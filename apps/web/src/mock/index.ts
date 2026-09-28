@@ -59,7 +59,10 @@ export function readScenario(): Scenario | null {
       return fromQuery as Scenario;
     }
     const stored = sessionStorage.getItem(SCENARIO_KEY);
-    return stored && (SCENARIOS as readonly string[]).includes(stored) ? (stored as Scenario) : null;
+    if (stored && (SCENARIOS as readonly string[]).includes(stored)) return stored as Scenario;
+    // Explicit mock mode (`VITE_MOCK=1`) defaults to the normal scenario so a
+    // plain dev/tunnel URL works without query parameters.
+    return import.meta.env.VITE_MOCK === "1" ? "normal" : null;
   } catch {
     return null;
   }
