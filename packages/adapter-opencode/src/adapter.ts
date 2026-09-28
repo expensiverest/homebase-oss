@@ -1,6 +1,8 @@
 import {
   AdapterError,
   createConsoleLogger,
+  createPublicId,
+  decodePublicIdFor,
   type AdapterContext,
   type AdapterLogger,
   type AgentAdapter,
@@ -105,6 +107,8 @@ export class OpenCodeAdapter implements AgentAdapter {
   #eventDelayMs: number;
 
   readonly #sessions = new Map<string, AgentSession>();
+  /** native OpenCode session id -> Homebase public session id */
+  readonly #nativeToPublic = new Map<string, string>();
 
   constructor(options: OpenCodeAdapterOptions = {}) {
     this.#config = parseOpenCodeConfig(options.config ?? {});
@@ -241,8 +245,9 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async getSession(sessionId: string): Promise<AgentSession> {
+    const nativeId = this.#toNativeId(sessionId);
     try {
-      const response = await this.#client.get<{ data: NativeSession }>(`/api/session/${encodeURIComponent(sessionId)}`);
+      const response = await this.#client.get<{ data: NativeSession }>(`/api/session/${encodeURIComponent(nativeId)}`);
       const native = response.data;
       const existing = this.#sessions.get(sessionId);
       const projectId =
@@ -283,21 +288,24 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async deleteSession(sessionId: string): Promise<void> {
+    const nativeId = this.#toNativeId(sessionId);
     await this.#ensureScopedSession(sessionId);
     try {
-      await this.#client.request<void>("DELETE", `/api/session/${encodeURIComponent(sessionId)}`);
+      await this.#client.request<void>("DELETE", `/api/session/${encodeURIComponent(nativeId)}`);
       this.#sessions.delete(sessionId);
+      this.#nativeToPublic.delete(nativeId);
     } catch (error) {
       throw toAdapterError(error);
     }
   }
 
   async listMessages(sessionId: string, page: PageRequest = {}): Promise<AgentPage<AgentMessage>> {
+    const nativeId = this.#toNativeId(sessionId);
     await this.#ensureScopedSession(sessionId);
     const limit = clampPageSize(page.limit, DEFAULT_MESSAGE_PAGE_SIZE);
     try {
       const response = await this.#client.get<{ data?: NativeMessage[]; cursor?: NativeCursor }>(
-        `/api/session/${encodeURIComponent(sessionId)}/message`,
+        `/api/session/${encodeURIComponent(nativeId)}/message`,
         {
           query: {
             limit,
@@ -321,47 +329,51 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async send(sessionId: string, input: SendMessageInput): Promise<void> {
+    const nativeId = this.#toNativeId(sessionId);
     await this.#ensureScopedSession(sessionId);
     const payload = await this.#promptPayload(input);
-    if (await this.#isActive(sessionId)) {
+    if (await this.#isActive(sessionId, nativeId)) {
       // A plain send must not hijack an active run; park it behind the current turn.
       payload.delivery = "queue";
     }
     try {
-      await this.#client.post(`/api/session/${encodeURIComponent(sessionId)}/prompt`, payload);
+      await this.#client.post(`/api/session/${encodeURIComponent(nativeId)}/prompt`, payload);
     } catch (error) {
       throw toAdapterError(error);
     }
   }
 
   async steer(sessionId: string, input: SendMessageInput): Promise<void> {
+    const nativeId = this.#toNativeId(sessionId);
     await this.#ensureScopedSession(sessionId);
     const payload = await this.#promptPayload(input);
-    if (await this.#isActive(sessionId)) {
+    if (await this.#isActive(sessionId, nativeId)) {
       payload.delivery = "steer";
     }
     try {
-      await this.#client.post(`/api/session/${encodeURIComponent(sessionId)}/prompt`, payload);
+      await this.#client.post(`/api/session/${encodeURIComponent(nativeId)}/prompt`, payload);
     } catch (error) {
       throw toAdapterError(error);
     }
   }
 
   async queue(sessionId: string, input: SendMessageInput): Promise<void> {
+    const nativeId = this.#toNativeId(sessionId);
     await this.#ensureScopedSession(sessionId);
     const payload = await this.#promptPayload(input);
     payload.delivery = "queue";
     try {
-      await this.#client.post(`/api/session/${encodeURIComponent(sessionId)}/prompt`, payload);
+      await this.#client.post(`/api/session/${encodeURIComponent(nativeId)}/prompt`, payload);
     } catch (error) {
       throw toAdapterError(error);
     }
   }
 
   async interrupt(sessionId: string): Promise<void> {
+    const nativeId = this.#toNativeId(sessionId);
     await this.#ensureScopedSession(sessionId);
     try {
-      await this.#client.post<{ interrupted?: boolean }>(`/api/session/${encodeURIComponent(sessionId)}/interrupt`);
+      await this.#client.post<{ interrupted?: boolean }>(`/api/session/${encodeURIComponent(nativeId)}/interrupt`);
     } catch (error) {
       throw toAdapterError(error);
     }
@@ -379,7 +391,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     }
     try {
       await this.#client.post(
-        `/api/session/${encodeURIComponent(pending.sessionId)}/permission/${encodeURIComponent(requestId)}/reply`,
+        `/api/session/${encodeURIComponent(this.#toNativeId(pending.sessionId))}/permission/${encodeURIComponent(requestId)}/reply`,
         {
           decision,
           ...(result.note ? { message: result.note } : {}),
@@ -400,7 +412,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     const body = toFormAnswer(pending.native, answer);
     try {
       await this.#client.post(
-        `/api/session/${encodeURIComponent(pending.sessionId)}/form/${encodeURIComponent(requestId)}/reply`,
+        `/api/session/${encodeURIComponent(this.#toNativeId(pending.sessionId))}/form/${encodeURIComponent(requestId)}/reply`,
         body,
       );
     } catch (error) {
@@ -409,6 +421,7 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async setModel(sessionId: string, input: SetModelInput): Promise<void> {
+    const nativeId = this.#toNativeId(sessionId);
     const session = await this.#ensureScopedSession(sessionId);
     const model = toNativeModelRef({
       provider: this.id,
@@ -419,7 +432,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       throw new AdapterError("invalid_request", 'Invalid model id; expected "<provider>/<model>".');
     }
     try {
-      await this.#client.post(`/api/session/${encodeURIComponent(sessionId)}/model`, { model });
+      await this.#client.post(`/api/session/${encodeURIComponent(nativeId)}/model`, { model });
       this.#sessions.set(sessionId, {
         ...session,
         model: { provider: this.id, modelId: input.modelId, thinkingLevel: input.thinkingLevel ?? null },
@@ -433,9 +446,10 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async setMode(sessionId: string, input: SetModeInput): Promise<void> {
+    const nativeId = this.#toNativeId(sessionId);
     const session = await this.#ensureScopedSession(sessionId);
     try {
-      await this.#client.post(`/api/session/${encodeURIComponent(sessionId)}/agent`, { agent: input.mode });
+      await this.#client.post(`/api/session/${encodeURIComponent(nativeId)}/agent`, { agent: input.mode });
       this.#sessions.set(sessionId, { ...session, mode: input.mode, updatedAt: nowTimestamp() });
       this.#emitSessionUpdated(sessionId);
     } catch (error) {
@@ -444,10 +458,11 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async getDiff(sessionId: string): Promise<AgentDiff> {
+    const nativeId = this.#toNativeId(sessionId);
     const session = await this.#ensureScopedSession(sessionId);
     try {
       const response = await this.#client.get<{ data?: NativeFileDiff[] }>(
-        `/api/session/${encodeURIComponent(sessionId)}/diff`,
+        `/api/session/${encodeURIComponent(nativeId)}/diff`,
         { query: { context: 3 } },
       );
       const projectPath = await this.#context?.resolveProjectPath(session.projectId).catch(() => null);
@@ -489,9 +504,28 @@ export class OpenCodeAdapter implements AgentAdapter {
     return "idle";
   }
 
+  /** Wraps a native session id; stable for the lifetime of the process. */
+  #toPublicId(nativeId: string): string {
+    const existing = this.#nativeToPublic.get(nativeId);
+    if (existing) return existing;
+    const publicId = createPublicId(this.id, nativeId);
+    this.#nativeToPublic.set(nativeId, publicId);
+    return publicId;
+  }
+
+  /** Decodes a public id for this provider; foreign/malformed ids fail closed. */
+  #toNativeId(sessionId: string): string {
+    const nativeId = decodePublicIdFor(sessionId, this.id);
+    if (!nativeId) {
+      throw new AdapterError("session_not_found", "The session id is not scoped to this provider.");
+    }
+    return nativeId;
+  }
+
   #ingest(native: NativeSession, projectId: string): AgentSession {
-    const session = toAgentSession(native, projectId, this.#stateFor(native, native.id));
-    this.#sessions.set(native.id, session);
+    const publicId = this.#toPublicId(native.id);
+    const session = toAgentSession({ ...native, id: publicId }, projectId, this.#stateFor(native, publicId));
+    this.#sessions.set(publicId, session);
     return session;
   }
 
@@ -530,14 +564,14 @@ export class OpenCodeAdapter implements AgentAdapter {
     return files;
   }
 
-  async #isActive(sessionId: string): Promise<boolean> {
+  async #isActive(publicSessionId: string, nativeSessionId: string): Promise<boolean> {
     try {
       const response = await this.#client.get<{ data?: Record<string, unknown> }>("/api/session/active", {
         timeoutMs: 3_000,
       });
-      return sessionId in (response.data ?? {});
+      return nativeSessionId in (response.data ?? {});
     } catch {
-      return this.#tracker?.isExecuting(sessionId) ?? false;
+      return this.#tracker?.isExecuting(publicSessionId) ?? false;
     }
   }
 
@@ -557,10 +591,11 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async #handleNativeEvent(event: NativeEvent): Promise<void> {
-    const sessionId = extractSessionId(event);
-    if (!sessionId) return; // global catalog events are not session state
+    const nativeSessionId = extractSessionId(event);
+    if (!nativeSessionId) return; // global catalog events are not session state
 
-    if (!this.#sessions.has(sessionId)) {
+    let publicSessionId = this.#nativeToPublic.get(nativeSessionId);
+    if (!publicSessionId || !this.#sessions.has(publicSessionId)) {
       const directory = event.location?.directory;
       if (!directory) return;
       const context = this.#context;
@@ -574,15 +609,15 @@ export class OpenCodeAdapter implements AgentAdapter {
       if (!projectId) return; // sessions outside configured roots are out of scope
       try {
         const response = await this.#client.get<{ data: NativeSession }>(
-          `/api/session/${encodeURIComponent(sessionId)}`,
+          `/api/session/${encodeURIComponent(nativeSessionId)}`,
         );
-        this.#ingest(response.data, projectId);
+        publicSessionId = this.#ingest(response.data, projectId).id;
       } catch {
         return;
       }
     }
 
-    this.#tracker?.handle(event, sessionId);
+    this.#tracker?.handle(event, publicSessionId);
   }
 
   /** Emits `session.created` for ingest paths that represent a new session. */
@@ -602,18 +637,18 @@ export class OpenCodeAdapter implements AgentAdapter {
   async #reconcileSession(sessionId: string): Promise<void> {
     const tracker = this.#tracker;
     if (!tracker) return;
-    const encoded = encodeURIComponent(sessionId);
+    const encoded = encodeURIComponent(this.#toNativeId(sessionId));
     const [permissions, forms] = await Promise.all([
       this.#client.get<{ data?: NativePermissionRequest[] }>(`/api/session/${encoded}/permission`),
       this.#client.get<{ data?: NativeForm[] }>(`/api/session/${encoded}/form`),
     ]);
     const permissionIds = new Set((permissions.data ?? []).map((request) => request.id));
-    for (const request of permissions.data ?? []) tracker.registerPermission(request);
+    for (const request of permissions.data ?? []) tracker.registerPermission(request, sessionId);
     for (const requestId of tracker.trackedPermissions()) {
       if (!permissionIds.has(requestId)) tracker.resolveVanished(requestId);
     }
     const formIds = new Set((forms.data ?? []).map((form) => form.id));
-    for (const form of forms.data ?? []) tracker.registerForm(form);
+    for (const form of forms.data ?? []) tracker.registerForm(form, sessionId);
     for (const formId of tracker.trackedForms()) {
       if (!formIds.has(formId)) tracker.resolveVanished(formId);
     }

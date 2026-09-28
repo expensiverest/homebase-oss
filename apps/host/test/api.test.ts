@@ -534,10 +534,11 @@ describe("session pagination", () => {
 });
 
 describe("default registrations", () => {
-  it("includes the OpenCode reference provider", () => {
+  it("includes the OpenCode and Claude reference providers", () => {
     const ids = createDefaultRegistrations().map((registration) => registration.id);
     expect(ids).toContain("mock");
     expect(ids).toContain("opencode");
+    expect(ids).toContain("claude");
   });
 
   it("starts and reports a useful status when OpenCode is unreachable", async () => {

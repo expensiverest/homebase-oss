@@ -2,6 +2,8 @@ import { createTestAdapterContext } from "@homebase/adapter-sdk/testing";
 import type { AgentSession } from "@homebase/protocol";
 import { describe, expect, it } from "vitest";
 
+import { createPublicId } from "@homebase/adapter-sdk";
+
 import { OpenCodeAdapter } from "../src/adapter.js";
 import {
   nativeAgentHidden,
@@ -19,6 +21,7 @@ import {
 import { createFakeFetch, errorResponse, jsonResponse, type FakeRoute } from "./helpers.js";
 
 const PROJECT_PATH = "/home/example/projects/demo";
+const SESSION = createPublicId("opencode", nativeSession.id);
 const PROJECT_ID = "prj_1";
 
 function baseRoutes(overrides: Record<string, () => Response | Promise<Response>> = {}): FakeRoute[] {
@@ -177,7 +180,7 @@ describe("sessions", () => {
       }),
     );
     const page = await adapter.listSessions(project, { limit: 50 });
-    expect(page.items.map((session) => session.id)).toEqual([nativeSession.id]);
+    expect(page.items.map((session) => session.id)).toEqual([SESSION]);
     expect(page.nextCursor).toBeNull();
   });
 
@@ -193,20 +196,22 @@ describe("sessions", () => {
     const { adapter } = createAdapter(
       baseRoutes({ [`GET /api/session/${outside.id}`]: () => jsonResponse({ data: outside }) }),
     );
-    await expect(adapter.getSession(outside.id)).rejects.toMatchObject({ code: "session_not_found" });
+    await expect(adapter.getSession(createPublicId("opencode", outside.id))).rejects.toMatchObject({
+      code: "session_not_found",
+    });
   });
 
   it("creates sessions scoped to the project directory", async () => {
     const { adapter, calls, project } = createAdapter();
     const session = await adapter.createSession({ provider: "opencode", projectId: PROJECT_ID }, project);
-    expect(session.id).toBe(nativeSession.id);
+    expect(session.id).toBe(SESSION);
     const createCall = calls.find((call) => call.method === "POST" && call.url.pathname === "/api/session");
     expect((createCall?.body as { location?: { directory?: string } })?.location?.directory).toBe(PROJECT_PATH);
   });
 
   it("maps message history with newest-first ordering and opaque cursors", async () => {
     const { adapter } = createAdapter();
-    const page = await adapter.listMessages(nativeSession.id, { limit: 50 });
+    const page = await adapter.listMessages(SESSION, { limit: 50 });
     expect(page.items.map((message) => message.role)).toEqual(["assistant", "user"]);
     expect(page.nextCursor).toBeNull();
   });
@@ -215,7 +220,7 @@ describe("sessions", () => {
 describe("prompt semantics", () => {
   it("sends plainly when idle and queues when active", async () => {
     const { adapter, calls } = createAdapter();
-    await adapter.send(nativeSession.id, { text: "hello" });
+    await adapter.send(SESSION, { text: "hello" });
     const idlePrompt = calls.filter((call) => call.method === "POST" && call.url.pathname.endsWith("/prompt")).at(-1);
     expect((idlePrompt?.body as { delivery?: string }).delivery).toBeUndefined();
 
@@ -224,7 +229,7 @@ describe("prompt semantics", () => {
         "GET /api/session/active": () => jsonResponse({ data: { [nativeSession.id]: { type: "running" } } }),
       }),
     );
-    await activeAdapter.send(nativeSession.id, { text: "hello" });
+    await activeAdapter.send(SESSION, { text: "hello" });
     const activePrompt = activeCalls
       .filter((call) => call.method === "POST" && call.url.pathname.endsWith("/prompt"))
       .at(-1);
@@ -233,7 +238,7 @@ describe("prompt semantics", () => {
 
   it("steers only active runs and queues explicitly", async () => {
     const { adapter: idleAdapter, calls: idleCalls } = createAdapter();
-    await idleAdapter.steer(nativeSession.id, { text: "steer" });
+    await idleAdapter.steer(SESSION, { text: "steer" });
     const idleSteer = idleCalls
       .filter((call) => call.method === "POST" && call.url.pathname.endsWith("/prompt"))
       .at(-1);
@@ -244,18 +249,18 @@ describe("prompt semantics", () => {
         "GET /api/session/active": () => jsonResponse({ data: { [nativeSession.id]: { type: "running" } } }),
       }),
     );
-    await adapter.steer(nativeSession.id, { text: "steer" });
+    await adapter.steer(SESSION, { text: "steer" });
     const steerCall = calls.filter((call) => call.method === "POST" && call.url.pathname.endsWith("/prompt")).at(-1);
     expect((steerCall?.body as { delivery?: string }).delivery).toBe("steer");
 
-    await adapter.queue(nativeSession.id, { text: "queue me" });
+    await adapter.queue(SESSION, { text: "queue me" });
     const queueCall = calls.filter((call) => call.method === "POST" && call.url.pathname.endsWith("/prompt")).at(-1);
     expect((queueCall?.body as { delivery?: string }).delivery).toBe("queue");
   });
 
   it("interrupts through the provider endpoint", async () => {
     const { adapter, calls } = createAdapter();
-    await adapter.interrupt(nativeSession.id);
+    await adapter.interrupt(SESSION);
     expect(calls.some((call) => call.method === "POST" && call.url.pathname.endsWith("/interrupt"))).toBe(true);
   });
 
@@ -275,7 +280,7 @@ describe("prompt semantics", () => {
       startEventStream: false,
     });
     adapter.init(context);
-    await adapter.send(nativeSession.id, {
+    await adapter.send(SESSION, {
       text: "see attached",
       attachments: [{ id: "att_1", kind: "file", name: "notes.txt", mimeType: "text/plain" }],
     });
@@ -293,7 +298,7 @@ describe("approvals and questions", () => {
         [`GET /api/session/${nativeSession.id}/permission`]: () => jsonResponse({ data: [nativePermission] }),
       }),
     );
-    await adapter.getSession(nativeSession.id);
+    await adapter.getSession(SESSION);
     const requested = context.events.find((event) => event.type === "approval.requested");
     expect(requested?.type).toBe("approval.requested");
 
@@ -308,7 +313,7 @@ describe("approvals and questions", () => {
     const { adapter, context, calls } = createAdapter(
       baseRoutes({ [`GET /api/session/${nativeSession.id}/form`]: () => jsonResponse({ data: [nativeForm] }) }),
     );
-    await adapter.getSession(nativeSession.id);
+    await adapter.getSession(SESSION);
     expect(context.events.some((event) => event.type === "question.requested")).toBe(true);
 
     await adapter.answerQuestion(nativeForm.id, { answers: [{ questionId: "q0", selectedOptionIds: ["Blue"] }] });
@@ -332,21 +337,21 @@ describe("approvals and questions", () => {
 describe("model, mode, and diff operations", () => {
   it("switches models with composite refs", async () => {
     const { adapter, calls } = createAdapter();
-    await adapter.setModel(nativeSession.id, { modelId: "example-provider/example-model", thinkingLevel: "high" });
+    await adapter.setModel(SESSION, { modelId: "example-provider/example-model", thinkingLevel: "high" });
     const call = calls.find((entry) => entry.method === "POST" && entry.url.pathname.endsWith("/model"));
     expect(call?.body).toEqual({ model: { id: "example-model", providerID: "example-provider", variant: "high" } });
   });
 
   it("switches modes through the agent endpoint", async () => {
     const { adapter, calls } = createAdapter();
-    await adapter.setMode(nativeSession.id, { mode: "plan" });
+    await adapter.setMode(SESSION, { mode: "plan" });
     const call = calls.find((entry) => entry.method === "POST" && entry.url.pathname.endsWith("/agent"));
     expect(call?.body).toEqual({ agent: "plan" });
   });
 
   it("returns diffs with project-relative paths", async () => {
     const { adapter } = createAdapter();
-    const diff = await adapter.getDiff(nativeSession.id);
+    const diff = await adapter.getDiff(SESSION);
     expect(diff.files.map((file) => file.path)).toEqual(["README.md", "src/new.ts"]);
     expect(JSON.stringify(diff)).not.toContain("/home/example");
   });
@@ -357,7 +362,7 @@ describe("adapter identity", () => {
     const { adapter } = createAdapter();
     expect(adapter.id).toBe("opencode");
     expect(adapter.displayName).toBe("OpenCode");
-    const session: AgentSession = await adapter.getSession(nativeSession.id);
+    const session: AgentSession = await adapter.getSession(SESSION);
     expect(Object.keys(session).sort()).toEqual(
       [
         "createdAt",

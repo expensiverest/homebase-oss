@@ -14,7 +14,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "npm run build -w @homebase/protocol && npm run build -w @homebase/adapter-sdk && npm run build -w @homebase/adapter-opencode && npm run build -w @homebase/host",
+    "build": "npm run build -w @homebase/protocol && npm run build -w @homebase/adapter-sdk && npm run build -w @homebase/adapter-opencode && npm run build -w @homebase/adapter-claude && npm run build -w @homebase/host",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint .",

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { AdapterContext, AgentAdapter } from "@homebase/adapter-sdk";
-import { AdapterError } from "@homebase/adapter-sdk";
+import { AdapterError, createPublicId } from "@homebase/adapter-sdk";
 import {
   defineCapabilities,
   nowTimestamp,
@@ -107,7 +107,7 @@ export class ExampleAdapter implements AgentAdapter {
   async createSession(input: CreateSessionInput, project: AgentProject): Promise<AgentSession> {
     const timestamp = nowTimestamp();
     const session: AgentSession = {
-      id: `exa_${randomUUID().slice(0, 8)}`,
+      id: createPublicId(this.id, `exa_${randomUUID().slice(0, 8)}`),
       provider: this.id,
       projectId: project.id,
       title: input.title ?? null,

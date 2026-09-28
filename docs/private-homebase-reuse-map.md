@@ -1,4 +1,4 @@
-# Private Homebase reuse map
+﻿# Private Homebase reuse map
 
 > **Status:** Initial audit (Phase 0)
 > **Sources inspected (read-only):** the operator's private Homebase worktrees, all cloned from the same
@@ -503,20 +503,20 @@ None of these belong to the AI development control plane.
 
 ## 4. Where each reuse area landed (or will land)
 
-| Private area                                                 | Public destination                                      | Status                                                  |
-| ------------------------------------------------------------ | ------------------------------------------------------- | ------------------------------------------------------- |
-| Path normalization/allowlist                                 | `apps/host/src/paths.ts`                                | Ported (platform-aware, tested)                         |
-| Constant-time auth + throttling                              | `apps/host/src/auth/auth.ts`                            | Ported; pairing replaces it in Phase 5                  |
-| SSE framing/keepalive/replay                                 | `apps/host/src/api/sse.ts`, `src/events/event-bus.ts`   | Ported with global sequences + resync                   |
-| Hono skeleton/security headers                               | `apps/host/src/api/app.ts`                              | Ported                                                  |
-| Error normalization                                          | `@homebase/protocol` errors + `apps/host/src/errors.ts` | Ported with stable codes                                |
-| Config validation                                            | `apps/host/src/config/config.ts`                        | Ported with security invariants                         |
-| `Oc*` canonical model                                        | `packages/protocol/*`                                   | Ported as `Agent*`, renamed/neutralized                 |
-| Adapter contract & compliance                                | `packages/adapter-sdk/*`                                | New; mock adapter runs the suite                        |
-| OpenCode client/routes                                       | `packages/adapter-opencode`                             | Ported (Phase 2); live-verified against OpenCode 2.0.18 |
-| Claude bridge (lifecycle/mapper/transcript/permissions)      | `packages/adapter-claude`                               | Phase 3                                                 |
-| Web chat components + view model                             | `apps/web`                                              | Phase 4, type swap in `lib/`                            |
-| Web mock/scenario architecture                               | `apps/web/src/mock` + protocol fixtures                 | Phase 4                                                 |
-| Playwright harness + matrix                                  | `apps/web/e2e`                                          | Phase 4                                                 |
-| Design tokens/a11y tests                                     | `apps/web/src/styles`                                   | Phase 4                                                 |
-| Homelab features, PC agent, deploy scripts, private fixtures | —                                                       | Not ported                                              |
+| Private area                                                 | Public destination                                      | Status                                                                |
+| ------------------------------------------------------------ | ------------------------------------------------------- | --------------------------------------------------------------------- |
+| Path normalization/allowlist                                 | `apps/host/src/paths.ts`                                | Ported (platform-aware, tested)                                       |
+| Constant-time auth + throttling                              | `apps/host/src/auth/auth.ts`                            | Ported; pairing replaces it in Phase 5                                |
+| SSE framing/keepalive/replay                                 | `apps/host/src/api/sse.ts`, `src/events/event-bus.ts`   | Ported with global sequences + resync                                 |
+| Hono skeleton/security headers                               | `apps/host/src/api/app.ts`                              | Ported                                                                |
+| Error normalization                                          | `@homebase/protocol` errors + `apps/host/src/errors.ts` | Ported with stable codes                                              |
+| Config validation                                            | `apps/host/src/config/config.ts`                        | Ported with security invariants                                       |
+| `Oc*` canonical model                                        | `packages/protocol/*`                                   | Ported as `Agent*`, renamed/neutralized                               |
+| Adapter contract & compliance                                | `packages/adapter-sdk/*`                                | New; mock adapter runs the suite                                      |
+| OpenCode client/routes                                       | `packages/adapter-opencode`                             | Ported (Phase 2); live-verified against OpenCode 2.0.18               |
+| Claude bridge (lifecycle/mapper/transcript/permissions)      | `packages/adapter-claude`                               | Ported (Phase 3); direct child process, live-verified against 2.1.268 |
+| Web chat components + view model                             | `apps/web`                                              | Phase 4, type swap in `lib/`                                          |
+| Web mock/scenario architecture                               | `apps/web/src/mock` + protocol fixtures                 | Phase 4                                                               |
+| Playwright harness + matrix                                  | `apps/web/e2e`                                          | Phase 4                                                               |
+| Design tokens/a11y tests                                     | `apps/web/src/styles`                                   | Phase 4                                                               |
+| Homelab features, PC agent, deploy scripts, private fixtures | —                                                       | Not ported                                                            |

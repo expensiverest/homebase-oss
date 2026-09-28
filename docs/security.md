@@ -51,6 +51,17 @@ This is the most important boundary in the product:
   suite checks detection output for credential-looking fields.
 - `redactSecrets()` in the adapter SDK is a best-effort safety net for logs (API keys, bearer tokens,
   private keys, `KEY=value` patterns). It is not a license to log secrets.
+- **Claude Code auth output is redacted by construction.** `claude auth status` returns email, org
+  id/name, subscription type, and paths; the adapter parses it and keeps only the `loggedIn` boolean.
+  Raw auth output is never stored, logged, returned, or placed in events. The compliance suite
+  recursively rejects sensitive detection fields and email-like values.
+- **Claude sessions keep strict MCP isolation.** Each Homebase-driven `claude` process is launched
+  with an explicit Homebase-only MCP config and `--strict-mcp-config`, so personal connectors
+  (Gmail/Drive/Calendar/…) are never loaded into an unattended Homebase session. Live verification
+  confirmed `init.mcp_servers` contains only the Homebase server.
+- **Claude "always allow" rules are session-scoped and in-memory.** Homebase never writes
+  `.claude/settings*.json` or any provider settings file to implement the mobile button.
+- **No Claude bypass modes.** `bypassPermissions` and `dontAsk` cannot be selected through Homebase.
 
 ### Attachments
 

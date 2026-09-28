@@ -81,6 +81,9 @@ interface AdapterContext {
   provider data instead of inventing their own project identity.
 - `resolveAttachment` yields Host-owned bytes for an uploaded attachment id. Adapters never read
   arbitrary files; clients never send paths.
+- **Ids returned to clients must be provider-scoped.** Use `createPublicId(providerId, nativeId)` for
+  sessions and globally routed requests (approvals/questions); decode with `decodePublicIdFor(id,
+providerId)` and fail closed on foreign/malformed ids. The compliance suite enforces this.
 - `config` contains only what the operator put in `providers.<id>.config` in the Host config. Secrets go
   here, stay server-side, and must never be emitted in events, logs, or detection output.
 - `emit` publishes a normalized event. Omit `occurredAt` and the Host stamps time.

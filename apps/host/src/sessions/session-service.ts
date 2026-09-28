@@ -1,4 +1,5 @@
 import type { AdapterLogger, AgentAdapter } from "@homebase/adapter-sdk";
+import { parsePublicId } from "@homebase/adapter-sdk";
 import type {
   AgentDiff,
   AgentMessage,
@@ -221,20 +222,18 @@ export class SessionService {
     const cached = this.#sessions.get(sessionId);
     if (cached) return { ...cached };
 
-    // The session may exist provider-side but not be in the in-memory index
-    // (for example after a Host restart). Ask each adapter in turn.
-    for (const { id, adapter } of this.#providers.adapters()) {
-      try {
-        const session = await adapter.getSession(sessionId);
-        this.#sessions.set(session.id, session);
-        this.#providerBySession.set(session.id, id);
-        return { ...session };
-      } catch {
-        // Not this provider's session; keep looking.
-      }
+    // Public ids carry trusted provider scope, so routing is deterministic:
+    // never probe other adapters for an unknown session, and never swallow a
+    // provider failure as "maybe another provider owns it".
+    const parsed = parsePublicId(sessionId);
+    if (!parsed) {
+      throw new HostError("session_not_found", `Unknown session "${sessionId}".`);
     }
-
-    throw new HostError("session_not_found", `Unknown session "${sessionId}".`);
+    const adapter = this.#providers.requireAdapter(parsed.providerId);
+    const session = await adapter.getSession(sessionId);
+    this.#sessions.set(session.id, session);
+    this.#providerBySession.set(session.id, parsed.providerId);
+    return { ...session };
   }
 
   async create(input: CreateSessionInput): Promise<AgentSession> {
@@ -357,14 +356,12 @@ export class SessionService {
   }
 
   async #resolveAdapter(sessionId: SessionId): Promise<{ providerId: ProviderId; adapter: AgentAdapter }> {
-    let providerId = this.#providerBySession.get(sessionId);
-    if (!providerId) {
-      await this.get(sessionId); // Populates the index or throws session_not_found.
-      providerId = this.#providerBySession.get(sessionId);
-    }
-    if (!providerId) {
+    // Public ids carry trusted provider scope; malformed or foreign ids fail
+    // closed instead of being probed across adapters.
+    const parsed = parsePublicId(sessionId);
+    if (!parsed) {
       throw new HostError("session_not_found", `Unknown session "${sessionId}".`);
     }
-    return { providerId, adapter: this.#providers.requireAdapter(providerId) };
+    return { providerId: parsed.providerId, adapter: this.#providers.requireAdapter(parsed.providerId) };
   }
 }

@@ -18,7 +18,30 @@ import {
 } from "@homebase/protocol";
 
 import type { AgentAdapter } from "./adapter.js";
+import { createPublicId, isPublicIdFor } from "./identity.js";
 import { createTestAdapterContext, type TestAdapterContext } from "./testing/context.js";
+
+const SENSITIVE_DETECTION_KEY =
+  /(password|passwd|secret|token|api[-_]?key|authorization|cookie|email|organization|org[-_]?id|account[-_]?id|credential)/i;
+const EMAIL_LIKE = /[\w.+-]+@[\w-]+\.[\w.-]+/;
+
+/** Recursively rejects credential/identity fields in detection output. */
+function assertNoSensitiveDetectionFields(value: unknown, path = "detection"): void {
+  if (typeof value === "string") {
+    expect(EMAIL_LIKE.test(value), `${path} contains an email-like value`).toBe(false);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertNoSensitiveDetectionFields(entry, `${path}[${index}]`));
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, child] of Object.entries(value)) {
+      expect(SENSITIVE_DETECTION_KEY.test(key), `${path}.${key} is a sensitive detection field`).toBe(false);
+      assertNoSensitiveDetectionFields(child, `${path}.${key}`);
+    }
+  }
+}
 
 export interface AdapterComplianceOptions {
   /** Provider display name used in test titles. */
@@ -93,14 +116,31 @@ export function defineAdapterComplianceSuite(options: AdapterComplianceOptions):
       expect(adapter.displayName.trim().length).toBeGreaterThan(0);
     });
 
-    it("reports detection without exposing credentials", async () => {
+    it("reports detection without exposing credentials or identity", async () => {
       const detection = await adapter.detect();
       expect(providerDetectionSchema.safeParse(detection).success).toBe(true);
+      assertNoSensitiveDetectionFields(detection);
+    });
 
-      const serialized = JSON.stringify(detection).toLowerCase();
-      for (const forbidden of ["api_key", "apikey", "access_token", "refresh_token", "client_secret"]) {
-        expect(serialized, `detection output mentions "${forbidden}"`).not.toContain(forbidden);
+    it("uses provider-scoped public session ids", async ({ skip }) => {
+      if (!project) return skip("no project fixture supplied");
+      const created = await adapter.createSession(
+        { provider: adapter.id, projectId: project.id, title: "id-scope check" },
+        project,
+      );
+      expect(isPublicIdFor(created.id, adapter.id), `session id "${created.id}" is not scoped to "${adapter.id}"`).toBe(
+        true,
+      );
+      if (capabilities.deleteSession) {
+        await adapter.deleteSession?.(created.id).catch(() => undefined);
       }
+    });
+
+    it("rejects ids scoped to a different provider", async () => {
+      const foreign = createPublicId("someone-else", "same-id");
+      const failure = { code: expect.stringMatching(/session_not_found|not_found|invalid_request/) };
+      await expect(adapter.getSession(foreign)).rejects.toMatchObject(failure);
+      await expect(adapter.listMessages(foreign, { limit: 5 })).rejects.toMatchObject(failure);
     });
 
     it("declares a complete, valid capability record", () => {

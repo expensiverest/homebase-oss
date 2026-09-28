@@ -6,7 +6,8 @@
       "@homebase/protocol": ["../../packages/protocol/src/index.ts"],
       "@homebase/adapter-sdk": ["../../packages/adapter-sdk/src/index.ts"],
       "@homebase/adapter-sdk/testing": ["../../packages/adapter-sdk/src/testing/index.ts"],
-      "@homebase/adapter-opencode": ["../../packages/adapter-opencode/src/index.ts"]
+      "@homebase/adapter-opencode": ["../../packages/adapter-opencode/src/index.ts"],
+      "@homebase/adapter-claude": ["../../packages/adapter-claude/src/index.ts"]
     }
   },
   "include": ["src", "test", "vitest.config.ts"]

@@ -47,8 +47,9 @@ apps/
   host/        @homebase/host        Node HTTP/SSE control plane
 packages/
   protocol/    @homebase/protocol    provider-neutral entities, events, capabilities, errors
-  adapter-sdk/ @homebase/adapter-sdk adapter contract, compliance suite, test utilities
-  adapter-opencode/                  OpenCode reference adapter (first real provider)
+  adapter-sdk/ @homebase/adapter-sdk adapter contract, compliance suite, identity helpers, test utilities
+  adapter-opencode/                  OpenCode reference adapter (native HTTP + SSE)
+  adapter-claude/                    Claude Code adapter (structured CLI subprocess)
 docs/
 ```
 
@@ -167,14 +168,20 @@ log and here:
    parts; the snapshot event keeps clients coherent without provider-specific event names.
 8. **Attachments are Host-owned bytes.** `POST /api/v1/attachments` + `AdapterContext.resolveAttachment`
    replaced any notion of adapters reading client paths; storage is in-memory with TTL/LRU cleanup.
+9. **Public ids are provider-scoped (Phase 3).** Sessions, approvals, and questions use
+   `hb1~<provider>~<base64url(native)>`; the Host routes deterministically and no longer probes
+   adapters to discover session ownership. Native ids never cross the adapter boundary.
+10. **Claude Code runs as a direct child process (Phase 3).** No HTTP bridge: the adapter spawns the
+    user's `claude` CLI with stream-json, uses control requests for interrupt/model/mode, and keeps a
+    loopback-only approval channel for the MCP permission-prompt tool. Credentials stay with the CLI.
 
 ## Current status
 
-| Phase                                       | Status                                                                                        |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| 0 — Repository and specification foundation | Complete                                                                                      |
-| 1 — Host core                               | Implemented (config, registries, bus, SSE, REST, auth placeholder, health)                    |
-| 2 — OpenCode reference adapter              | Complete (protocol/SDK corrections, Host attachments/catalogs/history, adapter + live checks) |
-| 3 — Claude adapter                          | Planned                                                                                       |
-| 4 — PWA                                     | Planned                                                                                       |
-| 5 — Security and pairing                    | Planned (auth placeholder exists)                                                             |
+| Phase                                          | Status                                                                                        |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 0 — Repository and specification foundation    | Complete                                                                                      |
+| 1 — Host core                                  | Implemented (config, registries, bus, SSE, REST, auth placeholder, health)                    |
+| 2 — OpenCode reference adapter                 | Complete (protocol/SDK corrections, Host attachments/catalogs/history, adapter + live checks) |
+| 3 — Claude adapter and multi-provider identity | Complete (provider-scoped ids, deterministic routing, Claude adapter + fake CLI/live suites)  |
+| 4 — PWA                                        | Next                                                                                          |
+| 5 — Security and pairing                       | Planned (auth placeholder exists)                                                             |

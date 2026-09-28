@@ -27,6 +27,7 @@ import {
 
 import type { AdapterContext, AgentAdapter } from "../adapter.js";
 import { AdapterError, toAgentError } from "../errors.js";
+import { createPublicId } from "../identity.js";
 
 export interface MockAdapterOptions {
   id?: string;
@@ -176,7 +177,7 @@ export class MockAdapter implements AgentAdapter {
   async createSession(input: CreateSessionInput, project: AgentProject): Promise<AgentSession> {
     const timestamp = nowTimestamp();
     const session: AgentSession = {
-      id: `ses_mock_${randomUUID().slice(0, 8)}`,
+      id: createPublicId(this.id, `ses_mock_${randomUUID().slice(0, 8)}`),
       provider: this.id,
       projectId: project.id,
       title: input.title ?? null,

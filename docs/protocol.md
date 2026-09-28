@@ -168,6 +168,28 @@ Rules:
 - Historical messages fetched through `listMessages` are authoritative when reopening a session; live
   events are the incremental overlay.
 
+## Public identifier scoping
+
+Provider-native ids are only unique inside one provider, so every id that Homebase routes globally
+carries trusted provider scope. The adapter SDK encodes them as:
+
+```text
+hb1~<providerId>~<base64url(nativeId)>
+```
+
+Rules:
+
+- **Sessions, approval requests, and question requests are provider-scoped.** Their public ids are
+  opaque to clients: clients round-trip them and never parse them or infer provider identity from
+  their shape.
+- **Decoding is trusted-code-only.** The Host and the owning adapter decode with `parsePublicId` /
+  `decodePublicIdFor`; malformed or foreign ids fail closed (`session_not_found`, `not_found`).
+- **The Host routes deterministically.** A session id routes straight to its provider; the Host never
+  probes other adapters or swallows provider errors while looking for an owner.
+- **Ids are stable across Host restarts** when the provider-native identity is stable (for example a
+  Claude UUID) and never contain paths or credentials.
+- Message/part/tool ids that are always scoped under a session stay provider-derived.
+
 ## Attachments
 
 Bytes never travel through the protocol. The flow is:

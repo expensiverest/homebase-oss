@@ -87,22 +87,22 @@ export class SessionEventTracker {
   }
 
   /** Registers a pending request discovered by reconciliation. */
-  registerPermission(request: NativePermissionRequest): void {
-    const approval = toApprovalRequest(request);
+  registerPermission(request: NativePermissionRequest, publicSessionId: string): void {
     if (this.#pendingPermissions.has(request.id)) return;
-    this.#pendingPermissions.set(request.id, { sessionId: request.sessionID, toolCallId: approval.toolCallId ?? null });
-    this.#emit(request.sessionID, "approval.requested", { approval });
-    this.#refreshWaiting(request.sessionID);
+    const approval = { ...toApprovalRequest(request), sessionId: publicSessionId };
+    this.#pendingPermissions.set(request.id, { sessionId: publicSessionId, toolCallId: approval.toolCallId ?? null });
+    this.#emit(publicSessionId, "approval.requested", { approval });
+    this.#refreshWaiting(publicSessionId);
   }
 
   /** Registers a pending form discovered by reconciliation. */
-  registerForm(form: NativeForm): void {
+  registerForm(form: NativeForm, publicSessionId: string): void {
     if (this.#pendingForms.has(form.id)) return;
     const question = toQuestionRequest(form);
     if (!question) return;
-    this.#pendingForms.set(form.id, { sessionId: form.sessionID, native: form });
-    this.#emit(form.sessionID, "question.requested", { question });
-    this.#refreshWaiting(form.sessionID);
+    this.#pendingForms.set(form.id, { sessionId: publicSessionId, native: form });
+    this.#emit(publicSessionId, "question.requested", { question: { ...question, sessionId: publicSessionId } });
+    this.#refreshWaiting(publicSessionId);
   }
 
   /** True when a tracked approval/form is no longer pending provider-side. */
@@ -365,12 +365,10 @@ export class SessionEventTracker {
       case "permission.asked": {
         const request = permissionRequestFromEvent(data);
         if (!request) return;
-        this.#pendingPermissions.set(request.id, {
-          sessionId: request.sessionID,
-          toolCallId: toApprovalRequest(request).toolCallId ?? null,
-        });
-        this.#emit(request.sessionID, "approval.requested", { approval: toApprovalRequest(request) });
-        this.#refreshWaiting(request.sessionID);
+        const approval = { ...toApprovalRequest(request), sessionId };
+        this.#pendingPermissions.set(request.id, { sessionId, toolCallId: approval.toolCallId ?? null });
+        this.#emit(sessionId, "approval.requested", { approval });
+        this.#refreshWaiting(sessionId);
         return;
       }
       case "permission.replied": {
@@ -398,9 +396,9 @@ export class SessionEventTracker {
         if (!form?.id || !form.sessionID) return;
         const question = toQuestionRequest(form);
         if (!question) return;
-        this.#pendingForms.set(form.id, { sessionId: form.sessionID, native: form });
-        this.#emit(form.sessionID, "question.requested", { question });
-        this.#refreshWaiting(form.sessionID);
+        this.#pendingForms.set(form.id, { sessionId, native: form });
+        this.#emit(sessionId, "question.requested", { question: { ...question, sessionId } });
+        this.#refreshWaiting(sessionId);
         return;
       }
       case "form.replied": {

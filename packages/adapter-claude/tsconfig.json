@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "paths": {
+      "@homebase/protocol": ["../protocol/src/index.ts"],
+      "@homebase/adapter-sdk": ["../adapter-sdk/src/index.ts"],
+      "@homebase/adapter-sdk/testing": ["../adapter-sdk/src/testing/index.ts"],
+      "@homebase/adapter-sdk/compliance": ["../adapter-sdk/src/compliance.ts"]
+    }
+  },
+  "include": ["src", "test", "vitest.config.ts"]
+}

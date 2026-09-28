@@ -1,4 +1,4 @@
-# Homebase
+﻿# Homebase
 
 Homebase is a local-first, mobile-first control plane for AI coding agents running on your own computer.
 
@@ -21,14 +21,14 @@ mobile experience for projects, sessions, streaming output, approvals, questions
 
 ## Supported providers
 
-| Provider           | Integration                                          | Status                                         |
-| ------------------ | ---------------------------------------------------- | ---------------------------------------------- |
-| OpenCode           | Native server HTTP + SSE adapter                     | **Available (beta)** — verified against 2.0.18 |
-| Claude Code        | Compatibility adapter over the structured CLI stream | Planned                                        |
-| Grok Build         | Generic ACP transport                                | Planned                                        |
-| Gemini CLI         | Generic ACP transport                                | Planned                                        |
-| Codex CLI          | Application-server protocol                          | Later                                          |
-| GitHub Copilot CLI | Official SDK / structured interface                  | Later                                          |
+| Provider           | Integration                                     | Status                                          |
+| ------------------ | ----------------------------------------------- | ----------------------------------------------- |
+| OpenCode           | Native server HTTP + SSE adapter                | **Available (beta)** — verified against 2.0.18  |
+| Claude Code        | Structured CLI subprocess + MCP approval broker | **Available (beta)** — verified against 2.1.268 |
+| Grok Build         | Generic ACP transport                           | Planned                                         |
+| Gemini CLI         | Generic ACP transport                           | Planned                                         |
+| Codex CLI          | Application-server protocol                     | Later                                           |
+| GitHub Copilot CLI | Official SDK / structured interface             | Later                                           |
 
 The Host ships with a deterministic **mock provider** so the protocol, event bus, and client can be developed and
 tested without any paid provider runs.

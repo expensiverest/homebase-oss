@@ -1631,3 +1631,25 @@ diverge (rule 17).
   - **Live checks:** `HOMEBASE_TEST_OPENCODE=1` verified detection, catalogs, session lifecycle,
     streaming, history reload, resume, interrupt, and diffs against OpenCode 2.0.18.
 
+- **2026-09-28 — Phase 3 (Claude adapter + multi-provider identity).**
+  - **§9/§4 (identity):** public session, approval, and question ids are now provider-scoped
+    (`hb1~<providerId>~<base64url(nativeId)>`, via `@homebase/adapter-sdk`). The Host routes by
+    decoding trusted provider scope and no longer probes adapters for session ownership; provider
+    failures surface instead of being swallowed as "maybe another provider owns it". OpenCode, mock,
+    and the example adapter were migrated in the same change.
+  - **Detection privacy:** the compliance suite now recursively rejects sensitive
+    credential/identity fields (including email-like values) instead of substring-matching warning
+    text.
+  - **Claude Code transport:** direct `claude` child process with documented stream-json, not the
+    Agent SDK and not the private HTTP bridge. The user's CLI owns authentication; Homebase ships no
+    Anthropic SDK, no login flow, and no API-key requirement.
+  - **Claude approvals/questions:** MCP permission-prompt broker over a loopback-only, token-guarded
+    channel; session-scoped in-memory "always" rules; deny messages reach the model and do not fail
+    the run. `--strict-mcp-config` keeps personal connectors out of Homebase sessions (live-verified).
+  - **Claude capabilities:** streaming, interrupt, steer (`priority:"now"`), queue (`priority:"next"`),
+    resume, models/effort via the CLI's own `initialize` catalog, live model/mode switching over
+    control requests, image input, tools, approvals, questions, and usage from `rate_limit_event`.
+    `plans`, `diffs`, `attachments` (non-image), `deleteSession`, and `slashCommands` stay false.
+  - **Testing:** fake-CLI compliance suite for normal runs, live suite (`HOMEBASE_TEST_CLAUDE=1`)
+    verified against Claude Code 2.1.268, and Host multi-provider coverage with colliding native ids.
+
