@@ -1,0 +1,49 @@
+{
+  "name": "@homebase/adapter-sdk",
+  "version": "0.0.1",
+  "description": "Adapter contract, compliance suite, and test utilities for Homebase provider adapters",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    },
+    "./compliance": {
+      "types": "./dist/compliance.d.ts",
+      "import": "./dist/compliance.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@homebase/protocol": "0.0.1"
+  },
+  "peerDependencies": {
+    "vitest": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "vitest": "^5.0.2"
+  }
+}

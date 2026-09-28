@@ -1,0 +1,35 @@
+{
+  "name": "homebase",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Local-first, mobile-first control plane for AI coding agents running on your own computer.",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "examples/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build -w @homebase/protocol && npm run build -w @homebase/adapter-sdk && npm run build -w @homebase/host",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "dev:host": "npm run dev -w @homebase/host",
+    "verify": "npm run build && npm run typecheck && npm run test && npm run lint && npm run format:check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.39.5",
+    "prettier": "^3.9.9",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.2"
+  }
+}

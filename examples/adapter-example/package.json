@@ -1,0 +1,16 @@
+{
+  "name": "@homebase/adapter-example",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Example third-party Homebase adapter used to demonstrate the adapter SDK and compliance suite",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@homebase/adapter-sdk": "0.0.1",
+    "@homebase/protocol": "0.0.1"
+  }
+}

@@ -1,0 +1,22 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Environment / secrets
+.env
+*.env
+!*.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test output
+test-results/
+playwright-report/
+.vitest/
+
+# OS
+.DS_Store
+Thumbs.db
