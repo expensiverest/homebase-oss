@@ -2,7 +2,9 @@ import { defineCapabilities, type AgentMessage, type AgentProvider, type AgentTo
 import { describe, expect, it } from "vitest";
 
 import {
+  activeRunView,
   attachmentRules,
+  buildTrace,
   foldTimeline,
   providerStatus,
   resolveThinkingLevel,
@@ -153,5 +155,94 @@ describe("provider-neutral status language", () => {
     expect(providerStatus({ ...provider({}), installed: false } as AgentProvider).label).toBe("Unavailable");
     expect(providerStatus({ ...provider({}), authenticated: false } as AgentProvider).label).toBe("Sign in required");
     expect(providerStatus({ ...provider({}), compatible: false } as AgentProvider).label).toBe("Incompatible version");
+  });
+});
+
+function userMessage(id: string, text: string): AgentMessage {
+  return {
+    id,
+    sessionId: "s",
+    role: "user",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    state: "completed",
+    parts: [{ type: "text", id: `${id}:t`, text }],
+  };
+}
+
+function call(
+  id: string,
+  name: string,
+  status: AgentToolCall["status"],
+  input?: Record<string, string>,
+): AgentToolCall {
+  return { id, name, status, input: input ?? null };
+}
+
+describe("execution trace", () => {
+  it("keeps reasoning, tools and interim text in order and the answer out", () => {
+    const run = [
+      assistant("a1", [{ type: "reasoning", id: "r1", text: "Plan the change." }]),
+      assistant("a2", [
+        { type: "text", id: "t1", text: "Reading first." },
+        { type: "tool_call", id: "c1", toolCall: call("c1", "read", "running") },
+      ]),
+      assistant("a3", [
+        { type: "tool_call", id: "c1", toolCall: call("c1", "read", "completed") },
+        { type: "text", id: "t2", text: "Done." },
+      ]),
+    ];
+    const { steps } = buildTrace(run);
+    expect(steps.map((step) => step.kind)).toEqual(["reasoning", "text", "tool"]);
+    // A tool call reported twice keeps its latest state at its first position.
+    const toolStep = steps[2];
+    expect(toolStep?.kind === "tool" ? toolStep.tool.status : null).toBe("completed");
+    // The last message's text is the answer, not a trace step.
+    expect(steps.some((step) => step.kind === "text" && step.text === "Done.")).toBe(false);
+  });
+
+  it("never invents a reasoning step for a provider that sends none", () => {
+    const { steps } = buildTrace([assistant("a1", [{ type: "text", id: "t", text: "Hi" }])]);
+    expect(steps).toEqual([]);
+  });
+});
+
+describe("active run presentation", () => {
+  it("is quiet when nothing is running", () => {
+    expect(activeRunView(foldTimeline([userMessage("u1", "Hi")]), false)).toEqual({ mode: "none" });
+  });
+
+  it("shows the orbit only until something substantive is visible", () => {
+    const prompt = userMessage("u1", "Go");
+    expect(activeRunView(foldTimeline([prompt]), true)).toEqual({ mode: "orbit", label: "Starting…" });
+
+    const empty = assistant("a1", [{ type: "text", id: "t", text: "" }], "streaming");
+    expect(activeRunView(foldTimeline([prompt, empty]), true)).toEqual({ mode: "orbit", label: "Working…" });
+
+    const thinking = assistant("a1", [{ type: "reasoning", id: "r", text: "Hmm" }], "streaming");
+    expect(activeRunView(foldTimeline([prompt, thinking]), true).mode).toBe("trace");
+
+    const tools = assistant(
+      "a1",
+      [{ type: "tool_call", id: "c", toolCall: call("c", "bash", "running") }],
+      "streaming",
+    );
+    expect(activeRunView(foldTimeline([prompt, tools]), true).mode).toBe("trace");
+
+    const text = assistant("a1", [{ type: "text", id: "t", text: "Here" }], "streaming");
+    expect(activeRunView(foldTimeline([prompt, text]), true).mode).toBe("trace");
+  });
+});
+
+describe("tool presentation for future tools", () => {
+  it("renders unknown tool names generically", () => {
+    const presentation = toolPresentation(call("x", "mcp__linear__search_issues", "completed", { query: "cursor" }));
+    expect(presentation.verb).toBe("Mcp Linear Search Issues");
+    expect(presentation.detail).toBe("cursor");
+  });
+
+  it("describes a search by its pattern rather than its path", () => {
+    expect(toolPresentation(call("g", "grep", "completed", { pattern: "nextCursor", path: "src" })).detail).toBe(
+      "nextCursor",
+    );
   });
 });

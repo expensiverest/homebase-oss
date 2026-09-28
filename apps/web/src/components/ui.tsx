@@ -39,7 +39,7 @@ export function Button({
       {...rest}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={`inline-flex min-w-11 items-center justify-center gap-2 font-semibold tracking-[-0.01em] transition-[transform,background-color,opacity] duration-150 active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${className}`}
+      className={`inline-flex min-w-11 items-center justify-center gap-2 font-semibold [&>svg]:shrink-0 tracking-[-0.01em] transition-[transform,background-color,opacity] duration-150 active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${className}`}
     >
       {loading ? <Loader2 size={16} className="animate-spin" aria-hidden /> : null}
       {children}
@@ -183,7 +183,7 @@ export function ErrorState({
 /** Mono eyebrow above a group, with an optional trailing readout. */
 export function SectionLabel({ title, trailing, id }: { title: string; trailing?: ReactNode; id?: string }) {
   return (
-    <div className="flex min-h-7 items-end justify-between gap-3 px-1 pb-2.5">
+    <div className="flex min-h-7 items-end justify-between gap-3 px-1 pb-3">
       <h2 id={id} className="eyebrow">
         {title}
       </h2>

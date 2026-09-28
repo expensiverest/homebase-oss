@@ -45,6 +45,10 @@ export const SCENARIOS = [
   "claude-image-only",
   "long-conversation",
   "host-error",
+  "run-starting",
+  "run-thinking",
+  "run-tools",
+  "confirm",
 ] as const;
 
 export type Scenario = (typeof SCENARIOS)[number];
@@ -656,6 +660,25 @@ function buildState(scenario: Scenario): MockState {
           { id: "allow_once", label: "Allow once", kind: "allow_once" },
           { id: "allow_always", label: "Always allow (this session)", kind: "allow_always" },
           { id: "deny", label: "Deny", kind: "deny" },
+        ],
+      },
+    ]);
+  }
+  if (scenario === "confirm") {
+    questions.set("ses_beacon_ui", [
+      {
+        id: "hb1~opencode~Y29uZmlybQ",
+        sessionId: "ses_beacon_ui",
+        provider: "opencode",
+        createdAt: new Date(Date.now() - 30_000).toISOString(),
+        title: "Questions",
+        questions: [
+          {
+            id: "q0",
+            header: "It keeps settings queryable and works offline; the JSON file would need a migration later.",
+            question: "Use SQLite for local settings storage?",
+            kind: "confirm",
+          },
         ],
       },
     ]);
@@ -1288,10 +1311,77 @@ export function installMock(scenario: Scenario): void {
       });
     }
   }
+  if (state.scenario === "run-starting" || state.scenario === "run-thinking" || state.scenario === "run-tools") {
+    const session = state.sessions.find((candidate) => candidate.id === "ses_aurora_docs");
+    if (session) scriptLiveRun(session, state.scenario);
+  }
   if (state.scenario === "long-conversation") {
     const session = state.sessions.find((candidate) => candidate.id === "ses_aurora_docs");
     if (session) session.state = "idle";
   }
+}
+
+/**
+ * Holds a live turn at one moment for visual QA: just started (nothing yet),
+ * reasoning in progress, or tools in flight. The run never finishes.
+ */
+function scriptLiveRun(session: AgentSession, scenario: "run-starting" | "run-thinking" | "run-tools"): void {
+  const context = { provider: session.provider, projectId: session.projectId, sessionId: session.id };
+  session.state = "working";
+  const prompt = "Add request examples for both endpoints.";
+  appendUserMessage(session, prompt);
+  const messageId = "msg_live_scripted";
+  const started = new Date(Date.now() - 12_000).toISOString();
+  const parts: AgentMessage["parts"] = [];
+  if (scenario === "run-thinking" || scenario === "run-tools") {
+    parts.push({
+      type: "reasoning",
+      id: `${messageId}:reasoning:0`,
+      text:
+        scenario === "run-thinking"
+          ? "The docs should show one request per endpoint. The messages endpoint pages with a cursor, so the example needs `nextCursor`"
+          : "The docs should show one request per endpoint, with the cursor for the messages page.",
+    });
+  }
+  if (scenario === "run-tools") {
+    const tool = (
+      id: string,
+      name: string,
+      input: Record<string, string>,
+      status: AgentToolCall["status"],
+      ago: number,
+    ) => ({
+      type: "tool_call" as const,
+      id,
+      toolCall: {
+        id,
+        name,
+        status,
+        input,
+        ...(status === "completed"
+          ? { output: { type: "text", text: "ok" }, completedAt: new Date(Date.now() - (ago - 2) * 1000).toISOString() }
+          : {}),
+        startedAt: new Date(Date.now() - ago * 1000).toISOString(),
+      },
+    });
+    parts.push(
+      tool("tool_run_read", "read", { file_path: "src/routes/gateway.ts" }, "completed", 10),
+      tool("tool_run_grep", "grep", { pattern: "nextCursor", path: "src" }, "completed", 8),
+      tool("tool_run_test", "bash", { command: "npm test -- gateway" }, "running", 4),
+    );
+  }
+  const message: AgentMessage = {
+    id: messageId,
+    sessionId: session.id,
+    role: "assistant",
+    createdAt: started,
+    state: "streaming",
+    parts,
+  };
+  later(300, () => {
+    emit("turn.started", { turnId: "turn_scripted" }, context);
+    emit("message.started", { message }, context);
+  });
 }
 
 export function disposeMock(): void {

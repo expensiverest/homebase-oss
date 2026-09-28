@@ -4,6 +4,7 @@ import {
   connectionPillText,
   expectNoHorizontalOverflow,
   expectTouchTargets,
+  ONE_PIXEL_PNG,
   openProject,
   openSession,
   sendMessage,
@@ -203,5 +204,165 @@ test.describe("design regressions", () => {
     const alert = page.getByRole("alert");
     await expect(alert).toContainText("OpenCode");
     await expect(alert.getByRole("button", { name: "Retry" })).toBeVisible();
+  });
+});
+
+test.describe("agent work presentation", () => {
+  test("the orbit shows before any work", async ({ page }) => {
+    await page.goto("/?mock=run-starting");
+    await openProject(page, "aurora-api");
+    await openSession(page, "Document the gateway endpoints");
+    await expect(page.locator("[data-agent-loading]")).toBeVisible();
+  });
+
+  // Separate tests: each mock scenario starts its own event sequence.
+  test("the orbit is gone once tools are visible", async ({ page }) => {
+    await page.goto("/?mock=run-tools");
+    await openProject(page, "aurora-api");
+    await openSession(page, "Document the gateway endpoints");
+    await expect(page.locator("[data-live-trace] [data-task-rows]")).toBeVisible();
+    await expect(page.locator("[data-agent-loading]")).toHaveCount(0);
+  });
+
+  test("the animated brain shows for active reasoning and rests under reduced motion", async ({ page }) => {
+    await page.goto("/?mock=run-thinking");
+    await openProject(page, "aurora-api");
+    await openSession(page, "Document the gateway endpoints");
+    const brain = page.locator('[data-brain="animated"] svg');
+    await expect(brain).toHaveCount(1);
+    // The suite runs with prefers-reduced-motion: reduce; the icon must not loop.
+    await expect(brain).toHaveAttribute("data-motion-state", "resting");
+    // Not merely slowed down: no path is animating and every path holds full opacity.
+    await expect(brain.locator("path")).toHaveCount(8);
+    const state = await brain.evaluate((svg) => ({
+      running: svg.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length,
+      opacities: [...svg.querySelectorAll("path")].map((path) => getComputedStyle(path).opacity),
+      hidden: svg.getAttribute("aria-hidden"),
+    }));
+    expect(state.running).toBe(0);
+    expect(new Set(state.opacities)).toEqual(new Set(["1"]));
+    expect(state.hidden).toBe("true");
+  });
+
+  test.describe("with motion allowed", () => {
+    test.use({ reducedMotion: "no-preference" });
+
+    test("the animated brain ripples a wave through the folds while the outline holds", async ({ page }) => {
+      await page.goto("/?mock=run-thinking");
+      await openProject(page, "aurora-api");
+      await openSession(page, "Document the gateway endpoints");
+      const brain = page.locator('[data-brain="animated"] svg');
+      await expect(brain).toHaveAttribute("data-motion-state", "looping");
+      await expect(brain.locator("path")).toHaveCount(8);
+      // Sample every path across two cycles (1.2s each).
+      const min = await brain.evaluate(async (svg) => {
+        const paths = [...svg.querySelectorAll("path")];
+        const lowest = paths.map(() => 1);
+        const started = performance.now();
+        while (performance.now() - started < 2600) {
+          paths.forEach((path, index) => {
+            lowest[index] = Math.min(lowest[index]!, Number(getComputedStyle(path).opacity));
+          });
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+        return { lowest, folds: [paths[0]!.getAttribute("d"), paths[1]!.getAttribute("d")] };
+      });
+      // Paths 0 and 1 are the interior fissures: they dip deep (0.35).
+      expect(min.lowest[0]).toBeLessThan(0.6);
+      expect(min.lowest[1]).toBeLessThan(0.6);
+      // The enclosing outline only ever brushes (0.72), so it stays above the fold dip.
+      for (const outline of min.lowest.slice(2)) {
+        expect(outline).toBeLessThan(0.95);
+        expect(outline).toBeGreaterThan(0.6);
+      }
+    });
+  });
+
+  test("settled reasoning shows a still brain", async ({ page }) => {
+    await page.goto("/?mock=run-tools");
+    await openProject(page, "aurora-api");
+    await openSession(page, "Document the gateway endpoints");
+    await expect(page.locator('[data-brain="static"]')).toHaveCount(1);
+    await expect(page.locator('[data-brain="animated"]')).toHaveCount(0);
+  });
+
+  test("a confirm question uses the recommendation card with no fabricated confidence", async ({ page }) => {
+    await page.goto("/?mock=confirm");
+    await openProject(page, "beacon-web");
+    await openSession(page, "Polish the onboarding empty state");
+    const card = page.getByRole("region", { name: "Question from the agent" });
+    await expect(card.getByText("Use SQLite for local settings storage?")).toBeVisible();
+    await expect(card.locator("[data-signal], [data-confidence]")).toHaveCount(0);
+    await expect(card).not.toContainText(/confidence/i);
+    await expectTouchTargets(page);
+    await card.getByRole("button", { name: "Yes, go ahead" }).click();
+    await expect(card).toHaveCount(0);
+  });
+
+  test("tool details stay inspectable from the folded work", async ({ page }) => {
+    await page.goto("/?mock=normal");
+    await openProject(page, "beacon-web");
+    await openSession(page, "Add cursor pagination to the audit log");
+    await page.getByRole("button", { name: /^Worked for/ }).click();
+    const chips = page.locator("[data-tool-chips]");
+    await chips.getByRole("button", { name: /Run npm test -- audit-log/ }).click();
+    await expect(chips.getByText("Tests: 14 passed, 14 total")).toBeVisible();
+  });
+
+  test("the folded-work chevron stays with its summary when the text wraps", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 700 });
+    await page.goto("/?mock=normal");
+    await openProject(page, "beacon-web");
+    await openSession(page, "Add cursor pagination to the audit log");
+    await page.addStyleTag({ content: "html { font-size: 130% !important; }" });
+    const button = page.getByRole("button", { name: /^Worked for/ });
+    const box = (await button.boundingBox())!;
+    const chevron = (await button.locator("[data-work-chevron]").boundingBox())!;
+    // The summary wraps onto more than one line at this size...
+    expect(box.height).toBeGreaterThan(60);
+    // ...and the chevron sits on the last line, right after the text, not detached at the far edge.
+    expect(chevron.y + chevron.height).toBeGreaterThan(box.y + box.height - 34);
+    const lastWord = await button.evaluate((element) => {
+      const range = document.createRange();
+      const texts = [...element.querySelectorAll("span")].filter((span) => span.textContent?.trim());
+      const last = texts[texts.length - 1] as HTMLElement;
+      range.selectNodeContents(last);
+      const rects = [...range.getClientRects()];
+      return rects[rects.length - 1]?.right ?? 0;
+    });
+    expect(chevron.x - lastWord).toBeLessThan(24);
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("marks grow with text but stay capped at 130%", async ({ page }) => {
+    await page.goto("/?mock=normal");
+    await page.addStyleTag({ content: "html { font-size: 130% !important; }" });
+    const mark = (await page.locator('[data-mark="project"]').first().boundingBox())!;
+    expect(mark.width).toBeGreaterThan(44);
+    expect(mark.width).toBeLessThanOrEqual(Math.round(44 * 1.15) + 0.5);
+    await expectNoHorizontalOverflow(page);
+    await openProject(page, "aurora-api");
+    await page.addStyleTag({ content: "html { font-size: 130% !important; }" });
+    const provider = (await page.locator('[data-mark="provider"]').first().boundingBox())!;
+    expect(provider.width).toBeLessThanOrEqual(Math.round(38 * 1.15) + 0.5);
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("prompt bar keeps a wide input with attachment, long model and running actions at 130%", async ({ page }) => {
+    await page.goto("/?mock=active-stream");
+    await openProject(page, "aurora-api");
+    await openSession(page, "Document the gateway endpoints");
+    await page
+      .locator('input[type="file"]')
+      .setInputFiles({ name: "notes.png", mimeType: "image/png", buffer: ONE_PIXEL_PNG });
+    await expect(page.getByText("notes.png")).toBeVisible();
+    await page.addStyleTag({ content: "html { font-size: 130% !important; }" });
+    await expect(page.getByLabel("Stop the run")).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("textbox", { name: "Message" }).fill("One\ntwo\nthree");
+    const input = (await page.getByRole("textbox", { name: "Message" }).boundingBox())!;
+    expect(input.width).toBeGreaterThan(330);
+    const queue = (await page.getByRole("button", { name: "Queue message" }).boundingBox())!;
+    expect(queue.x + queue.width).toBeLessThanOrEqual(402 - 16);
+    await expectNoHorizontalOverflow(page);
   });
 });

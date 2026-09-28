@@ -1,5 +1,6 @@
 import type {
   AgentApprovalRequest,
+  AgentPlan,
   AgentCapabilities,
   AgentMessage,
   AgentModel,
@@ -128,7 +129,7 @@ function firstString(input: unknown, keys: string[]): string | null {
   return null;
 }
 
-const DETAIL_KEYS = ["command", "file_path", "path", "pattern", "query", "url", "description", "text"];
+const DETAIL_KEYS = ["command", "file_path", "pattern", "query", "url", "path", "description", "text"];
 
 export function toolPresentation(tool: AgentToolCall): ToolPresentation {
   const verb =
@@ -146,9 +147,19 @@ export function shorten(text: string, max: number): string {
 
 // --- timeline folding -------------------------------------------------------
 
+/** One step of a run's execution trace, in the order the agent produced it. */
+export type TraceStep =
+  | { kind: "reasoning"; id: string; text: string; streaming: boolean }
+  | { kind: "tool"; id: string; tool: AgentToolCall }
+  | { kind: "text"; id: string; text: string };
+
 export interface TimelineWorkItem {
   kind: "work";
   id: string;
+  /** Reasoning, tool calls and interim updates, chronological; tools de-duplicated by call id. */
+  steps: TraceStep[];
+  /** The newest plan the run reported, if any. */
+  plan: AgentPlan | null;
   tools: AgentToolCall[];
   reasoningCount: number;
   foldedTextCount: number;
@@ -189,8 +200,43 @@ function reasoningCount(messages: AgentMessage[]): number {
 }
 
 /**
- * Groups a conversation into user prompts, folded completed work, and the
- * final answer of each run. The newest run stays expanded while it streams.
+ * The execution trace of a run: reasoning, tool calls and interim text in the
+ * order they arrived. The last message's text is the answer, not a trace step.
+ * A tool call reported more than once keeps its latest state at its first slot.
+ */
+export function buildTrace(run: AgentMessage[]): { steps: TraceStep[]; plan: AgentPlan | null } {
+  const steps: TraceStep[] = [];
+  const toolIndex = new Map<string, number>();
+  let plan: AgentPlan | null = null;
+  const last = run[run.length - 1];
+  for (const message of run) {
+    const streaming = message.state === "streaming";
+    for (const part of message.parts) {
+      if (part.type === "reasoning") {
+        if (part.text.trim().length > 0 || streaming) {
+          steps.push({ kind: "reasoning", id: part.id, text: part.text, streaming });
+        }
+      } else if (part.type === "tool_call") {
+        const existing = toolIndex.get(part.toolCall.id);
+        if (existing === undefined) {
+          toolIndex.set(part.toolCall.id, steps.length);
+          steps.push({ kind: "tool", id: part.toolCall.id, tool: part.toolCall });
+        } else {
+          steps[existing] = { kind: "tool", id: part.toolCall.id, tool: part.toolCall };
+        }
+      } else if (part.type === "text" && message !== last && part.text.trim().length > 0) {
+        steps.push({ kind: "text", id: part.id, text: part.text });
+      } else if (part.type === "plan") {
+        plan = part.plan;
+      }
+    }
+  }
+  return { steps, plan };
+}
+
+/**
+ * Groups a conversation into user prompts, each run's work (its trace), and
+ * the final answer of each run.
  */
 export function foldTimeline(messages: AgentMessage[]): TimelineItem[] {
   const items: TimelineItem[] = [];
@@ -217,20 +263,21 @@ export function foldTimeline(messages: AgentMessage[]): TimelineItem[] {
     if (run.length === 0) continue;
 
     const last = run[run.length - 1];
-    const followingUser = messages[index]?.role === "user";
-    const finished = !followingUser || last?.state !== "streaming";
     const finalText = last ? assistantText(last) : "";
     const folded = run.slice(0, -1);
     const tools = collectTools(run);
     const reasoning = reasoningCount(run);
     const foldedTexts = folded.filter((entry) => assistantText(entry).length > 0).length;
+    const trace = buildTrace(run);
 
-    // Work only folds when there is something to fold; a simple answer stays a
-    // simple answer.
-    if (finished && (tools.length > 0 || reasoning > 0 || foldedTexts > 0)) {
+    // A run gets a work item only when there is something besides the answer;
+    // a simple answer stays a simple answer.
+    if (trace.steps.length > 0 || trace.plan) {
       items.push({
         kind: "work",
         id: `work:${run[0]?.id ?? "run"}`,
+        steps: trace.steps,
+        plan: trace.plan,
         tools,
         reasoningCount: reasoning,
         foldedTextCount: foldedTexts,
@@ -324,4 +371,39 @@ export function modelDisplayName(modelId: string | null | undefined, models?: Ag
     .replace(/[-_]+/g, " ")
     .trim()
     .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+// --- active-run presentation ------------------------------------------------
+
+export type ActiveRunView =
+  { mode: "none" } | { mode: "orbit"; label: string } | { mode: "trace"; workId: string | null };
+
+/**
+ * One narrative for a running turn:
+ *
+ *   not running                       → none (history renders folded work)
+ *   running, nothing visible yet      → orbit ("Starting…", or "Working…" once
+ *                                        the assistant message exists)
+ *   reasoning, tools, plan or text    → trace (Thinking / Task Rows / text);
+ *                                        the orbit is gone
+ */
+export function activeRunView(items: TimelineItem[], running: boolean): ActiveRunView {
+  if (!running) return { mode: "none" };
+  let start = items.length;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index]?.kind === "user") break;
+    start = index;
+  }
+  const run = items.slice(start);
+  const work = run.find((item): item is TimelineWorkItem => item.kind === "work");
+  const final = run.find((item) => item.kind === "final") as { kind: "final"; message: AgentMessage } | undefined;
+  const hasTrace = Boolean(work && (work.steps.length > 0 || work.plan));
+  const hasText = final ? assistantText(final.message).length > 0 : false;
+  const hasOther = final
+    ? final.message.parts.some((part) => part.type === "image" || part.type === "file" || part.type === "error")
+    : false;
+  if (!hasTrace && !hasText && !hasOther) {
+    return { mode: "orbit", label: final ? "Working…" : "Starting…" };
+  }
+  return { mode: "trace", workId: work?.id ?? null };
 }

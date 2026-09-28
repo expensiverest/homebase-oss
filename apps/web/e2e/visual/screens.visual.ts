@@ -4,12 +4,16 @@ import { expectNoHorizontalOverflow, openProject, openSession } from "../helpers
 
 /**
  * Deterministic screenshots of the key mobile screens for design review.
- * Output: apps/web/screenshots/<name>-<theme>.png
+ * Output: apps/web/screenshots/<name>-<theme>.png (402×874 @3×).
+ *
+ * Captures wait for fonts and for every code block to finish highlighting, so
+ * an image never shows the plain pre-highlight frame. Nothing compares pixels.
  */
 
 type Theme = "dark" | "light";
 
 const OUT = "screenshots";
+const LARGE_TEXT = "html { font-size: 130% !important; }";
 
 async function boot(page: Page, scenario: string, theme: Theme): Promise<void> {
   await page.addInitScript((value) => {
@@ -23,10 +27,14 @@ async function boot(page: Page, scenario: string, theme: Theme): Promise<void> {
   await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
 }
 
-async function shot(page: Page, name: string, theme: Theme): Promise<void> {
-  // Fonts and the first query round-trip settle before capture.
+async function settle(page: Page): Promise<void> {
   await page.evaluate(() => document.fonts.ready);
+  await expect(page.locator('[data-code-block][data-highlight="pending"]')).toHaveCount(0);
   await page.waitForTimeout(250);
+}
+
+async function shot(page: Page, name: string, theme: Theme): Promise<void> {
+  await settle(page);
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: `${OUT}/${name}-${theme}.png` });
 }
@@ -41,42 +49,81 @@ async function expectWideComposer(page: Page): Promise<void> {
 
 for (const theme of ["dark", "light"] as const) {
   test.describe(`screens (${theme})`, () => {
-    test("projects", async ({ page }) => {
+    test("01 projects", async ({ page }) => {
       await boot(page, "normal", theme);
       await expect(page.getByRole("button", { name: "Open project aurora-api" })).toBeVisible();
       await shot(page, "01-projects", theme);
     });
 
-    test("projects with a provider problem", async ({ page }) => {
-      await boot(page, "provider-down", theme);
-      await expect(page.getByRole("button", { name: "Open project aurora-api" })).toBeVisible();
-      await shot(page, "02-projects-provider-down", theme);
-    });
-
-    test("project", async ({ page }) => {
+    test("02 project", async ({ page }) => {
       await boot(page, "normal", theme);
       await openProject(page, "aurora-api");
       await expect(page.getByRole("button", { name: "New session" })).toBeVisible();
-      await shot(page, "03-project", theme);
+      await shot(page, "02-project", theme);
     });
 
-    test("project with long names", async ({ page }) => {
+    test("03 chat orbit (turn started, nothing yet)", async ({ page }) => {
+      await boot(page, "run-starting", theme);
+      await openProject(page, "aurora-api");
+      await openSession(page, "Document the gateway endpoints");
+      await expect(page.locator("[data-agent-loading]")).toBeVisible();
+      await shot(page, "03-chat-orbit", theme);
+    });
+
+    test("04 chat thinking", async ({ page }) => {
+      await boot(page, "run-thinking", theme);
+      await openProject(page, "aurora-api");
+      await openSession(page, "Document the gateway endpoints");
+      await expect(page.locator('[data-thinking="active"]')).toBeVisible();
+      await shot(page, "04-chat-thinking", theme);
+    });
+
+    test("05 chat tools (live trace, a row expanded)", async ({ page }) => {
+      await boot(page, "run-tools", theme);
+      await openProject(page, "aurora-api");
+      await openSession(page, "Document the gateway endpoints");
+      const rows = page.locator("[data-live-trace] [data-task-rows]");
+      await expect(rows).toBeVisible();
+      await rows.getByRole("button", { name: /Run npm test/ }).click();
+      await shot(page, "05-chat-tools", theme);
+    });
+
+    test("06 chat completed work (folded, then opened)", async ({ page }) => {
       await boot(page, "normal", theme);
-      await openProject(page, "northwind-customer-portal-platform");
-      await expect(page.getByRole("button", { name: "New session" })).toBeVisible();
-      await shot(page, "04-project-long-names", theme);
+      await openProject(page, "beacon-web");
+      await openSession(page, "Add cursor pagination to the audit log");
+      await page.getByRole("button", { name: /^Worked for/ }).click();
+      await expect(page.locator("[data-tool-chips]")).toBeVisible();
+      await page.locator("[data-work-row]").scrollIntoViewIfNeeded();
+      await shot(page, "06-chat-work", theme);
     });
 
-    test("chat idle", async ({ page }) => {
+    test("07 chat approval", async ({ page }) => {
+      await boot(page, "approval", theme);
+      await openProject(page, "aurora-api");
+      await openSession(page, "Fix the flaky auth test");
+      await expect(page.getByRole("region", { name: "Approval needed" })).toBeVisible();
+      await shot(page, "07-chat-approval", theme);
+    });
+
+    test("08 chat recommendation (confirm question)", async ({ page }) => {
+      await boot(page, "confirm", theme);
+      await openProject(page, "beacon-web");
+      await openSession(page, "Polish the onboarding empty state");
+      await expect(page.getByRole("region", { name: "Question from the agent" })).toBeVisible();
+      await shot(page, "08-chat-recommendation", theme);
+    });
+
+    test("09 chat idle prompt bar", async ({ page }) => {
       await boot(page, "normal", theme);
       await openProject(page, "aurora-api");
       await openSession(page, "Refactor session storage");
       await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
       await expectWideComposer(page);
-      await shot(page, "05-chat-idle", theme);
+      await shot(page, "09-chat-idle", theme);
     });
 
-    test("chat running", async ({ page }) => {
+    test("10 chat running prompt bar", async ({ page }) => {
       await boot(page, "active-stream", theme);
       await openProject(page, "aurora-api");
       await openSession(page, "Document the gateway endpoints");
@@ -85,73 +132,57 @@ for (const theme of ["dark", "light"] as const) {
         .getByRole("textbox", { name: "Message" })
         .fill("Also cover pagination,\nerror shapes,\nand the retry headers\nfor the event stream.");
       await expectWideComposer(page);
-      await shot(page, "06-chat-running", theme);
+      await shot(page, "10-chat-running", theme);
     });
 
-    test("chat approval", async ({ page }) => {
-      await boot(page, "approval", theme);
-      await openProject(page, "aurora-api");
-      await openSession(page, "Fix the flaky auth test");
-      await expect(page.getByRole("region", { name: "Approval needed" })).toBeVisible();
-      await shot(page, "07-chat-approval", theme);
-    });
-
-    test("chat question", async ({ page }) => {
-      await boot(page, "question", theme);
-      await openProject(page, "beacon-web");
-      await openSession(page, "Polish the onboarding empty state");
-      await expect(page.getByRole("region", { name: "Question from the agent" })).toBeVisible();
-      await shot(page, "08-chat-question", theme);
-    });
-
-    test("chat long output", async ({ page }) => {
+    test("11 code block", async ({ page }) => {
       await boot(page, "normal", theme);
       await openProject(page, "beacon-web");
       await openSession(page, "Add cursor pagination to the audit log");
-      await expect(page.getByText("Worked for", { exact: false }).first()).toBeVisible();
-      await shot(page, "09-chat-long-output", theme);
+      const code = page.locator("[data-code-block]").first();
+      await code.scrollIntoViewIfNeeded();
+      await page.evaluate(() => {
+        const block = document.querySelector("[data-code-block]");
+        block?.scrollIntoView({ block: "center" });
+      });
+      await shot(page, "11-code-block", theme);
     });
 
-    test("chat composer focused with a long draft", async ({ page }) => {
-      await boot(page, "normal", theme);
-      await openProject(page, "aurora-api");
-      await openSession(page, "Refactor session storage");
-      const box = page.getByRole("textbox", { name: "Message" });
-      await box.fill(Array.from({ length: 8 }, (_, index) => `Line ${index + 1} of a longer prompt`).join("\n"));
-      await box.focus();
-      await expectWideComposer(page);
-      await shot(page, "10-chat-composer-draft", theme);
-    });
-
-    test("new session sheet", async ({ page }) => {
-      await boot(page, "normal", theme);
-      await openProject(page, "aurora-api");
-      await page.getByRole("button", { name: /^Model:/ }).click();
-      await expect(page.getByRole("dialog")).toBeVisible();
-      await shot(page, "11-model-sheet", theme);
-    });
-
-    test("design QA page", async ({ page }) => {
+    test("14 design QA page", async ({ page }) => {
       await boot(page, "normal", theme);
       await page.goto("/dev/ui");
       await expect(page.getByRole("heading", { name: "Design QA" })).toBeVisible();
-      await page.evaluate(() => document.fonts.ready);
-      await page.screenshot({ path: `${OUT}/12-dev-ui-${theme}.png`, fullPage: true });
+      await settle(page);
+      await page.screenshot({ path: `${OUT}/14-dev-ui-${theme}.png`, fullPage: true });
     });
   });
 }
 
-test("130% text keeps the project and chat layout", async ({ page }) => {
+test("12 running prompt bar at 130% text", async ({ page }) => {
   await boot(page, "active-stream", "dark");
-  await page.addStyleTag({ content: "html { font-size: 130% !important; }" });
-  await shot(page, "13-projects-130", "dark");
   await openProject(page, "aurora-api");
-  await page.addStyleTag({ content: "html { font-size: 130% !important; }" });
-  await shot(page, "14-project-130", "dark");
   await openSession(page, "Document the gateway endpoints");
-  await page.addStyleTag({ content: "html { font-size: 130% !important; }" });
+  await page.addStyleTag({ content: LARGE_TEXT });
   await expect(page.getByLabel("Stop the run")).toBeVisible({ timeout: 10_000 });
   await page.getByRole("textbox", { name: "Message" }).fill("A queued follow-up\nwith two lines");
   await expectWideComposer(page);
-  await shot(page, "15-chat-running-130", "dark");
+  await shot(page, "12-chat-running-130", "dark");
+});
+
+test("13 folded work disclosure at 130% text", async ({ page }) => {
+  await boot(page, "normal", "dark");
+  await openProject(page, "beacon-web");
+  await openSession(page, "Add cursor pagination to the audit log");
+  await page.addStyleTag({ content: LARGE_TEXT });
+  await page.locator("[data-work-row]").first().scrollIntoViewIfNeeded();
+  await shot(page, "13-work-disclosure-130", "dark");
+});
+
+test("15 projects and project at 130% text", async ({ page }) => {
+  await boot(page, "normal", "light");
+  await page.addStyleTag({ content: LARGE_TEXT });
+  await shot(page, "15a-projects-130", "light");
+  await openProject(page, "northwind-customer-portal-platform");
+  await page.addStyleTag({ content: LARGE_TEXT });
+  await shot(page, "15b-project-long-130", "light");
 });

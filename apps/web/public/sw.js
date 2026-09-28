@@ -6,7 +6,7 @@
  * history, approvals, questions, attachments, or provider usage — private data
  * always comes from the network with `no-store`.
  */
-const VERSION = "homebase-shell-v1";
+const VERSION = "homebase-shell-v2";
 const SHELL = [
   "/",
   "/manifest.webmanifest",

@@ -43,7 +43,7 @@ function SessionRow({
       type="button"
       onClick={onOpen}
       aria-label={`Open session ${title}`}
-      className="hairline-top flex min-h-[76px] w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors first:shadow-none active:bg-surface-2"
+      className="hairline-top flex min-h-[80px] w-full items-center gap-4 px-4 py-4 text-left transition-colors first:shadow-none active:bg-surface-2"
     >
       <ProviderMark providerId={session.provider} provider={provider} working={working} size={38} />
       <span className="min-w-0 flex-1">
@@ -55,7 +55,7 @@ function SessionRow({
           </span>
           <span className="readout mt-[3px] shrink-0 text-caption text-muted">{relativeTime(session.updatedAt)}</span>
         </span>
-        <span className="mt-1 flex min-w-0 items-center gap-2 text-callout text-muted">
+        <span className="mt-1.5 flex min-w-0 items-center gap-2 text-callout text-muted">
           <SessionState session={session} />
           <span className="min-w-0 truncate">
             {provider?.name ?? session.provider}
