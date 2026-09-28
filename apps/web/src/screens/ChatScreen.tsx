@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { Cpu, FileDiff, Gauge, Trash2 } from "lucide-react";
+import { FileDiff, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentApprovalRequest, AgentAttachmentRef, AgentMessage, AgentQuestionRequest } from "@homebase/protocol";
@@ -8,14 +8,25 @@ import type { AgentApprovalRequest, AgentAttachmentRef, AgentMessage, AgentQuest
 import { api } from "../lib/api.js";
 import { useChatScroll } from "../lib/chatScroll.js";
 import { useLive } from "../lib/live.js";
-import { qk, useActions, useDiff, useMessages, useModels, useModes, useProviders, useSession } from "../lib/queries.js";
-import { foldTimeline, sessionStatus } from "../lib/viewmodel.js";
+import {
+  qk,
+  useActions,
+  useDiff,
+  useMessages,
+  useModels,
+  useModes,
+  useProject,
+  useProviders,
+  useSession,
+} from "../lib/queries.js";
+import { foldTimeline, levelLabel, modelDisplayName, sessionStatus } from "../lib/viewmodel.js";
 import { ApprovalCard, QuestionCard } from "../components/ActionCards.js";
 import { Timeline } from "../components/ChatTimeline.js";
 import { Composer, type ComposerAction } from "../components/Composer.js";
-import { ScreenHeader, ConnectionPill } from "../components/chrome.js";
+import { BackButton, ConnectionPill, TopBar } from "../components/chrome.js";
+import { ProviderGlyph } from "../components/marks.js";
 import { ConfirmSheet, DiffSheet, ModelSheet, ModeSheet } from "../components/Sheets.js";
-import { EmptyState, ErrorState, IconButton, Pill, Skeleton } from "../components/ui.js";
+import { EmptyState, ErrorState, IconButton, Pill, PickerButton, Skeleton } from "../components/ui.js";
 
 export function ChatScreen() {
   const { sessionId } = useParams({ strict: false }) as { sessionId?: string };
@@ -29,6 +40,8 @@ export function ChatScreen() {
   const overlay = useLive((state) => state.sessions[id]);
   const sessionRow = session.data;
   const provider = providers.data?.find((candidate) => candidate.id === sessionRow?.provider);
+  const project = useProject(sessionRow?.projectId);
+  const backLabel = project.data?.name ?? "Project";
 
   const canApprove = provider?.capabilities.approvals === true;
   const canQuestion = provider?.capabilities.questions === true;
@@ -84,9 +97,10 @@ export function ChatScreen() {
     initialScrollDone.current = true;
   }, [fetched.length, scrollToBottom]);
 
+  const pendingCount = (actions.data?.approvals.length ?? 0) + (actions.data?.questions.length ?? 0);
   useEffect(() => {
     if (initialScrollDone.current && atBottom) scrollToBottom(false);
-  }, [merged.length, running, atBottom, scrollToBottom]);
+  }, [merged.length, running, pendingCount, atBottom, scrollToBottom]);
 
   // Fetched history is authoritative: prune overlay copies that history
   // already contains (running state is considered inside `prune`).
@@ -220,10 +234,12 @@ export function ChatScreen() {
 
   if (session.isLoading && !sessionRow) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <ScreenHeader title="Session" onBack={() => void navigate({ to: "/" })} />
-        <div className="flex flex-col gap-2 px-safe pt-4">
-          <Skeleton className="h-5 w-2/3" />
+      <div className="flex min-h-0 flex-1 flex-col px-safe pt-safe">
+        <TopBar leading={<BackButton label="Projects" onClick={() => void navigate({ to: "/" })} />} />
+        <div className="mt-3 flex flex-col gap-3">
+          <Skeleton className="h-7 w-2/3" />
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="mt-6 h-12 w-3/5 self-end rounded-[20px]" />
           <Skeleton className="h-24 w-full" />
         </div>
       </div>
@@ -232,8 +248,8 @@ export function ChatScreen() {
 
   if (session.isError || !sessionRow) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        <ScreenHeader title="Session" onBack={() => void navigate({ to: "/" })} />
+      <div className="flex min-h-0 flex-1 flex-col px-safe pt-safe">
+        <TopBar leading={<BackButton label="Projects" onClick={() => void navigate({ to: "/" })} />} />
         <ErrorState
           title="Session unavailable"
           detail="It may have been deleted, or the Host cannot reach the provider."
@@ -245,9 +261,7 @@ export function ChatScreen() {
 
   const status = sessionStatus(sessionRow.state);
   const selectedModel = models.data?.find((model) => model.id === sessionRow.model?.modelId);
-  const modelLabel =
-    selectedModel?.name ??
-    (sessionRow.model?.modelId ? (sessionRow.model.modelId.split("/").pop() ?? "Model") : "Model");
+  const modelLabel = selectedModel?.name ?? modelDisplayName(sessionRow.model?.modelId) ?? "Model";
   const modeLabel = modes.data?.find((mode) => mode.id === sessionRow.mode)?.name ?? sessionRow.mode ?? "Mode";
   const thinking = sessionRow.model?.thinkingLevel ?? sessionRow.thinkingLevel;
   const approvals = actions.data?.approvals ?? [];
@@ -255,73 +269,66 @@ export function ChatScreen() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ScreenHeader
-        title={sessionRow.title ?? "Session"}
-        subtitle={
-          <>
-            <span className="shrink-0 rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-muted">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-safe pb-6">
+        <header className="pt-safe pb-5">
+          <TopBar
+            leading={
+              <BackButton
+                label={backLabel}
+                onClick={() => void navigate({ to: "/p/$projectId", params: { projectId: sessionRow.projectId } })}
+              />
+            }
+            trailing={
+              <>
+                {provider?.capabilities.diffs ? (
+                  <IconButton label="Show changes" onClick={() => setDiffOpen(true)}>
+                    <FileDiff size={20} aria-hidden />
+                  </IconButton>
+                ) : null}
+                {provider?.capabilities.deleteSession ? (
+                  <IconButton label="Delete session" onClick={() => setConfirmOpen(true)}>
+                    <Trash2 size={20} aria-hidden />
+                  </IconButton>
+                ) : null}
+              </>
+            }
+          />
+          <h1
+            className={`mt-2 line-clamp-3 break-words text-heading font-semibold ${sessionRow.title ? "text-text" : "italic text-muted"}`}
+          >
+            {sessionRow.title ?? "Untitled session"}
+          </h1>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-callout text-muted">
+            <span className="inline-flex items-center gap-1.5">
+              <ProviderGlyph providerId={sessionRow.provider} size={15} />
               {provider?.name ?? sessionRow.provider}
             </span>
-            <Pill tone={status.tone}>{status.label}</Pill>
-            <ConnectionPill />
-          </>
-        }
-        onBack={() => void navigate({ to: "/p/$projectId", params: { projectId: sessionRow.projectId } })}
-        trailing={
-          <>
-            {provider?.capabilities.diffs ? (
-              <IconButton label="Show changes" onClick={() => setDiffOpen(true)}>
-                <FileDiff size={18} aria-hidden />
-              </IconButton>
+            {status.tone === "working" || running ? (
+              <span className="inline-flex items-center gap-1.5 font-medium text-accent">
+                <span aria-hidden className="hb-pulse h-1.5 w-1.5 rounded-full bg-accent" />
+                Working
+              </span>
+            ) : status.tone === "waiting" ? (
+              <Pill tone="waiting">Needs you</Pill>
+            ) : status.tone === "failed" ? (
+              <span className="font-medium text-bad">Failed</span>
             ) : null}
-            {provider?.capabilities.deleteSession ? (
-              <IconButton label="Delete session" onClick={() => setConfirmOpen(true)}>
-                <Trash2 size={18} aria-hidden />
-              </IconButton>
-            ) : null}
-          </>
-        }
-      />
+            <ConnectionPill hideWhenConnected />
+          </div>
+        </header>
 
-      <div className="flex items-center gap-2 overflow-x-auto px-safe pb-2">
-        {provider?.capabilities.models ? (
-          <button
-            type="button"
-            onClick={() => setModelOpen(true)}
-            className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface px-3 text-[12px] text-text"
-            aria-label={`Model: ${modelLabel}. Change model`}
-          >
-            <Cpu size={13} className="text-muted" aria-hidden />
-            <span className="max-w-[160px] truncate font-medium">{modelLabel}</span>
-            {thinking ? <span className="text-faint">· {thinking}</span> : null}
-          </button>
+        {bannerError ? (
+          <p role="alert" className="mb-4 rounded-[var(--radius-md)] bg-bad-soft px-4 py-3 text-callout text-bad">
+            {bannerError}
+          </p>
         ) : null}
-        {provider?.capabilities.modes ? (
-          <button
-            type="button"
-            onClick={() => setModeOpen(true)}
-            className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface px-3 text-[12px] text-text"
-            aria-label={`Mode: ${modeLabel}. Change mode`}
-          >
-            <Gauge size={13} className="text-muted" aria-hidden />
-            <span className="font-medium">{modeLabel}</span>
-          </button>
-        ) : null}
-      </div>
 
-      {bannerError ? (
-        <p role="alert" className="mx-3 mb-2 rounded-[10px] bg-bad-soft px-3 py-2 text-[12px] text-bad">
-          {bannerError}
-        </p>
-      ) : null}
-
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-safe pb-3">
         {messages.hasNextPage ? (
           <div className="flex justify-center pb-3 pt-1">
             <button
               type="button"
               onClick={loadOlder}
-              className="min-h-11 rounded-full px-4 text-[12px] font-medium text-muted hover:text-text"
+              className="min-h-11 rounded-full bg-fill px-4 text-callout font-medium text-muted hover:text-text"
               disabled={messages.isFetchingNextPage}
             >
               {messages.isFetchingNextPage ? "Loading earlier messages…" : "Load earlier messages"}
@@ -344,19 +351,19 @@ export function ChatScreen() {
         ) : merged.length === 0 ? (
           <EmptyState title="No messages yet" detail="Send the first prompt to start working in this session." />
         ) : (
-          <div className="pt-2">
+          <div>
             <Timeline items={timeline} running={running} hasMessages={merged.length > 0} />
           </div>
         )}
 
         {messages.isError && merged.length > 0 ? (
-          <p role="alert" className="mb-2 rounded-[10px] bg-warn-soft px-3 py-2 text-[12px] text-warn">
+          <p role="alert" className="mb-3 rounded-[var(--radius-md)] bg-warn-soft px-4 py-3 text-callout text-warn">
             Showing live updates only — history could not be refreshed.
           </p>
         ) : null}
 
         {approvals.length > 0 || questions.length > 0 ? (
-          <div className="mt-3 flex flex-col gap-3">
+          <div className="mt-2 flex flex-col gap-3">
             {approvals.map((request) => (
               <ApprovalCard
                 key={request.id}
@@ -386,29 +393,58 @@ export function ChatScreen() {
         running={running}
         onSend={send}
         onInterrupt={interrupt}
+        controls={
+          provider?.capabilities.models || provider?.capabilities.modes ? (
+            <>
+              {provider?.capabilities.models ? (
+                <PickerButton
+                  value={modelLabel}
+                  detail={thinking ? `· ${levelLabel(selectedModel, thinking)}` : undefined}
+                  icon={<span aria-hidden className="block h-1.5 w-1.5 rounded-full bg-accent" />}
+                  ariaLabel={`Model: ${modelLabel}. Change model`}
+                  onClick={() => setModelOpen(true)}
+                  className="min-w-0 flex-1"
+                />
+              ) : null}
+              {provider?.capabilities.modes ? (
+                <PickerButton
+                  value={modeLabel}
+                  icon={<SlidersHorizontal size={16} aria-hidden />}
+                  ariaLabel={`Mode: ${modeLabel}. Change mode`}
+                  onClick={() => setModeOpen(true)}
+                  className="max-w-[46%] shrink-0"
+                />
+              ) : null}
+            </>
+          ) : null
+        }
       />
 
-      <ModelSheet
-        open={modelOpen}
-        onClose={() => setModelOpen(false)}
-        models={models.data ?? []}
-        loading={models.isLoading}
-        error={models.isError ? "Models are unavailable right now." : null}
-        currentModelId={sessionRow.model?.modelId ?? null}
-        currentThinkingLevel={thinking ?? null}
-        showThinking={provider?.capabilities.thinkingLevels === true}
-        busy={sheetBusy}
-        onApply={(modelId, thinkingLevel) => void applyModel(modelId, thinkingLevel)}
-      />
-      <ModeSheet
-        open={modeOpen}
-        onClose={() => setModeOpen(false)}
-        modes={modes.data ?? []}
-        loading={modes.isLoading}
-        currentMode={sessionRow.mode ?? null}
-        busy={sheetBusy}
-        onApply={(mode) => void applyMode(mode)}
-      />
+      {modelOpen ? (
+        <ModelSheet
+          open
+          onClose={() => setModelOpen(false)}
+          models={models.data ?? []}
+          loading={models.isLoading}
+          error={models.isError ? "Models are unavailable right now." : null}
+          currentModelId={sessionRow.model?.modelId ?? null}
+          currentThinkingLevel={thinking ?? null}
+          showThinking={provider?.capabilities.thinkingLevels === true}
+          busy={sheetBusy}
+          onApply={(modelId, thinkingLevel) => void applyModel(modelId, thinkingLevel)}
+        />
+      ) : null}
+      {modeOpen ? (
+        <ModeSheet
+          open
+          onClose={() => setModeOpen(false)}
+          modes={modes.data ?? []}
+          loading={modes.isLoading}
+          currentMode={sessionRow.mode ?? null}
+          busy={sheetBusy}
+          onApply={(mode) => void applyMode(mode)}
+        />
+      ) : null}
       <DiffSheet
         open={diffOpen}
         onClose={() => setDiffOpen(false)}

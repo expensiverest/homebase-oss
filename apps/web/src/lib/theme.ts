@@ -19,7 +19,7 @@ export function applyTheme(setting: ThemeSetting): void {
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   document.documentElement.style.colorScheme = dark ? "dark" : "light";
   for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
-    meta.setAttribute("content", dark ? "#101014" : "#f7f6f3");
+    meta.setAttribute("content", dark ? "#0e0d0c" : "#f5f3ee");
   }
 }
 

@@ -85,14 +85,51 @@ from provider identity:
 - Diff and delete-session controls appear only with `diffs` / `deleteSession`; the UI never runs git itself.
 - Reasoning renders only when an `AgentMessage` actually contains a reasoning part.
 
-Provider identity is used only for names, initials, and badges.
+Provider identity is used only for names and visual marks (`src/components/marks.tsx`).
+
+## Design system (Phase 4.1)
+
+The visual direction is "evening instrument": warm neutrals (charcoal and paper, never blue-grey), one iris accent for
+actions and agent activity, and status colors only where something needs you. Tokens live in `src/styles/tokens.css`;
+every text color, including status on its tinted `*-soft` background, is checked at ≥ 4.5:1 by `contrast.test.ts`.
+
+- **Type.** Instrument Serif for screen identity only (the Projects title, a project's name, empty-state headlines);
+  Geist for UI; Geist Mono for readouts (branches, paths, times, model ids). The scale is rem-based (`display`,
+  `title`, `heading`, `row`, `body`, `callout`, `caption`, `eyebrow`) and nothing sets a px size on the root, so the iOS
+  `-apple-system-body` root (Dynamic Type) scales the whole interface. Conversation text is 17px with 1.6 leading;
+  nothing essential is below 13px.
+- **Surfaces.** Inset-grouped lists on one `.surface`: a hairline border plus light from above (an inner top highlight
+  in dark, a soft ambient shadow in light). Drop shadows are reserved for sheets.
+- **Status.** Healthy is quiet (a muted "OpenCode · Claude Code ready" line); problems explain themselves (provider,
+  what's wrong, Retry). Pills are reserved for Working / Needs you style status and branch chips.
+- **Screens.** Projects is project-first with serif identity and deterministic monogram marks. A project's screen is
+  its workspace: the session launcher (provider, mode, model, thinking, **New session**) is part of the screen, with
+  long catalogs in sheets. Chat has a real heading, provider/state line, and a composer whose textarea always owns the
+  full width; attach/Stop sit on the left of a toolbar below the text and Steer/Queue on the right, wrapping as a
+  group at very large text sizes. Queue is the primary follow-up, Steer secondary, Stop a separate interruption.
+- **Navigation.** There is only one root destination today, so there is no tab bar; one will arrive with the
+  Attention/Activity screens rather than as placeholder tabs.
+
+`/dev/ui` (development only) shows the type scale, colors, marks, rows, controls, buttons, a folded conversation, tool
+states, action cards, attachments, and the composer idle and running.
+
+## Visual QA
+
+`npm run screenshots -w @homebase/web` renders the key screens at 402×874 (@3×) in both themes and at 130% text, and
+writes PNGs to `apps/web/screenshots/` (git-ignored). It asserts composition invariants (no horizontal overflow, a
+composer textarea wider than 70% of the viewport) but never compares pixels, so it is a review artifact rather than a
+brittle golden-image gate. CI uploads the images as the `visual-qa-screenshots` artifact. Functional design
+regressions (running composer width, long names, 130% text, large model names, quiet/loud provider health) are
+covered by `e2e/quality.spec.ts`.
 
 ## Mock mode
 
 In development, `?mock=<scenario>` installs a deterministic in-memory transport and event stream. Scenarios include
 `normal`, `empty`, `many-sessions`, `active-stream`, `approval`, `question`, `failed`, `provider-down`, `signed-out`,
 `reconnecting`, `resync`, `models-large`, `attachments`, `diff`, `reasoning`, `claude-image-only`,
-`long-conversation`, and `host-error`. Fixtures are fictional. The module is loaded through a dynamic import behind
+`long-conversation`, and `host-error`. Fixtures are fictional; the normal scenario deliberately includes short and
+very long project names, a long branch, a long session title, mixed providers and states, and a long tool-heavy reply
+so screenshots exercise the design. The module is loaded through a dynamic import behind
 `import.meta.env.DEV || VITE_MOCK === "1"`, so scenario payloads are excluded from the production bundle. Playwright
 E2E runs entirely on these mocks and spends no provider quota.
 
@@ -129,6 +166,6 @@ is a centered, naturally expanded version of the same product.
 - Attention and Activity screens are later phases; the connection pill and provider warnings are the only global
   status surfaces.
 - Usage (`capabilities.usage`) is fetched by the API client but not yet rendered.
-- Steer is an explicit secondary button; the private client's press-and-hold gesture was not ported.
+- Steer is an explicit secondary button beside Queue; the private client's press-and-hold gesture was not ported.
 - Diffs are read-only; there is no git command execution from the browser.
 - Queue/steer behaviour is verified against mocks; Claude/OpenCode live queue/steer proofs remain adapter-level.

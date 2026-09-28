@@ -98,6 +98,20 @@ const PROJECTS: AgentProject[] = [
     branch: "main",
     providersAvailable: ["opencode"],
   },
+  {
+    id: "prj_northwind",
+    name: "northwind-customer-portal-platform",
+    path: "/home/example/work/clients/northwind/northwind-customer-portal-platform",
+    branch: "feature/long-running-migration-to-event-sourcing",
+    providersAvailable: ["opencode", "claude"],
+  },
+  {
+    id: "prj_kit",
+    name: "kit",
+    path: "/home/example/projects/kit",
+    branch: "main",
+    providersAvailable: ["claude"],
+  },
 ];
 
 interface MockState {
@@ -372,6 +386,24 @@ function buildState(scenario: Scenario): MockState {
       makeSession("opencode", "prj_beacon", "ses_beacon_ui", "Polish the onboarding empty state", "idle", 42),
       makeSession("claude", "prj_beacon", "ses_beacon_api", "Add cursor pagination to the audit log", "completed", 500),
       makeSession("opencode", "prj_cedar", "ses_cedar_release", "Prepare the 0.4 release notes", "failed", 90),
+      makeSession(
+        "claude",
+        "prj_northwind",
+        "ses_northwind_export",
+        "Investigate why the nightly export job occasionally produces duplicate rows for customers in multiple regions",
+        "waiting",
+        8,
+        "opus",
+      ),
+      makeSession(
+        "opencode",
+        "prj_northwind",
+        "ses_northwind_sdk",
+        "Upgrade the payments SDK",
+        "idle",
+        26 * 60,
+        "example-provider/comet-7",
+      ),
     );
   }
   if (scenario === "many-sessions") {
@@ -493,6 +525,115 @@ function buildState(scenario: Scenario): MockState {
       "Added a calm empty state with a single primary action.",
       "msg_ui_a1",
       58,
+    ),
+  ]);
+  messages.set("ses_beacon_api", [
+    textMessage(
+      "ses_beacon_api",
+      "user",
+      "Add cursor pagination to the audit log endpoint. Keep the old offset parameter working for one release.",
+      "msg_api_u1",
+      520,
+    ),
+    textMessage("ses_beacon_api", "assistant", "I'll read the current handler and its tests first.", "msg_api_a1", 519),
+    toolMessage(
+      "ses_beacon_api",
+      {
+        id: "tool_api_read",
+        name: "read",
+        status: "completed",
+        input: { file_path: "src/routes/audit-log.ts" },
+        output: { type: "text", text: "export async function listAuditLog(req) { /* offset */ }" },
+        startedAt: new Date(Date.now() - 519 * 60000).toISOString(),
+      },
+      "completed",
+      519,
+    ),
+    toolMessage(
+      "ses_beacon_api",
+      {
+        id: "tool_api_grep",
+        name: "grep",
+        status: "completed",
+        input: { pattern: "offset", path: "src" },
+        startedAt: new Date(Date.now() - 518 * 60000).toISOString(),
+      },
+      "completed",
+      518,
+    ),
+    toolMessage(
+      "ses_beacon_api",
+      {
+        id: "tool_api_edit",
+        name: "edit",
+        status: "completed",
+        input: { file_path: "src/routes/audit-log.ts" },
+        startedAt: new Date(Date.now() - 514 * 60000).toISOString(),
+      },
+      "completed",
+      514,
+    ),
+    toolMessage(
+      "ses_beacon_api",
+      {
+        id: "tool_api_test",
+        name: "bash",
+        status: "completed",
+        input: { command: "npm test -- audit-log" },
+        output: { type: "text", text: "Tests: 14 passed, 14 total" },
+        startedAt: new Date(Date.now() - 512 * 60000).toISOString(),
+      },
+      "completed",
+      512,
+    ),
+    {
+      ...textMessage(
+        "ses_beacon_api",
+        "assistant",
+        [
+          "Cursor pagination is in place and the offset parameter still works.",
+          "",
+          "## What changed",
+          "",
+          "- `GET /audit-log` accepts `cursor` and `limit` and returns `nextCursor`.",
+          "- Cursors are opaque: a base64url encoding of `(createdAt, id)`, so rows with the same timestamp never repeat or vanish between pages.",
+          "- `offset` still works but logs a deprecation warning. It goes away in 0.6.",
+          "",
+          "## Example",
+          "",
+          "```ts",
+          "const page = await client.auditLog.list({ limit: 50 });",
+          "for (const entry of page.items) render(entry);",
+          "if (page.nextCursor) await client.auditLog.list({ cursor: page.nextCursor });",
+          "```",
+          "",
+          "## Follow-ups",
+          "",
+          "1. Update the admin UI to use `nextCursor` instead of page numbers.",
+          "2. Add an index on `(created_at, id)`; the query plan still scans on large tenants.",
+          "",
+          "All 14 audit-log tests pass.",
+        ].join("\n"),
+        "msg_api_a2",
+        510,
+      ),
+      createdAt: new Date(Date.now() - 519 * 60000).toISOString(),
+    },
+  ]);
+  messages.set("ses_northwind_export", [
+    textMessage(
+      "ses_northwind_export",
+      "user",
+      "The nightly export sometimes writes the same customer twice when they have accounts in two regions. Find out why.",
+      "msg_nw_u1",
+      20,
+    ),
+    textMessage(
+      "ses_northwind_export",
+      "assistant",
+      "The export joins accounts before de-duplicating customers, so a customer with two regional accounts yields two rows. I'd like to run the export against the fixture database to confirm.",
+      "msg_nw_a1",
+      9,
     ),
   ]);
   messages.set("ses_cedar_release", [

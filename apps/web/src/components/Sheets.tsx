@@ -1,13 +1,47 @@
 import { Check, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import type { AgentDiff, AgentMode, AgentModel } from "@homebase/protocol";
 
-import { resolveThinkingLevel, validThinkingLevels } from "../lib/viewmodel.js";
+import { levelLabel, resolveThinkingLevel, validThinkingLevels } from "../lib/viewmodel.js";
 import { Markdown } from "./Markdown.js";
-import { Button, Sheet, Spinner } from "./ui.js";
+import { Button, Segmented, Sheet, Spinner } from "./ui.js";
 
 const DISPLAY_LIMIT = 80;
+
+/** One selectable row in a sheet's grouped list. */
+function ChoiceRow({
+  active,
+  onClick,
+  title,
+  meta,
+  description,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: ReactNode;
+  meta?: ReactNode;
+  description?: ReactNode;
+}) {
+  return (
+    <li className="hairline-top first:shadow-none">
+      <button
+        type="button"
+        role="radio"
+        aria-checked={active}
+        onClick={onClick}
+        className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2.5 text-left transition-colors active:bg-surface-2"
+      >
+        <span className="min-w-0 flex-1">
+          <span className={`block truncate text-row font-medium ${active ? "text-accent" : "text-text"}`}>{title}</span>
+          {meta ? <span className="readout mt-0.5 block truncate text-caption text-muted">{meta}</span> : null}
+          {description ? <span className="mt-0.5 block text-callout text-muted">{description}</span> : null}
+        </span>
+        {active ? <Check size={20} strokeWidth={2.5} className="shrink-0 text-accent" aria-hidden /> : null}
+      </button>
+    </li>
+  );
+}
 
 export function ModelSheet({
   open,
@@ -57,6 +91,7 @@ export function ModelSheet({
       footer={
         <Button
           variant="primary"
+          size="lg"
           className="w-full"
           loading={busy}
           disabled={!selectedId}
@@ -66,10 +101,10 @@ export function ModelSheet({
         </Button>
       }
     >
-      <div className="relative mb-3">
+      <div className="relative mb-4">
         <Search
-          size={15}
-          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint"
+          size={17}
+          className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted"
           aria-hidden
         />
         <input
@@ -78,88 +113,55 @@ export function ModelSheet({
           placeholder="Search models"
           aria-label="Search models"
           data-autofocus
-          className="min-h-11 w-full rounded-[12px] border border-border bg-surface pl-9 pr-3 text-[15px] text-text placeholder:text-faint focus:border-accent focus:outline-none"
+          className="min-h-12 w-full rounded-[var(--radius-md)] bg-fill pl-10 pr-3 text-body text-text placeholder:text-muted focus:outline-2 focus:outline-accent"
         />
       </div>
+
+      {levels.length > 0 ? (
+        <div className="mb-5">
+          <p className="eyebrow mb-2 px-1">Thinking level</p>
+          <Segmented
+            ariaLabel="Thinking level"
+            options={levels.map((level) => ({ id: level, label: levelLabel(selectedModel, level) }))}
+            value={effectiveThinking}
+            onChange={(level) => setThinking(level)}
+          />
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="flex justify-center py-8">
           <Spinner label="Loading models" />
         </div>
       ) : error ? (
-        <p className="py-6 text-center text-[13px] text-bad">{error}</p>
+        <p className="py-6 text-center text-callout text-bad">{error}</p>
       ) : (
         <>
-          <ul className="flex flex-col gap-1">
-            {visible.map((model) => {
-              const active = model.id === selectedId;
-              return (
-                <li key={model.id}>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    onClick={() => {
-                      setSelectedId(model.id);
-                      setThinking(resolveThinkingLevel(model, null));
-                    }}
-                    className={`flex min-h-[52px] w-full items-center gap-3 rounded-[12px] border px-3 py-2 text-left transition-colors ${
-                      active ? "border-accent bg-accent-soft" : "border-border bg-surface"
-                    }`}
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span
-                        className={`block truncate text-[14px] font-medium ${active ? "text-accent" : "text-text"}`}
-                      >
-                        {model.name}
-                      </span>
-                      <span className="block truncate font-mono text-[11px] text-faint">{model.id}</span>
-                      {model.description ? (
-                        <span className="mt-0.5 block truncate text-[12px] text-muted">{model.description}</span>
-                      ) : null}
-                    </span>
-                    {active ? <Check size={16} className="shrink-0 text-accent" aria-hidden /> : null}
-                  </button>
-                </li>
-              );
-            })}
+          <ul role="radiogroup" aria-label="Models" className="surface overflow-hidden">
+            {visible.map((model) => (
+              <ChoiceRow
+                key={model.id}
+                active={model.id === selectedId}
+                onClick={() => {
+                  setSelectedId(model.id);
+                  setThinking(resolveThinkingLevel(model, null));
+                }}
+                title={model.name}
+                meta={model.id}
+                description={model.description}
+              />
+            ))}
           </ul>
           {filtered.length > visible.length ? (
-            <p className="mt-2 text-center text-[12px] text-faint">
+            <p className="mt-3 text-center text-caption text-muted">
               Showing {visible.length} of {filtered.length} models — keep typing to narrow the list.
             </p>
           ) : null}
           {filtered.length === 0 ? (
-            <p className="py-6 text-center text-[13px] text-muted">No models match “{search}”.</p>
+            <p className="py-6 text-center text-callout text-muted">No models match “{search}”.</p>
           ) : null}
         </>
       )}
-
-      {levels.length > 0 ? (
-        <div className="mt-4">
-          <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-faint">Thinking level</h3>
-          <div role="radiogroup" aria-label="Thinking level" className="flex flex-wrap gap-2">
-            {levels.map((level) => {
-              const levelMeta = selectedModel?.thinkingLevels?.find((entry) => entry.id === level);
-              const active = effectiveThinking === level;
-              return (
-                <button
-                  key={level}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => setThinking(level)}
-                  className={`min-h-11 rounded-full border px-3.5 text-[13px] font-medium ${
-                    active ? "border-accent bg-accent-soft text-accent" : "border-border bg-surface text-muted"
-                  }`}
-                >
-                  {levelMeta?.name ?? level}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
     </Sheet>
   );
 }
@@ -190,6 +192,7 @@ export function ModeSheet({
       footer={
         <Button
           variant="primary"
+          size="lg"
           className="w-full"
           loading={busy}
           disabled={!selected}
@@ -204,35 +207,49 @@ export function ModeSheet({
           <Spinner label="Loading modes" />
         </div>
       ) : (
-        <ul className="flex flex-col gap-1">
-          {modes.map((mode) => {
-            const active = mode.id === selected;
-            return (
-              <li key={mode.id}>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => setSelected(mode.id)}
-                  className={`flex min-h-[52px] w-full items-center gap-3 rounded-[12px] border px-3 py-2 text-left ${
-                    active ? "border-accent bg-accent-soft" : "border-border bg-surface"
-                  }`}
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className={`block text-[14px] font-medium ${active ? "text-accent" : "text-text"}`}>
-                      {mode.name}
-                    </span>
-                    {mode.description ? (
-                      <span className="mt-0.5 block text-[12px] text-muted">{mode.description}</span>
-                    ) : null}
-                  </span>
-                  {active ? <Check size={16} className="shrink-0 text-accent" aria-hidden /> : null}
-                </button>
-              </li>
-            );
-          })}
+        <ul role="radiogroup" aria-label="Modes" className="surface overflow-hidden">
+          {modes.map((mode) => (
+            <ChoiceRow
+              key={mode.id}
+              active={mode.id === selected}
+              onClick={() => setSelected(mode.id)}
+              title={mode.name}
+              description={mode.description}
+            />
+          ))}
         </ul>
       )}
+    </Sheet>
+  );
+}
+
+/** A short list where a tap chooses and closes (no confirm step). */
+export function OptionSheet({
+  title,
+  options,
+  value,
+  onClose,
+  onPick,
+}: {
+  title: string;
+  options: Array<{ id: string; label: string; description?: string | null }>;
+  value: string | null;
+  onClose: () => void;
+  onPick: (id: string) => void;
+}) {
+  return (
+    <Sheet open onClose={onClose} title={title}>
+      <ul role="radiogroup" aria-label={title} className="surface mb-2 overflow-hidden">
+        {options.map((option) => (
+          <ChoiceRow
+            key={option.id}
+            active={option.id === value}
+            onClick={() => onPick(option.id)}
+            title={option.label}
+            description={option.description}
+          />
+        ))}
+      </ul>
     </Sheet>
   );
 }
@@ -257,28 +274,28 @@ export function DiffSheet({
           <Spinner label="Loading diff" />
         </div>
       ) : error ? (
-        <p className="py-6 text-center text-[13px] text-bad">{error}</p>
+        <p className="py-6 text-center text-callout text-bad">{error}</p>
       ) : !diff || diff.files.length === 0 ? (
-        <p className="py-6 text-center text-[13px] text-muted">No file changes in this session yet.</p>
+        <p className="py-6 text-center text-callout text-muted">No file changes in this session yet.</p>
       ) : (
         <ul className="flex flex-col gap-3">
           {diff.files.map((file) => (
-            <li key={file.path} className="rounded-[var(--radius-md)] border border-border bg-surface">
-              <div className="flex items-center gap-2 px-3 py-2">
-                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-text">{file.path}</span>
-                <span className="shrink-0 text-[11px] text-faint">
+            <li key={file.path} className="surface overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-3">
+                <span className="readout min-w-0 flex-1 truncate text-callout text-text">{file.path}</span>
+                <span className="readout shrink-0 text-caption">
                   <span className="text-ok">+{file.additions ?? 0}</span>{" "}
                   <span className="text-bad">−{file.deletions ?? 0}</span>
                 </span>
               </div>
               {file.patch ? (
-                <div className="border-t border-border px-2 py-1">
+                <div className="hairline-top px-2 pb-2 pt-2">
                   <Markdown text={`\`\`\`diff\n${file.patch}\n\`\`\``} />
                 </div>
               ) : null}
             </li>
           ))}
-          {diff.truncated ? <p className="text-[12px] text-faint">The diff was truncated by the provider.</p> : null}
+          {diff.truncated ? <p className="text-caption text-muted">The diff was truncated by the provider.</p> : null}
         </ul>
       )}
     </Sheet>
@@ -310,17 +327,23 @@ export function ConfirmSheet({
       onClose={onClose}
       title={title}
       footer={
-        <div className="flex gap-2">
-          <Button className="flex-1" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant={destructive ? "danger" : "primary"} className="flex-1" loading={busy} onClick={onConfirm}>
+        <div className="flex flex-col gap-2">
+          <Button
+            variant={destructive ? "danger" : "primary"}
+            size="lg"
+            className="w-full"
+            loading={busy}
+            onClick={onConfirm}
+          >
             {confirmLabel}
+          </Button>
+          <Button variant="ghost" className="w-full" onClick={onClose}>
+            Cancel
           </Button>
         </div>
       }
     >
-      <p className="pb-2 text-[14px] text-muted">{detail}</p>
+      <p className="pb-2 text-body text-muted">{detail}</p>
     </Sheet>
   );
 }

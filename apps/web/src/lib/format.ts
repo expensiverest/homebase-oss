@@ -39,3 +39,13 @@ export function bytesLabel(bytes: number | null | undefined): string | null {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+/** "/home/me/projects/app" → "~/projects/app"; keeps the tail when it's still long. */
+export function shortenPath(path: string | null | undefined, maxSegments = 3): string {
+  if (!path) return "";
+  const home = path.replace(/^(\/home|\/Users)\/[^/]+/, "~").replace(/^[A-Za-z]:\\Users\\[^\\]+/, "~");
+  const separator = home.includes("\\") && !home.includes("/") ? "\\" : "/";
+  const segments = home.split(separator).filter((segment) => segment.length > 0);
+  if (segments.length <= maxSegments) return home;
+  return `…${separator}${segments.slice(-maxSegments + 1).join(separator)}`;
+}

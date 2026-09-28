@@ -1,4 +1,4 @@
-import { Check, ShieldQuestion, X } from "lucide-react";
+import { Check, MessageCircleQuestion, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
 
 import type { AgentApprovalOption, AgentApprovalRequest, AgentQuestionRequest } from "@homebase/protocol";
@@ -29,46 +29,46 @@ export function ApprovalCard({
   return (
     <section
       aria-label="Approval needed"
-      className="hb-rise rounded-[var(--radius-lg)] border border-border bg-surface p-3.5 halo"
+      className="hb-rise surface border-[color-mix(in_srgb,var(--warn)_30%,var(--border))] p-4"
     >
-      <header className="mb-1 flex items-center gap-2">
-        <ShieldQuestion size={15} className="shrink-0 text-warn" aria-hidden />
-        <h3 className="text-[13px] font-semibold text-text">{request.title}</h3>
-      </header>
+      <p className="eyebrow mb-2 flex items-center gap-1.5 text-warn">
+        <ShieldAlert size={14} className="shrink-0" aria-hidden />
+        Needs your approval
+      </p>
+      <h3 className="mb-2 break-words text-row font-semibold text-text">{request.title}</h3>
       {request.detail ? (
-        <pre className="mb-2.5 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-[10px] bg-surface-inset px-2.5 py-2 font-mono text-[12px] text-muted">
+        <pre className="mb-3.5 max-h-36 overflow-auto whitespace-pre-wrap break-words rounded-[12px] bg-fill px-3 py-2.5 font-mono text-caption text-text">
           {request.detail}
         </pre>
-      ) : null}
-      {!request.detail ? (
-        <p className="mb-2.5 text-[13px] text-muted">The agent is waiting for your decision.</p>
-      ) : null}
+      ) : (
+        <p className="mb-3.5 text-callout text-muted">The agent is waiting for your decision.</p>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {request.options.map((option) => (
           <Button
             key={option.id}
             variant={OPTION_STYLES[option.kind] ?? "secondary"}
-            size="sm"
+            className="flex-1 basis-[8rem]"
             disabled={busy}
             onClick={() => onResolve(option.id, note.trim().length > 0 ? note.trim() : null)}
           >
             {option.kind === "deny" ? (
-              <X size={14} aria-hidden />
+              <X size={16} aria-hidden />
             ) : option.kind === "allow_once" || option.kind === "allow_always" ? (
-              <Check size={14} aria-hidden />
+              <Check size={16} aria-hidden />
             ) : null}
             {option.label}
           </Button>
         ))}
       </div>
       {request.options.some((option) => option.description) ? (
-        <ul className="mt-2 flex flex-col gap-0.5">
+        <ul className="mt-3 flex flex-col gap-1">
           {request.options
             .filter((option) => option.description)
             .map((option) => (
-              <li key={option.id} className="text-[12px] text-faint">
-                <span className="font-medium text-muted">{option.label}:</span> {option.description}
+              <li key={option.id} className="text-caption text-muted">
+                <span className="font-medium text-text">{option.label}:</span> {option.description}
               </li>
             ))}
         </ul>
@@ -81,19 +81,19 @@ export function ApprovalCard({
           aria-label="Note to the agent"
           rows={2}
           maxLength={2000}
-          className="mt-2.5 w-full rounded-[12px] border border-border bg-surface px-3 py-2 text-[14px] text-text placeholder:text-faint focus:border-accent focus:outline-none"
+          className="mt-3 w-full rounded-[var(--radius-md)] bg-fill px-3.5 py-2.5 text-body text-text placeholder:text-muted focus:outline-2 focus:outline-accent"
           placeholder="Add an optional note…"
         />
       ) : (
         <button
           type="button"
           onClick={() => setNoteOpen(true)}
-          className="mt-2 min-h-11 text-[12px] font-medium text-muted hover:text-text"
+          className="-ml-1 mt-1.5 min-h-11 rounded-[10px] px-1 text-callout font-medium text-muted hover:text-text"
         >
           Add a note
         </button>
       )}
-      {error ? <p className="mt-2 text-[12px] text-bad">{error}</p> : null}
+      {error ? <p className="mt-2 text-callout text-bad">{error}</p> : null}
     </section>
   );
 }
@@ -179,24 +179,22 @@ export function QuestionCard({
   return (
     <section
       aria-label="Question from the agent"
-      className="hb-rise rounded-[var(--radius-lg)] border border-border bg-surface p-3.5 halo"
+      className="hb-rise surface border-[color-mix(in_srgb,var(--accent)_30%,var(--border))] p-4"
     >
-      <header className="mb-2 flex items-center gap-2">
-        <ShieldQuestion size={15} className="shrink-0 text-accent" aria-hidden />
-        <h3 className="text-[13px] font-semibold text-text">{request.title ?? "The agent has a question"}</h3>
-      </header>
-      <div className="flex flex-col gap-3">
+      <p className="eyebrow mb-3 flex items-center gap-1.5 text-accent">
+        <MessageCircleQuestion size={14} className="shrink-0" aria-hidden />
+        {request.title && request.title !== "Questions" ? request.title : "The agent has a question"}
+      </p>
+      <div className="flex flex-col gap-5">
         {request.questions.map((question) => {
           const state = answers[question.id] ?? initialState();
           return (
             <fieldset key={question.id} className="min-w-0">
-              <legend className="mb-1.5 flex w-full flex-col gap-0.5">
+              <legend className="mb-2.5 flex w-full flex-col gap-1">
                 {question.header ? (
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-faint">
-                    {question.header}
-                  </span>
+                  <span className="text-caption font-semibold text-muted">{question.header}</span>
                 ) : null}
-                <span className="text-[14px] text-text">{question.question}</span>
+                <span className="text-row font-medium text-text">{question.question}</span>
               </legend>
               {question.kind === "single_select" || question.kind === "multi_select" ? (
                 <div className="flex flex-wrap gap-2">
@@ -218,12 +216,13 @@ export function QuestionCard({
                                   : [...state.selected, option.id],
                           })
                         }
-                        className={`min-h-11 rounded-[12px] border px-3.5 text-[14px] transition-colors ${
+                        className={`inline-flex min-h-11 items-center gap-1.5 rounded-[var(--radius-md)] border px-4 text-callout font-medium transition-colors ${
                           active
-                            ? "border-accent bg-accent-soft text-accent"
-                            : "border-border bg-surface text-muted hover:text-text"
+                            ? "border-[color-mix(in_srgb,var(--accent)_50%,transparent)] bg-accent-soft text-accent"
+                            : "border-transparent bg-fill text-text hover:bg-fill-strong"
                         }`}
                       >
+                        {active ? <Check size={15} strokeWidth={2.5} aria-hidden /> : null}
                         {option.label}
                       </button>
                     );
@@ -254,7 +253,7 @@ export function QuestionCard({
                   onChange={(event) => update(question.id, { text: event.target.value })}
                   rows={2}
                   aria-label={question.header ?? question.question}
-                  className="mt-2 w-full rounded-[12px] border border-border bg-surface px-3 py-2 text-[14px] text-text placeholder:text-faint focus:border-accent focus:outline-none"
+                  className="mt-2.5 w-full rounded-[var(--radius-md)] bg-fill px-3.5 py-2.5 text-body text-text placeholder:text-muted focus:outline-2 focus:outline-accent"
                   placeholder={question.kind === "text" ? "Type your answer…" : "Or type your own answer…"}
                 />
               ) : null}
@@ -262,10 +261,10 @@ export function QuestionCard({
           );
         })}
       </div>
-      {validation ? <p className="mt-2 text-[12px] text-warn">{validation}</p> : null}
-      {error ? <p className="mt-2 text-[12px] text-bad">{error}</p> : null}
-      <div className="mt-3">
-        <Button variant="primary" size="sm" loading={busy} onClick={submit}>
+      {validation ? <p className="mt-3 text-callout text-warn">{validation}</p> : null}
+      {error ? <p className="mt-3 text-callout text-bad">{error}</p> : null}
+      <div className="mt-4">
+        <Button variant="primary" className="w-full" loading={busy} onClick={submit}>
           Submit answer
         </Button>
       </div>

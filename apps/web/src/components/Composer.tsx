@@ -1,5 +1,5 @@
-import { ArrowUp, ImagePlus, Paperclip, SendHorizontal, Square, Zap } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowUp, ImagePlus, ListEnd, Paperclip, Square, Zap } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import type { AgentAttachmentRef, AgentModel, AgentProvider, AgentSession } from "@homebase/protocol";
 
@@ -7,9 +7,12 @@ import { api } from "../lib/api.js";
 import { readDraft, writeDraft } from "../lib/prefs.js";
 import { attachmentRules } from "../lib/viewmodel.js";
 import { PendingAttachmentChip } from "./attachments.js";
-import { Button, IconButton } from "./ui.js";
+import { IconButton } from "./ui.js";
 
 export type ComposerAction = "send" | "queue" | "steer";
+
+/** The textarea grows with the draft up to about a third of the screen. */
+const MAX_HEIGHT_FRACTION = 0.35;
 
 interface ComposerProps {
   session: AgentSession;
@@ -18,10 +21,27 @@ interface ComposerProps {
   running: boolean;
   onSend: (text: string, attachments: AgentAttachmentRef[], action: ComposerAction) => Promise<void> | void;
   onInterrupt: () => void;
+  /** Model / mode / effort controls, shown above the input. */
+  controls?: ReactNode;
   disabled?: boolean;
 }
 
-export function Composer({ session, provider, model, running, onSend, onInterrupt, disabled = false }: ComposerProps) {
+/**
+ * The composer is built around the text: the input owns the full width, and
+ * every action lives on a toolbar beneath it, so nothing can squeeze the
+ * draft. Idle, the only action is Send. While a run is going, Queue is the
+ * primary follow-up, Steer is secondary, and Stop sits apart on the left.
+ */
+export function Composer({
+  session,
+  provider,
+  model,
+  running,
+  onSend,
+  onInterrupt,
+  controls,
+  disabled = false,
+}: ComposerProps) {
   const [draft, setDraft] = useState(() => readDraft(session.id));
   const [attachments, setAttachments] = useState<AgentAttachmentRef[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -47,11 +67,12 @@ export function Composer({ session, provider, model, running, onSend, onInterrup
     writeDraft(session.id, draft);
   }, [session.id, draft]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = textareaRef.current;
     if (!node) return;
     node.style.height = "auto";
-    node.style.height = `${Math.min(node.scrollHeight, 140)}px`;
+    const max = Math.round(window.innerHeight * MAX_HEIGHT_FRACTION);
+    node.style.height = `${Math.min(node.scrollHeight, max)}px`;
   }, [draft]);
 
   const pickFiles = () => {
@@ -100,7 +121,8 @@ export function Composer({ session, provider, model, running, onSend, onInterrup
   };
 
   const requestAction: ComposerAction = !running ? "send" : canQueue ? "queue" : "send";
-  const primaryDisabled = disabled || busy || uploading || (running && !canQueue);
+  const empty = draft.trim().length === 0 && attachments.length === 0;
+  const primaryDisabled = disabled || busy || uploading || (running && !canQueue) || empty;
 
   const submit = async (action: ComposerAction) => {
     const text = draft.trim();
@@ -123,75 +145,123 @@ export function Composer({ session, provider, model, running, onSend, onInterrup
     }
   };
 
-  return (
-    <div className="hairline-top bg-bg/95 px-3 pt-2 pb-safe-composer backdrop-blur">
-      {attachments.length > 0 || uploading ? (
-        <div className="mb-2 flex flex-wrap gap-2">
-          {attachments.map((attachment) => (
-            <PendingAttachmentChip
-              key={attachment.id}
-              attachment={attachment}
-              onRemove={() => setAttachments((current) => current.filter((entry) => entry.id !== attachment.id))}
-            />
-          ))}
-          {uploading ? (
-            <span className="inline-flex items-center gap-2 rounded-[12px] border border-border bg-surface px-3 py-2 text-[12px] text-muted">
-              Uploading…
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      {error ? <p className="mb-1.5 px-1 text-[12px] text-bad">{error}</p> : null}
+  const placeholder = running
+    ? canQueue
+      ? "Queue a follow-up…"
+      : "The agent is working…"
+    : `Message ${provider?.name ?? "your agent"}…`;
 
-      <div className="flex items-end gap-1.5">
-        {canAttach ? (
-          <IconButton label="Add attachment" onClick={pickFiles} disabled={disabled || uploading}>
-            {rules.images && !rules.files ? <ImagePlus size={19} aria-hidden /> : <Paperclip size={19} aria-hidden />}
-          </IconButton>
+  return (
+    <div className="relative z-10 border-t border-[var(--chrome-border)] bg-chrome px-safe pt-2.5 pb-safe-composer backdrop-blur-xl backdrop-saturate-150">
+      <div className="mx-auto flex max-w-[680px] flex-col gap-2">
+        {controls ? <div className="flex min-w-0 items-center gap-2">{controls}</div> : null}
+
+        <div className="surface rounded-[24px] transition-[border-color] focus-within:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]">
+          {attachments.length > 0 || uploading ? (
+            <div className="flex flex-wrap gap-2 px-2.5 pt-2.5" aria-label="Attached files">
+              {attachments.map((attachment) => (
+                <PendingAttachmentChip
+                  key={attachment.id}
+                  attachment={attachment}
+                  onRemove={() => setAttachments((current) => current.filter((entry) => entry.id !== attachment.id))}
+                />
+              ))}
+              {uploading ? (
+                <span className="inline-flex min-h-11 items-center rounded-[14px] bg-fill px-3 text-caption text-muted">
+                  Uploading…
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !coarsePointer) {
+                event.preventDefault();
+                void submit(requestAction);
+              }
+            }}
+            rows={1}
+            aria-label="Message"
+            enterKeyHint="enter"
+            placeholder={placeholder}
+            className="block min-h-[3rem] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-body text-text outline-none placeholder:text-muted focus-visible:outline-none"
+          />
+
+          {/* Leading tools and trailing actions; the actions wrap below as a group when text is very large. */}
+          <div className="flex flex-wrap items-center gap-1.5 px-1.5 pb-1.5">
+            <div className="flex items-center gap-1.5">
+              {canAttach ? (
+                <IconButton label="Add attachment" onClick={pickFiles} disabled={disabled || uploading}>
+                  {rules.images && !rules.files ? (
+                    <ImagePlus size={20} aria-hidden />
+                  ) : (
+                    <Paperclip size={20} aria-hidden />
+                  )}
+                </IconButton>
+              ) : null}
+              {running && canInterrupt ? (
+                <button
+                  type="button"
+                  aria-label="Stop the run"
+                  title="Stop the run"
+                  onClick={onInterrupt}
+                  disabled={disabled}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-bad-soft text-bad transition-transform active:scale-95 disabled:opacity-40"
+                >
+                  <Square size={13} fill="currentColor" strokeWidth={0} aria-hidden />
+                </button>
+              ) : null}
+            </div>
+            <div className="ml-auto flex items-center gap-1.5">
+              {running && canSteer ? (
+                <button
+                  type="button"
+                  onClick={() => void submit("steer")}
+                  disabled={disabled || busy || empty}
+                  aria-label="Steer the agent now"
+                  title="Send into the current run"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-fill px-3.5 text-callout font-semibold text-text transition-[transform,opacity] active:scale-95 disabled:opacity-40"
+                >
+                  <Zap size={16} strokeWidth={2.25} className="text-accent" aria-hidden />
+                  Steer
+                </button>
+              ) : null}
+              {running ? (
+                <button
+                  type="button"
+                  onClick={() => void submit(requestAction)}
+                  disabled={primaryDisabled}
+                  aria-label="Queue message"
+                  title="Send after this run"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-callout font-semibold text-on-accent shadow-[var(--shadow-accent)] transition-[transform,opacity] active:scale-95 disabled:opacity-40 disabled:shadow-none"
+                >
+                  <ListEnd size={17} strokeWidth={2.25} aria-hidden />
+                  Queue
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void submit(requestAction)}
+                  disabled={primaryDisabled}
+                  aria-label="Send message"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent shadow-[var(--shadow-accent)] transition-[transform,opacity] active:scale-95 disabled:opacity-35 disabled:shadow-none"
+                >
+                  <ArrowUp size={20} strokeWidth={2.5} aria-hidden />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {error ? (
+          <p role="alert" className="px-2 text-caption text-bad">
+            {error}
+          </p>
         ) : null}
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !coarsePointer) {
-              event.preventDefault();
-              void submit(requestAction);
-            }
-          }}
-          rows={1}
-          aria-label="Message"
-          placeholder={running ? (canQueue ? "Queue a follow-up…" : "The agent is working…") : "Message your agent…"}
-          className="min-h-11 max-h-[140px] min-w-0 flex-1 resize-none rounded-[16px] border border-border bg-surface px-3 py-2.5 text-[15px] text-text placeholder:text-faint focus:border-accent focus:outline-none"
-        />
-        {running && canInterrupt ? (
-          <IconButton label="Stop the run" onClick={onInterrupt} className="bg-bad-soft text-bad" disabled={disabled}>
-            <Square size={16} aria-hidden />
-          </IconButton>
-        ) : null}
-        {running && canSteer ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void submit("steer")}
-            disabled={disabled || busy}
-            aria-label="Steer the agent now"
-            className="mb-0.5"
-          >
-            <Zap size={14} aria-hidden />
-            Steer
-          </Button>
-        ) : null}
-        <button
-          type="button"
-          onClick={() => void submit(requestAction)}
-          disabled={primaryDisabled || busy || (draft.trim().length === 0 && attachments.length === 0)}
-          aria-label={running ? "Queue message" : "Send message"}
-          className="mb-0.5 inline-flex h-11 items-center gap-1.5 rounded-[14px] bg-accent px-3.5 text-[14px] font-medium text-on-accent transition-colors disabled:opacity-40"
-        >
-          {running ? <ArrowUp size={17} aria-hidden /> : <SendHorizontal size={17} aria-hidden />}
-          <span>{running ? "Queue" : "Send"}</span>
-        </button>
       </div>
       <input
         ref={fileInputRef}
