@@ -42,7 +42,7 @@ function ProjectRow({ project, onOpen }: { project: AgentProject; onOpen: () => 
       type="button"
       onClick={onOpen}
       aria-label={`Open project ${project.name}`}
-      className="hairline-top flex min-h-[76px] w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors first:shadow-none active:bg-surface-2"
+      className="hairline-top flex min-h-[80px] w-full items-center gap-4 px-4 py-4 text-left transition-colors first:shadow-none active:bg-surface-2"
     >
       <ProjectMark name={project.name} working={summary.working > 0} />
       <span className="min-w-0 flex-1">
@@ -56,7 +56,7 @@ function ProjectRow({ project, onOpen }: { project: AgentProject; onOpen: () => 
             <span className="readout shrink-0 text-caption text-muted">{relativeTime(latest)}</span>
           ) : null}
         </span>
-        <span className="mt-1 flex min-w-0 items-center gap-2 text-callout text-muted">
+        <span className="mt-1.5 flex min-w-0 items-center gap-2 text-callout text-muted">
           {project.branch ? <BranchChip branch={project.branch} className="max-w-[55%] shrink" /> : null}
           <span className="min-w-0 shrink-0 truncate">{activity}</span>
         </span>
@@ -107,7 +107,7 @@ export function ProjectsScreen() {
           {projects.isLoading ? (
             <div className="surface overflow-hidden">
               {[0, 1, 2].map((index) => (
-                <div key={index} className="hairline-top flex min-h-[76px] items-center gap-3.5 px-4 first:shadow-none">
+                <div key={index} className="hairline-top flex min-h-[80px] items-center gap-4 px-4 first:shadow-none">
                   <Skeleton className="h-11 w-11 rounded-[30%]" />
                   <div className="flex flex-1 flex-col gap-2">
                     <Skeleton className="h-4 w-32" />

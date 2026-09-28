@@ -7,6 +7,7 @@ import { api } from "../lib/api.js";
 import { readDraft, writeDraft } from "../lib/prefs.js";
 import { attachmentRules } from "../lib/viewmodel.js";
 import { PendingAttachmentChip } from "./attachments.js";
+import { PromptBar } from "./beautiful/PromptBar.js";
 import { IconButton } from "./ui.js";
 
 export type ComposerAction = "send" | "queue" | "steer";
@@ -153,12 +154,12 @@ export function Composer({
 
   return (
     <div className="relative z-10 border-t border-[var(--chrome-border)] bg-chrome px-safe pt-2.5 pb-safe-composer backdrop-blur-xl backdrop-saturate-150">
-      <div className="mx-auto flex max-w-[680px] flex-col gap-2">
-        {controls ? <div className="flex min-w-0 items-center gap-2">{controls}</div> : null}
-
-        <div className="surface rounded-[24px] transition-[border-color] focus-within:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))]">
-          {attachments.length > 0 || uploading ? (
-            <div className="flex flex-wrap gap-2 px-2.5 pt-2.5" aria-label="Attached files">
+      <PromptBar
+        busy={running}
+        controls={controls}
+        attachments={
+          attachments.length > 0 || uploading ? (
+            <>
               {attachments.map((attachment) => (
                 <PendingAttachmentChip
                   key={attachment.id}
@@ -171,98 +172,96 @@ export function Composer({
                   Uploading…
                 </span>
               ) : null}
-            </div>
-          ) : null}
-
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey && !coarsePointer) {
-                event.preventDefault();
-                void submit(requestAction);
-              }
-            }}
-            rows={1}
-            aria-label="Message"
-            enterKeyHint="enter"
-            placeholder={placeholder}
-            className="block min-h-[3rem] w-full resize-none bg-transparent px-4 pt-3 pb-1 text-body text-text outline-none placeholder:text-muted focus-visible:outline-none"
-          />
-
-          {/* Leading tools and trailing actions; the actions wrap below as a group when text is very large. */}
-          <div className="flex flex-wrap items-center gap-1.5 px-1.5 pb-1.5">
-            <div className="flex items-center gap-1.5">
-              {canAttach ? (
-                <IconButton label="Add attachment" onClick={pickFiles} disabled={disabled || uploading}>
-                  {rules.images && !rules.files ? (
-                    <ImagePlus size={20} aria-hidden />
-                  ) : (
-                    <Paperclip size={20} aria-hidden />
-                  )}
-                </IconButton>
-              ) : null}
-              {running && canInterrupt ? (
-                <button
-                  type="button"
-                  aria-label="Stop the run"
-                  title="Stop the run"
-                  onClick={onInterrupt}
-                  disabled={disabled}
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-bad-soft text-bad transition-transform active:scale-95 disabled:opacity-40"
-                >
-                  <Square size={13} fill="currentColor" strokeWidth={0} aria-hidden />
-                </button>
-              ) : null}
-            </div>
-            <div className="ml-auto flex items-center gap-1.5">
-              {running && canSteer ? (
-                <button
-                  type="button"
-                  onClick={() => void submit("steer")}
-                  disabled={disabled || busy || empty}
-                  aria-label="Steer the agent now"
-                  title="Send into the current run"
-                  className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-fill px-3.5 text-callout font-semibold text-text transition-[transform,opacity] active:scale-95 disabled:opacity-40"
-                >
-                  <Zap size={16} strokeWidth={2.25} className="text-accent" aria-hidden />
-                  Steer
-                </button>
-              ) : null}
-              {running ? (
-                <button
-                  type="button"
-                  onClick={() => void submit(requestAction)}
-                  disabled={primaryDisabled}
-                  aria-label="Queue message"
-                  title="Send after this run"
-                  className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-callout font-semibold text-on-accent shadow-[var(--shadow-accent)] transition-[transform,opacity] active:scale-95 disabled:opacity-40 disabled:shadow-none"
-                >
-                  <ListEnd size={17} strokeWidth={2.25} aria-hidden />
-                  Queue
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => void submit(requestAction)}
-                  disabled={primaryDisabled}
-                  aria-label="Send message"
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent shadow-[var(--shadow-accent)] transition-[transform,opacity] active:scale-95 disabled:opacity-35 disabled:shadow-none"
-                >
-                  <ArrowUp size={20} strokeWidth={2.5} aria-hidden />
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {error ? (
-          <p role="alert" className="px-2 text-caption text-bad">
-            {error}
-          </p>
-        ) : null}
-      </div>
+            </>
+          ) : null
+        }
+        textareaRef={textareaRef}
+        textarea={{
+          value: draft,
+          onChange: (event) => setDraft(event.target.value),
+          onKeyDown: (event) => {
+            if (event.key === "Enter" && !event.shiftKey && !coarsePointer) {
+              event.preventDefault();
+              void submit(requestAction);
+            }
+          },
+          "aria-label": "Message",
+          enterKeyHint: "enter",
+          placeholder,
+        }}
+        leading={
+          <>
+            {canAttach ? (
+              <IconButton label="Add attachment" onClick={pickFiles} disabled={disabled || uploading}>
+                {rules.images && !rules.files ? (
+                  <ImagePlus size={20} aria-hidden />
+                ) : (
+                  <Paperclip size={20} aria-hidden />
+                )}
+              </IconButton>
+            ) : null}
+            {running && canInterrupt ? (
+              <button
+                type="button"
+                aria-label="Stop the run"
+                title="Stop the run"
+                onClick={onInterrupt}
+                disabled={disabled}
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-bad-soft text-bad transition-transform active:scale-95 disabled:opacity-40"
+              >
+                <Square size={13} fill="currentColor" strokeWidth={0} aria-hidden />
+              </button>
+            ) : null}
+          </>
+        }
+        trailing={
+          <>
+            {running && canSteer ? (
+              <button
+                type="button"
+                onClick={() => void submit("steer")}
+                disabled={disabled || busy || empty}
+                aria-label="Steer the agent now"
+                title="Send into the current run"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-fill px-3.5 text-callout font-semibold text-text transition-[transform,opacity] active:scale-95 disabled:opacity-40"
+              >
+                <Zap size={16} strokeWidth={2.25} className="text-accent" aria-hidden />
+                Steer
+              </button>
+            ) : null}
+            {running ? (
+              <button
+                type="button"
+                onClick={() => void submit(requestAction)}
+                disabled={primaryDisabled}
+                aria-label="Queue message"
+                title="Send after this run"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-callout font-semibold text-on-accent shadow-[var(--shadow-accent)] transition-[transform,opacity] active:scale-95 disabled:opacity-40 disabled:shadow-none"
+              >
+                <ListEnd size={17} strokeWidth={2.25} aria-hidden />
+                Queue
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void submit(requestAction)}
+                disabled={primaryDisabled}
+                aria-label="Send message"
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent shadow-[var(--shadow-accent)] transition-[transform,opacity] active:scale-95 disabled:scale-90 disabled:opacity-35 disabled:shadow-none"
+              >
+                <ArrowUp size={20} strokeWidth={2.5} aria-hidden />
+              </button>
+            )}
+          </>
+        }
+        message={
+          error ? (
+            <p role="alert" className="px-2 text-caption text-bad">
+              {error}
+            </p>
+          ) : null
+        }
+      />
       <input
         ref={fileInputRef}
         type="file"

@@ -25,16 +25,30 @@ export function projectInitial(name: string): string {
   );
 }
 
+/**
+ * Mark dimension that follows the text size (rem) but is capped, so a larger
+ * Dynamic Type or browser text setting grows the mark a little (up to 15%)
+ * without letting it dominate the row. `base` is the size at a 16px root.
+ */
+export function markDimension(base: number): string {
+  return `clamp(${base}px, ${base / 16}rem, ${Math.round(base * 1.15)}px)`;
+}
+
 /** Serif monogram tile; an iris ring radiates from it while a session works. */
 export function ProjectMark({ name, working = false, size = 44 }: { name: string; working?: boolean; size?: number }) {
   const hue = MARK_HUES[hashName(name) % MARK_HUES.length] ?? MARK_HUES[0];
   return (
-    <span aria-hidden className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
+    <span
+      aria-hidden
+      data-mark="project"
+      className="relative inline-flex shrink-0"
+      style={{ width: markDimension(size), height: markDimension(size) }}
+    >
       {working ? <span className="hb-ping absolute inset-0 rounded-[30%] border border-accent" /> : null}
       <span
         className="relative flex h-full w-full items-center justify-center rounded-[30%] border font-serif italic leading-none"
         style={{
-          fontSize: size * 0.56,
+          fontSize: `calc(${markDimension(size)} * 0.56)`,
           background: `color-mix(in srgb, ${hue} 16%, var(--surface-2))`,
           borderColor: working
             ? "color-mix(in srgb, var(--accent) 55%, transparent)"
@@ -79,13 +93,14 @@ export function ProviderMark({
   return (
     <span
       className="relative inline-flex shrink-0"
-      style={{ width: size, height: size }}
+      data-mark="provider"
+      style={{ width: markDimension(size), height: markDimension(size) }}
       title={title ?? provider?.name ?? providerId}
       aria-hidden
     >
       {working ? <span className="hb-ping absolute inset-0 rounded-full border border-accent" /> : null}
       <span
-        className={`relative flex h-full w-full items-center justify-center rounded-full ${
+        className={`relative flex h-full w-full items-center justify-center rounded-full [&>svg]:size-[46%] ${
           working ? "bg-accent-soft text-accent" : "bg-fill text-muted"
         }`}
       >

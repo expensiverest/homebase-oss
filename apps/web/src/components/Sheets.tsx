@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import type { AgentDiff, AgentMode, AgentModel } from "@homebase/protocol";
 
 import { levelLabel, resolveThinkingLevel, validThinkingLevels } from "../lib/viewmodel.js";
-import { Markdown } from "./Markdown.js";
+import { CodeBlock } from "./beautiful/CodeBlock.js";
 import { Button, Segmented, Sheet, Spinner } from "./ui.js";
 
 const DISPLAY_LIMIT = 80;
@@ -290,7 +290,8 @@ export function DiffSheet({
               </div>
               {file.patch ? (
                 <div className="hairline-top px-2 pb-2 pt-2">
-                  <Markdown text={`\`\`\`diff\n${file.patch}\n\`\`\``} />
+                  {/* A real normalized diff from the provider: the only place Code Block uses diff mode. */}
+                  <CodeBlock code={file.patch} diff title="patch" compact />
                 </div>
               ) : null}
             </li>

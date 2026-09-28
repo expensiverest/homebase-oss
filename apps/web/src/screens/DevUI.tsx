@@ -14,7 +14,15 @@ import {
 import { ApprovalCard, QuestionCard } from "../components/ActionCards.js";
 import { FileChip } from "../components/attachments.js";
 import { ThemeToggle } from "../components/chrome.js";
-import { Timeline, ToolRow, WorkingRow } from "../components/ChatTimeline.js";
+import { PendingAttachmentChip } from "../components/attachments.js";
+import { CodeBlock } from "../components/beautiful/CodeBlock.js";
+import { LoadingState } from "../components/beautiful/LoadingState.js";
+import { PromptBar } from "../components/beautiful/PromptBar.js";
+import { TaskRows } from "../components/beautiful/TaskRows.js";
+import { Thinking } from "../components/beautiful/Thinking.js";
+import { ToolChips } from "../components/beautiful/ToolChips.js";
+import { Timeline, toolChipItem, toolTaskRow } from "../components/ChatTimeline.js";
+import { Markdown } from "../components/Markdown.js";
 import { Composer } from "../components/Composer.js";
 import { ProjectMark, ProviderMark } from "../components/marks.js";
 import {
@@ -33,6 +41,7 @@ import {
   StatusDot,
   TextField,
 } from "../components/ui.js";
+import { writeDraft } from "../lib/prefs.js";
 import { useTheme, type ThemeSetting } from "../lib/theme.js";
 import { foldTimeline, sessionStatus } from "../lib/viewmodel.js";
 
@@ -169,6 +178,124 @@ const SESSION: AgentSession = {
   state: "idle",
 };
 
+const MANY_TOOLS: AgentToolCall[] = Array.from({ length: 9 }, (_, index) => ({
+  id: `many_${index}`,
+  name:
+    ["read", "grep", "edit", "bash", "glob", "webfetch", "write", "todowrite", "mcp__linear__search"][index] ?? "read",
+  status: index === 8 ? "running" : "completed",
+  input: { file_path: `src/module-${index + 1}.ts`, pattern: "cursor" },
+  startedAt: iso(4 - index * 0.3),
+  completedAt: index === 8 ? null : iso(4 - index * 0.3 - 0.1),
+}));
+
+const LONG_APPROVAL: AgentApprovalRequest = {
+  id: "dev_approval_long",
+  sessionId: "dev_session",
+  provider: "mock",
+  createdAt: iso(1),
+  kind: "file",
+  title: "Write src/features/billing/reconciliation/nightly-export-deduplication.ts",
+  detail:
+    "src/features/billing/reconciliation/nightly-export-deduplication.ts (new file, 212 lines) — replaces the region join with a customer-first query",
+  options: [
+    { id: "allow_once", label: "Allow once", kind: "allow_once" },
+    {
+      id: "allow_always",
+      label: "Always allow edits in src/features",
+      kind: "allow_always",
+      description: "Until this session ends",
+    },
+    {
+      id: "review",
+      label: "Show me the diff first",
+      kind: "custom",
+      description: "The agent pauses and posts the diff",
+    },
+    { id: "deny", label: "Deny", kind: "deny", description: "The agent is told not to write the file" },
+  ],
+};
+
+const CONFIRM_QUESTION: AgentQuestionRequest = {
+  id: "dev_confirm",
+  sessionId: "dev_session",
+  provider: "mock",
+  createdAt: iso(1),
+  title: "Questions",
+  questions: [
+    {
+      id: "c0",
+      header: "It keeps settings queryable and works offline.",
+      question: "Use SQLite for local settings storage?",
+      kind: "confirm",
+    },
+  ],
+};
+
+const LIVE_CONVERSATION: AgentMessage[] = [
+  text("l1", "user", "Add request examples for both endpoints.", 1),
+  {
+    id: "l2",
+    sessionId: "dev_session",
+    role: "assistant",
+    createdAt: iso(0.5),
+    state: "streaming",
+    parts: [
+      { type: "reasoning", id: "l2:r", text: "One example per endpoint; the messages page needs a cursor." },
+      { type: "tool_call", id: "l2:t1", toolCall: SAMPLE_TOOLS[0] as AgentToolCall },
+      { type: "tool_call", id: "l2:t2", toolCall: SAMPLE_TOOLS[1] as AgentToolCall },
+      { type: "text", id: "l2:x", text: "Here is the first example:" },
+    ],
+  },
+];
+
+const LONG_REASONING = Array.from(
+  { length: 5 },
+  (_, index) =>
+    `Step ${index + 1}: the export joins accounts before de-duplicating customers, so a customer with accounts in two regions produces two rows unless the join is keyed on the customer first.`,
+).join("\n\n");
+
+const SAMPLE_TS = `export async function listMessages(sessionId: string, cursor?: string) {
+  const url = new URL(\`/api/v1/sessions/\${sessionId}/messages\`, location.origin);
+  if (cursor) url.searchParams.set("cursor", cursor);
+  const response = await fetch(url, { headers: authHeaders() });
+  return (await response.json()) as ListPage<AgentMessage>;
+}`;
+
+const LONG_LINE = JSON.stringify({
+  messages: [
+    {
+      id: "msg_01",
+      role: "assistant",
+      text: "A single very long line that must scroll sideways inside the code block instead of widening the page.",
+    },
+  ],
+});
+
+const SAMPLE_PATCH =
+  "@@ -1,3 +1,4 @@\n export const version = 2;\n-export const pageSize = 25;\n+export const pageSize = 50;\n+export const maxPageSize = 200;\n";
+
+const DRAFT_SESSION = "dev_composer_draft";
+
+const LONG_CONTROLS = (
+  <>
+    <PickerButton
+      value="An extremely long provider model name, 1M context"
+      detail="· High"
+      icon={<span aria-hidden className="block h-1.5 w-1.5 rounded-full bg-accent" />}
+      ariaLabel="Model (long sample)"
+      onClick={() => undefined}
+      className="min-w-0 flex-1"
+    />
+    <PickerButton
+      value="Auto-edit"
+      icon={<SlidersHorizontal size={16} aria-hidden />}
+      ariaLabel="Mode (long sample)"
+      onClick={() => undefined}
+      className="max-w-[46%] shrink-0"
+    />
+  </>
+);
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="mb-10">
@@ -216,6 +343,11 @@ export function DevUI() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [provider, setProvider] = useState("opencode");
   const [mode, setMode] = useState("build");
+  // Seed the running composer's draft before it mounts (dev page only).
+  useState(() => {
+    writeDraft(DRAFT_SESSION, "Also cover pagination,\nerror shapes,\nand the retry headers\nfor the event stream.");
+    return null;
+  });
 
   if (!import.meta.env.DEV) {
     return <p className="p-6 text-callout text-muted">/dev/ui is only available during development.</p>;
@@ -399,25 +531,94 @@ export function DevUI() {
         </div>
       </Section>
 
-      <Section title="Conversation">
-        <Timeline items={foldTimeline(SAMPLE_CONVERSATION)} running={false} hasMessages />
+      <Section title="Execution trace · finished (tap Worked for…)">
+        <Timeline items={foldTimeline(SAMPLE_CONVERSATION)} running={false} />
       </Section>
 
-      <Section title="Running">
-        <WorkingRow />
+      <Section title="Execution trace · live">
+        <Timeline items={foldTimeline(LIVE_CONVERSATION)} running runStartedAt={iso(0.3)} />
       </Section>
 
-      <Section title="Tool states">
-        {SAMPLE_TOOLS.map((tool) => (
-          <ToolRow key={tool.id} tool={tool} />
-        ))}
+      <Section title="Loading · Orbit">
+        <div className="flex flex-col gap-1">
+          <LoadingState label="Starting…" />
+          <LoadingState label="Working…" since={iso(0.2)} />
+        </div>
+        <p className="mt-2 text-caption text-muted">
+          Agent activity only, before any reasoning, tool or text arrives. Data loading uses skeletons.
+        </p>
       </Section>
 
-      <Section title="Action cards">
+      <Section title="Thinking">
+        <Thinking active label="Thought process">
+          <div className="hb-markdown-quiet">
+            <Markdown text="The router registers two endpoints and the event stream…" />
+          </div>
+        </Thinking>
+        <Thinking active={false} label="Thought process">
+          <div className="hb-markdown-quiet">
+            <Markdown text="Settled reasoning stays collapsed and quiet." />
+          </div>
+        </Thinking>
+        <Thinking active={false} label="Thought process" defaultOpen>
+          <div className="hb-markdown-quiet">
+            <Markdown text={LONG_REASONING} />
+          </div>
+        </Thinking>
+        <p className="mt-1 text-caption text-muted">
+          The Brain loops only while reasoning streams; with reduced motion it holds still (lucide-react-motion respects
+          the OS setting).
+        </p>
+      </Section>
+
+      <Section title="Tool chips">
+        <ToolChips items={SAMPLE_TOOLS.map(toolChipItem)} />
+        <p className="eyebrow mb-1 mt-4 px-1">Many tools</p>
+        <ToolChips items={MANY_TOOLS.map(toolChipItem)} />
+      </Section>
+
+      <Section title="Task rows">
+        <TaskRows rows={SAMPLE_TOOLS.map(toolTaskRow)} label="Tool calls" />
+        <div className="mt-3">
+          <TaskRows
+            label="Plan"
+            rows={[
+              { key: "p1", label: "Read the gateway routes", status: "done" },
+              {
+                key: "p2",
+                label: "Write request examples for every endpoint in the gateway reference",
+                status: "running",
+              },
+              {
+                key: "p3",
+                label: "Update the docs index",
+                status: "pending",
+                details: <p className="text-callout text-muted">Link the new page from the sidebar.</p>,
+              },
+              { key: "p4", label: "Publish", status: "failed", meta: "exit 1" },
+            ]}
+          />
+        </div>
+      </Section>
+
+      <Section title="Approval">
         <div className="flex flex-col gap-3">
           <ApprovalCard request={SAMPLE_APPROVAL} busy={false} error={null} onResolve={() => undefined} />
-          <QuestionCard request={SAMPLE_QUESTION} busy={false} error={null} onSubmit={() => undefined} />
+          <ApprovalCard request={LONG_APPROVAL} busy={false} error={null} onResolve={() => undefined} />
         </div>
+      </Section>
+
+      <Section title="Recommendation (confirm question)">
+        <div className="flex flex-col gap-3">
+          <QuestionCard request={CONFIRM_QUESTION} busy={false} error={null} onSubmit={() => undefined} />
+          <p className="text-caption text-muted">
+            No confidence meter: the protocol has no confidence value, so none is shown or inferred.
+          </p>
+        </div>
+      </Section>
+
+      <Section title="Questions (stepped)">
+        <QuestionCard request={SAMPLE_QUESTION} busy={false} error={null} onSubmit={() => undefined} />
       </Section>
 
       <Section title="Attachments">
@@ -427,7 +628,7 @@ export function DevUI() {
         </div>
       </Section>
 
-      <Section title="Composer · idle">
+      <Section title="Prompt bar · idle">
         <div className="-mx-4 overflow-hidden rounded-[var(--radius-lg)]">
           <Composer
             session={SESSION}
@@ -441,17 +642,53 @@ export function DevUI() {
         </div>
       </Section>
 
-      <Section title="Composer · running">
+      <Section title="Prompt bar · running, multiline draft, long model">
         <div className="-mx-4 overflow-hidden rounded-[var(--radius-lg)]">
           <Composer
-            session={{ ...SESSION, id: "dev_composer_running" }}
+            session={{ ...SESSION, id: DRAFT_SESSION }}
             provider={PROVIDER}
             model={undefined}
             running
             onSend={() => undefined}
             onInterrupt={() => undefined}
-            controls={COMPOSER_CONTROLS}
+            controls={LONG_CONTROLS}
           />
+        </div>
+      </Section>
+
+      <Section title="Prompt bar · attachment">
+        <PromptBar
+          controls={COMPOSER_CONTROLS}
+          attachments={
+            <PendingAttachmentChip
+              attachment={{
+                id: "dev_att",
+                kind: "file",
+                name: "gateway-notes.md",
+                mimeType: "text/markdown",
+                sizeBytes: 4_812,
+              }}
+              onRemove={() => undefined}
+            />
+          }
+          textarea={{ "aria-label": "Message (sample)", placeholder: "Message OpenCode…", readOnly: true }}
+          trailing={
+            <span
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-accent text-on-accent"
+              aria-hidden
+            >
+              ↑
+            </span>
+          }
+        />
+      </Section>
+
+      <Section title="Code block">
+        <div className="flex flex-col gap-3">
+          <CodeBlock code={SAMPLE_TS} language="ts" />
+          <CodeBlock code="npm test -- --runInBand" language="bash" />
+          <CodeBlock code={LONG_LINE} language="json" />
+          <CodeBlock code={SAMPLE_PATCH} diff title="src/lib/session.ts" />
         </div>
       </Section>
 

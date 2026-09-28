@@ -18,6 +18,8 @@ export interface SessionOverlay {
   /** Live messages keyed by id, in arrival order. */
   messages: AgentMessage[];
   running: boolean;
+  /** When the current turn started (the `turn.started` event's time); absent when not observed live. */
+  runStartedAt?: string;
   /** Fetched history should be refetched (terminal event or resync). */
   stale: boolean;
 }
@@ -107,14 +109,19 @@ export function reduceOverlay(state: OverlayState, event: SequencedAgentEvent): 
     case "turn.started": {
       if (!sessionId) return advanced;
       const overlay = overlayFor(advanced, sessionId);
-      return withSession(advanced, sessionId, { ...overlay, running: true, stale: false });
+      return withSession(advanced, sessionId, {
+        ...overlay,
+        running: true,
+        runStartedAt: event.occurredAt,
+        stale: false,
+      });
     }
     case "turn.completed":
     case "turn.failed":
     case "turn.interrupted": {
       if (!sessionId) return advanced;
       const overlay = overlayFor(advanced, sessionId);
-      return withSession(advanced, sessionId, { ...overlay, running: false, stale: true });
+      return withSession(advanced, sessionId, { ...overlay, running: false, runStartedAt: undefined, stale: true });
     }
     case "message.started":
     case "message.updated":

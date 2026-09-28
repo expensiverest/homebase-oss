@@ -352,7 +352,7 @@ export function ChatScreen() {
           <EmptyState title="No messages yet" detail="Send the first prompt to start working in this session." />
         ) : (
           <div>
-            <Timeline items={timeline} running={running} hasMessages={merged.length > 0} />
+            <Timeline items={timeline} running={running} runStartedAt={overlay?.runStartedAt ?? null} />
           </div>
         )}
 
