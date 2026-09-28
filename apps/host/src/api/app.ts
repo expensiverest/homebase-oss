@@ -20,6 +20,7 @@ import {
 import { getConnInfo } from "@hono/node-server/conninfo";
 
 import type { Authenticator } from "../auth/index.js";
+import { ATTACHMENT_MAX_FILES_PER_UPLOAD, type AttachmentStore } from "../attachments/index.js";
 import type { HostConfig } from "../config/index.js";
 import { errorBody, HostError, normalizeError } from "../errors.js";
 import type { EventBus } from "../events/index.js";
@@ -36,6 +37,7 @@ export interface ApiDependencies {
   providers: ProviderRegistry;
   projects: ProjectRegistry;
   sessions: SessionService;
+  attachments: AttachmentStore;
   auth: Authenticator;
   logger: AdapterLogger;
 }
@@ -47,6 +49,8 @@ export interface ApiEnv {
 }
 
 const MAX_BODY_BYTES = 1024 * 1024;
+/** Multipart uploads get their own, larger limit; all other JSON bodies stay at 1 MiB. */
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 /**
  * Builds the Homebase Host API: REST for commands and reads, SSE for the
@@ -63,14 +67,16 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
     c.header("x-content-type-options", "nosniff");
   });
 
-  app.use(
-    "/api/*",
-    bodyLimit({
-      maxSize: MAX_BODY_BYTES,
-      onError: (c) =>
-        c.json(errorBody(new HostError("invalid_request", "Request body is too large."), c.get("requestId")), 413),
-    }),
-  );
+  const jsonLimit = bodyLimit({
+    maxSize: MAX_BODY_BYTES,
+    onError: (c) =>
+      c.json(errorBody(new HostError("invalid_request", "Request body is too large."), c.get("requestId")), 413),
+  });
+  app.use("/api/*", async (c, next) => {
+    // Multipart attachment uploads use a route-specific limit instead.
+    if (c.req.path === "/api/v1/attachments" && c.req.method === "POST") return next();
+    return jsonLimit(c, next);
+  });
 
   // Authentication. Health stays reachable for local diagnostics; it never
   // contains secrets or project data.
@@ -133,9 +139,25 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
     c.json({ project: withAvailability(deps.projects.require(c.req.param("projectId")), deps) }),
   );
 
-  app.get("/api/v1/projects/:projectId/sessions", async (c) =>
-    c.json({ sessions: await deps.sessions.listForProject(c.req.param("projectId")) }),
-  );
+  app.get("/api/v1/projects/:projectId/sessions", async (c) => {
+    const page = await deps.sessions.listForProject(c.req.param("projectId"), {
+      limit: limitParam(c),
+      cursor: cursorParam(c),
+    });
+    return c.json({ sessions: page.items, nextCursor: page.nextCursor, previousCursor: page.previousCursor });
+  });
+
+  app.get("/api/v1/projects/:projectId/providers/:providerId/models", async (c) => {
+    const project = deps.projects.require(c.req.param("projectId"));
+    const models = await deps.providers.listModels(c.req.param("providerId"), project);
+    return c.json({ models });
+  });
+
+  app.get("/api/v1/projects/:projectId/providers/:providerId/modes", async (c) => {
+    const project = deps.projects.require(c.req.param("projectId"));
+    const modes = await deps.providers.listModes(c.req.param("providerId"), project);
+    return c.json({ modes });
+  });
 
   app.post("/api/v1/sessions", async (c) => {
     const input = await parseBody(c, createSessionInputSchema);
@@ -146,6 +168,14 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
   app.get("/api/v1/sessions/:sessionId", async (c) =>
     c.json({ session: await deps.sessions.get(c.req.param("sessionId")) }),
   );
+
+  app.get("/api/v1/sessions/:sessionId/messages", async (c) => {
+    const page = await deps.sessions.listMessages(c.req.param("sessionId"), {
+      limit: limitParam(c),
+      cursor: cursorParam(c),
+    });
+    return c.json({ messages: page.items, nextCursor: page.nextCursor, previousCursor: page.previousCursor });
+  });
 
   app.delete("/api/v1/sessions/:sessionId", async (c) => {
     await deps.sessions.delete(c.req.param("sessionId"));
@@ -166,6 +196,12 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
   app.post("/api/v1/sessions/:sessionId/steer", async (c) => {
     const input = await parseBody(c, sendMessageInputSchema);
     await deps.sessions.steer(c.req.param("sessionId"), input);
+    return c.json({ accepted: true }, 202);
+  });
+
+  app.post("/api/v1/sessions/:sessionId/queue", async (c) => {
+    const input = await parseBody(c, sendMessageInputSchema);
+    await deps.sessions.queue(c.req.param("sessionId"), input);
     return c.json({ accepted: true }, 202);
   });
 
@@ -199,6 +235,50 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
 
   app.get("/api/v1/events", (c) => sseEventsHandler(c, deps));
 
+  app.post(
+    "/api/v1/attachments",
+    bodyLimit({
+      maxSize: MAX_UPLOAD_BYTES,
+      onError: (c) =>
+        c.json(errorBody(new HostError("invalid_attachment", "Upload is too large."), c.get("requestId")), 413),
+    }),
+    async (c) => {
+      let form: FormData;
+      try {
+        form = await c.req.formData();
+      } catch {
+        throw new HostError("invalid_request", "Attachments must be uploaded as multipart/form-data.");
+      }
+      const files = form.getAll("file").filter((entry): entry is File => entry instanceof File);
+      if (files.length === 0) {
+        throw new HostError("invalid_request", "No files were uploaded.");
+      }
+      if (files.length > ATTACHMENT_MAX_FILES_PER_UPLOAD) {
+        throw new HostError("invalid_attachment", `At most ${ATTACHMENT_MAX_FILES_PER_UPLOAD} files per upload.`);
+      }
+      const stored = [];
+      for (const file of files) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        stored.push(deps.attachments.add({ filename: file.name, mimeType: file.type, bytes }));
+      }
+      return c.json({ attachments: stored.map((attachment) => deps.attachments.toRef(attachment)) }, 201);
+    },
+  );
+
+  app.get("/api/v1/attachments/:attachmentId", (c) => {
+    const attachment = deps.attachments.get(c.req.param("attachmentId"));
+    const disposition = attachment.mimeType.startsWith("image/") ? "inline" : "attachment";
+    return new Response(attachment.bytes, {
+      headers: {
+        "content-type": attachment.mimeType,
+        "content-length": String(attachment.size),
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "content-disposition": `${disposition}; filename="${attachment.filename.replace(/"/g, "")}"`,
+      },
+    });
+  });
+
   app.all("/api/*", (c) =>
     c.json(errorBody(new HostError("not_found", "No such API route."), c.get("requestId")), 404),
   );
@@ -208,6 +288,21 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
 
 function withAvailability(project: AgentProject, deps: ApiDependencies): AgentProject {
   return { ...project, providersAvailable: deps.providers.availableProviderIds() };
+}
+
+function limitParam(c: Context): number | undefined {
+  const raw = c.req.query("limit");
+  if (raw === undefined || raw === "") return undefined;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new HostError("invalid_request", "Invalid limit parameter.");
+  }
+  return value;
+}
+
+function cursorParam(c: Context): string | undefined {
+  const raw = c.req.query("cursor");
+  return raw && raw.length > 0 ? raw : undefined;
 }
 
 /** Reads and validates a JSON body, producing stable validation errors. */

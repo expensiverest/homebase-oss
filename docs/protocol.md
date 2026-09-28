@@ -24,7 +24,7 @@ paths or derive provider behavior from their shape.
 | `AgentProvider`                  | A registered provider and its state        | `installed`, `authenticated` (`boolean \| null` for "unknown"), `compatible`, `capabilities`, `warning` |
 | `AgentProject`                   | A Homebase-owned project                   | `path` is always Host-canonical; `providersAvailable` is computed by the Host                           |
 | `AgentSession`                   | A session with one provider                | `provider`, `projectId`, `state`, `model`, `mode`, `thinkingLevel`                                      |
-| `AgentModel`                     | A selectable model                         | `thinkingLevels`, `defaultThinkingLevel`, context/output limits                                         |
+| `AgentModel`                     | A selectable model                         | `thinkingLevels`, `defaultThinkingLevel`, context/output limits, per-model `inputCapabilities`          |
 | `AgentModelRef`                  | Model selection for a session              | `provider`, `modelId`, `thinkingLevel`                                                                  |
 | `AgentMode`                      | A selectable mode (for example plan/agent) | `id`, `name`, `description`                                                                             |
 | `AgentMessage`                   | One user/assistant/system message          | `state` (`streaming`/`completed`/`failed`/`interrupted`), `parts`                                       |
@@ -48,7 +48,8 @@ Every part has a stable `id` so streaming deltas can address it:
 
 - `text` — streamed with `message.delta`
 - `reasoning` — streamed with `reasoning.*` events; providers without reasoning text simply never emit it
-- `image` / `file` — reference an attachment id; bytes never travel through the protocol
+- `image` / `file` — reference an attachment id when the Host owns the bytes; `attachmentId` may be
+  absent for provider-historical references, in which case clients render metadata only
 - `tool_call` — wraps a full `AgentToolCall` snapshot
 - `plan` — structured plan steps
 - `status` — progress/status line
@@ -82,7 +83,7 @@ Every adapter emits from this vocabulary:
 provider.connected | provider.disconnected | provider.updated
 session.created | session.updated | session.deleted
 turn.started | turn.completed | turn.failed | turn.interrupted
-message.started | message.delta | message.completed
+message.started | message.updated | message.delta | message.completed
 reasoning.started | reasoning.delta | reasoning.completed
 tool.started | tool.updated | tool.completed | tool.failed
 approval.requested | approval.resolved
@@ -108,9 +109,10 @@ Envelope (adapter-emitted):
 
 ### Semantics
 
-- `message.started` carries the full message skeleton. `message.delta` appends text to the addressed
-  `partId`; deltas for unknown parts should be ignored by clients. `message.completed` carries the final
-  message snapshot and is authoritative.
+- `message.started` carries the full message skeleton. `message.updated` carries a full snapshot when
+  parts change without a pure text append (for example a tool part appearing mid-turn); clients upsert
+  by message id. `message.delta` appends text to the addressed `partId`; deltas for unknown parts should
+  be ignored by clients. `message.completed` carries the final message snapshot and is authoritative.
 - `tool.*` events carry full `AgentToolCall` snapshots; clients replace by tool id. `tool.failed` with
   `status: "denied"` is a user rejection, not a provider error.
 - `turn.started`/`turn.completed`/`turn.interrupted`/`turn.failed` define the run lifecycle;
@@ -137,6 +139,48 @@ The Host assigns a global, monotonically increasing `sequence` and an `id` to ev
 - `: heartbeat` comments arrive every 15 seconds.
 
 Clients must treat the stream as resumable, not permanent: iOS suspends background connections.
+
+## Pagination
+
+List operations that can grow unbounded use an opaque page shape:
+
+```ts
+interface PageRequest {
+  cursor?: string | null;
+  limit?: number | null;
+}
+interface AgentPage<T> {
+  items: T[];
+  nextCursor: string | null;
+  previousCursor: string | null;
+}
+```
+
+Rules:
+
+- Cursors are opaque strings owned by the adapter; clients round-trip them untouched.
+- `listSessions(project, page?)` and `listMessages(sessionId, page?)` return pages.
+- Items keep provider order across pages; both default to newest-first, so `nextCursor` walks into
+  older history (`previousCursor` is only meaningful for single-provider listings and is `null` in the
+  Host's merged session view).
+- The Host clamps limits (sessions 1–100 default 50; messages 1–200 default 50) before calling
+  adapters, and merges multi-provider session pages behind one Host-owned cursor.
+- Historical messages fetched through `listMessages` are authoritative when reopening a session; live
+  events are the incremental overlay.
+
+## Attachments
+
+Bytes never travel through the protocol. The flow is:
+
+1. `POST /api/v1/attachments` (multipart) uploads bytes to the Host-owned store and returns
+   `AgentAttachmentRef[]` (`id`, `kind`, `name`, `mimeType`, `sizeBytes`).
+2. Clients reference refs by id in `SendMessageInput.attachments`.
+3. Adapters resolve ids through `AdapterContext.resolveAttachment(id)`, which yields Host-owned bytes
+   only — never a filesystem path.
+4. `GET /api/v1/attachments/:id` serves the bytes back for rendering (authenticated, `no-store`).
+
+Host storage is ephemeral: bounded per file (20 MiB), per upload (10 files), and per store
+(64 MiB LRU), with a 6-hour TTL; nothing is written to disk.
 
 ## Host inputs (strict)
 

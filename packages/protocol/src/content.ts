@@ -67,7 +67,7 @@ export const agentContentPartSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("image"),
     id: partIdSchema,
-    attachmentId: attachmentIdSchema,
+    attachmentId: attachmentIdSchema.optional(),
     mimeType: z.string(),
     name: z.string().nullable().optional(),
     alt: z.string().nullable().optional(),
@@ -75,7 +75,7 @@ export const agentContentPartSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("file"),
     id: partIdSchema,
-    attachmentId: attachmentIdSchema,
+    attachmentId: attachmentIdSchema.optional(),
     name: z.string(),
     mimeType: z.string(),
     sizeBytes: z.number().int().nonnegative().nullable().optional(),

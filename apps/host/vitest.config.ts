@@ -5,6 +5,10 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: "@homebase/adapter-opencode",
+        replacement: fileURLToPath(new URL("../../packages/adapter-opencode/src/index.ts", import.meta.url)),
+      },
+      {
         find: "@homebase/adapter-sdk/testing",
         replacement: fileURLToPath(new URL("../../packages/adapter-sdk/src/testing/index.ts", import.meta.url)),
       },

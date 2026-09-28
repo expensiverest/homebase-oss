@@ -9,12 +9,15 @@ import {
   type AgentDiff,
   type AgentEvent,
   type AgentEventType,
+  type AgentMessage,
   type AgentMode,
   type AgentModel,
+  type AgentPage,
   type AgentProject,
   type AgentSession,
   type AgentUsage,
   type CreateSessionInput,
+  type PageRequest,
   type ProviderDetection,
   type SendMessageInput,
 } from "@homebase/protocol";
@@ -22,10 +25,10 @@ import {
 /**
  * Minimal example adapter for adapter authors.
  *
- * It is intentionally small and honest: it streams text, but it declares no
- * approvals, questions, tools, models, modes, diffs, usage, or deletion. The
- * capability declarations and the absence of the matching methods are both
- * checked by the compliance suite.
+ * It is intentionally small and honest: it streams text and keeps message
+ * history, but it declares no approvals, questions, tools, models, modes,
+ * diffs, usage, queueing, or deletion. The capability declarations and the
+ * absence of the matching methods are both checked by the compliance suite.
  *
  * Copy this package as the starting point for a new provider adapter:
  * 1. replace the transport with your provider's documented interface,
@@ -45,6 +48,7 @@ export class ExampleAdapter implements AgentAdapter {
   #context: AdapterContext | null = null;
   #counter = 0;
   readonly #sessions = new Map<string, AgentSession>();
+  readonly #messages = new Map<string, AgentMessage[]>();
 
   init(context: AdapterContext): void {
     this.#context = context;
@@ -72,10 +76,24 @@ export class ExampleAdapter implements AgentAdapter {
     return [];
   }
 
-  async listSessions(project: AgentProject): Promise<AgentSession[]> {
-    return [...this.#sessions.values()]
+  async listSessions(project: AgentProject, page: PageRequest = {}): Promise<AgentPage<AgentSession>> {
+    const sessions = [...this.#sessions.values()]
       .filter((session) => session.projectId === project.id)
-      .map((session) => structuredClone(session));
+      .map((session) => structuredClone(session))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return paginate(sessions, page);
+  }
+
+  async listMessages(sessionId: string, page: PageRequest = {}): Promise<AgentPage<AgentMessage>> {
+    const messages = this.#messages.get(sessionId);
+    if (!messages) {
+      throw new AdapterError("session_not_found", `Unknown example session "${sessionId}".`);
+    }
+    return paginate(
+      [...messages].reverse().map((message) => structuredClone(message)),
+      page,
+      100,
+    );
   }
 
   async getSession(sessionId: string): Promise<AgentSession> {
@@ -132,18 +150,40 @@ export class ExampleAdapter implements AgentAdapter {
     }
 
     const finalText = streamed.trimEnd();
+    const createdAt = nowTimestamp();
     this.#emit(session, "message.completed", {
       message: {
         id: messageId,
         sessionId,
         role: "assistant",
-        createdAt: nowTimestamp(),
-        updatedAt: nowTimestamp(),
+        createdAt,
+        updatedAt: createdAt,
         state: "completed",
         parts: [{ type: "text", id: partId, text: finalText }],
       },
     });
     this.#emit(session, "turn.completed", { turnId });
+
+    this.#messages.set(sessionId, [
+      ...(this.#messages.get(sessionId) ?? []),
+      {
+        id: `msg_${++this.#counter}`,
+        sessionId,
+        role: "user",
+        createdAt,
+        state: "completed",
+        parts: [{ type: "text", id: `part_${++this.#counter}`, text: input.text }],
+      },
+      {
+        id: messageId,
+        sessionId,
+        role: "assistant",
+        createdAt,
+        updatedAt: createdAt,
+        state: "completed",
+        parts: [{ type: "text", id: partId, text: finalText }],
+      },
+    ]);
 
     session.state = "idle";
     session.updatedAt = nowTimestamp();
@@ -176,4 +216,21 @@ export class ExampleAdapter implements AgentAdapter {
       data,
     } as AgentEvent);
   }
+}
+
+function paginate<T>(items: T[], page: PageRequest, defaultLimit = 50): AgentPage<T> {
+  const limit = Math.max(1, Math.min(page.limit ?? defaultLimit, 500));
+  let offset = 0;
+  if (page.cursor) {
+    const match = /^example:(\d+)$/.exec(page.cursor);
+    if (!match) throw new AdapterError("invalid_request", "Invalid example cursor.");
+    offset = Number(match[1]);
+  }
+  const slice = items.slice(offset, offset + limit);
+  const nextOffset = offset + slice.length;
+  return {
+    items: slice,
+    nextCursor: nextOffset < items.length ? `example:${nextOffset}` : null,
+    previousCursor: offset > 0 ? `example:${Math.max(0, offset - limit)}` : null,
+  };
 }

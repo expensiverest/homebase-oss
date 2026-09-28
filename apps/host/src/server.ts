@@ -1,10 +1,12 @@
 import { serve } from "@hono/node-server";
 import { createConsoleLogger, type AdapterLogger, type AdapterRegistration } from "@homebase/adapter-sdk";
+import { opencodeRegistration } from "@homebase/adapter-opencode";
 import { MockAdapter } from "@homebase/adapter-sdk/testing";
 import type { Hono } from "hono";
 
 import { createApiApp, type ApiEnv } from "./api/index.js";
 import { createAuthenticator, type Authenticator } from "./auth/index.js";
+import { AttachmentStore } from "./attachments/index.js";
 import type { HostConfig } from "./config/index.js";
 import { EventBus } from "./events/index.js";
 import { PathAllowlist } from "./paths.js";
@@ -30,6 +32,7 @@ export interface HostRuntime {
   readonly providers: ProviderRegistry;
   readonly projects: ProjectRegistry;
   readonly sessions: SessionService;
+  readonly attachments: AttachmentStore;
   readonly auth: Authenticator;
   readonly app: Hono<ApiEnv>;
   start(): Promise<{ hostname: string; port: number }>;
@@ -37,9 +40,9 @@ export interface HostRuntime {
 }
 
 /**
- * Built-in provider registrations. Dedicated provider packages will be added
- * here as they are implemented; the mock adapter is a development fixture and
- * can be disabled with `providers.mock.enabled = false`.
+ * Built-in provider registrations. The mock adapter is a development fixture
+ * and can be disabled with `providers.mock.enabled = false`; OpenCode is the
+ * reference real provider and degrades to `installed: false` when absent.
  */
 export function createDefaultRegistrations(): AdapterRegistration[] {
   return [
@@ -51,6 +54,7 @@ export function createDefaultRegistrations(): AdapterRegistration[] {
           stepDelayMs: typeof config.stepDelayMs === "number" ? config.stepDelayMs : 5,
         }),
     },
+    opencodeRegistration,
   ];
 }
 
@@ -86,6 +90,11 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     logger,
     hostVersion: HOST_VERSION,
     resolveProjectPath: (projectId) => projects.resolvePath(projectId),
+    findProjectByPath: async (candidate) => {
+      const project = await projects.findByPath(candidate);
+      return project?.id ?? null;
+    },
+    resolveAttachment: async (attachmentId) => attachments.get(attachmentId),
   });
   for (const registration of options.registrations ?? createDefaultRegistrations()) {
     providers.register(registration);
@@ -94,6 +103,7 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
 
   const sessions = new SessionService({ providers, projects, bus, logger });
   const auth = createAuthenticator(config);
+  const attachments = new AttachmentStore();
 
   const app = createApiApp({
     version: HOST_VERSION,
@@ -103,6 +113,7 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     providers,
     projects,
     sessions,
+    attachments,
     auth,
     logger,
   });
@@ -115,6 +126,7 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     providers,
     projects,
     sessions,
+    attachments,
     auth,
     app,
     async start() {
@@ -134,6 +146,7 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     },
     async close() {
       await providers.dispose();
+      attachments.dispose();
       const running = server;
       server = null;
       if (running) {

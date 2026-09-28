@@ -22,14 +22,17 @@ interface AgentAdapter {
   listModels(project: AgentProject): Promise<AgentModel[]>;
   listModes(project: AgentProject): Promise<AgentMode[]>;
 
-  listSessions(project: AgentProject): Promise<AgentSession[]>;
+  listSessions(project: AgentProject, page?: PageRequest): Promise<AgentPage<AgentSession>>;
   getSession(sessionId: SessionId): Promise<AgentSession>;
   createSession(input: CreateSessionInput, project: AgentProject): Promise<AgentSession>;
   deleteSession?(sessionId: SessionId): Promise<void>;
 
+  listMessages(sessionId: SessionId, page?: PageRequest): Promise<AgentPage<AgentMessage>>;
+
   send(sessionId: SessionId, input: SendMessageInput): Promise<void>;
   interrupt?(sessionId: SessionId): Promise<void>;
   steer?(sessionId: SessionId, input: SendMessageInput): Promise<void>;
+  queue?(sessionId: SessionId, input: SendMessageInput): Promise<void>;
 
   resolveApproval?(requestId: string, result: ApprovalResult): Promise<void>;
   answerQuestion?(requestId: string, answer: QuestionAnswer): Promise<void>;
@@ -46,7 +49,12 @@ Rules:
 
 - **Optional methods are capability-gated.** If `interrupt` is declared, `interrupt()` must exist and
   work. If not, the Host returns `unsupported_capability` and the UI hides the affordance.
+- **Send, steer, and queue are distinct operations.** `send` begins a turn when appropriate (it must
+  not hijack an active run); `steer` injects into the active turn; `queue` parks a message for delivery
+  behind the active turn (or runs it immediately when idle).
 - **`send` resolves on acceptance**, not completion. Streaming progress arrives through events.
+- **List operations page.** `listSessions` and `listMessages` return `AgentPage` with opaque cursors;
+  adapters normalize short final pages to a null next cursor.
 - Methods without a matching boolean capability in `CAPABILITY_METHODS` are covered by the compliance
   suite's structural checks.
 - **Only `context.emit` talks to clients.** Adapters never serve HTTP, never fan out, and never assign
@@ -68,6 +76,11 @@ interface AdapterContext {
 - `resolveProjectPath` returns the canonical, allowlisted path from the Host project registry. Adapters
   must not read configuration files or environment variables to find projects, and must not accept paths
   from messages.
+- `findProjectByPath` maps a provider-reported directory (session location, transcript cwd) back to a
+  Homebase project id, or `null` when it is outside every configured root. Adapters use it to scope
+  provider data instead of inventing their own project identity.
+- `resolveAttachment` yields Host-owned bytes for an uploaded attachment id. Adapters never read
+  arbitrary files; clients never send paths.
 - `config` contains only what the operator put in `providers.<id>.config` in the Host config. Secrets go
   here, stay server-side, and must never be emitted in events, logs, or detection output.
 - `emit` publishes a normalized event. Omit `occurredAt` and the Host stamps time.
@@ -119,10 +132,12 @@ Checks:
 - provider identity is a valid slug and display name is present;
 - detection is well-formed and contains no credential-looking fields;
 - capabilities parse and are complete;
-- every declared capability with a matching method has that method;
+- every declared capability with a matching method has that method (including `queue`);
 - models/modes/sessions validate against the protocol schemas;
 - create → get → list → delete lifecycle (when a project fixture is supplied);
-- live-only checks (streaming turn, interrupt, diff, usage) run only when `live: true`;
+- session and message listing return valid `AgentPage` shapes with opaque cursors;
+- live-only checks (streaming turn, interrupt, message history, diff, usage) run only when
+  `live: true`;
 - unsupported capabilities are skipped with an explicit reason — never faked, never failed.
 
 The mock adapter is the reference implementation and runs the suite with `live: true` in
@@ -158,6 +173,7 @@ regressions.
 | Event                                       | Meaning for clients                                         |
 | ------------------------------------------- | ----------------------------------------------------------- |
 | `message.started`                           | Message exists (possibly empty parts); render immediately   |
+| `message.updated`                           | Full snapshot after parts change; upsert by message id      |
 | `message.delta`                             | Append to the part id; ignore unknown part ids              |
 | `message.completed`                         | Replace with the final snapshot                             |
 | `tool.*`                                    | Replace `AgentToolCall` by id; `denied` is a user rejection |

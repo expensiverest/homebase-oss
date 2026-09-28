@@ -6,5 +6,6 @@
  * `@homebase/adapter-sdk/testing` and `@homebase/adapter-sdk/compliance`.
  */
 export * from "./adapter.js";
+export * from "./attachments.js";
 export * from "./errors.js";
 export * from "./logger.js";

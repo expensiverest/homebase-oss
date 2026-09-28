@@ -1,3 +1,4 @@
+import { OpenCodeAdapter } from "@homebase/adapter-opencode";
 import type {
   AgentDiff,
   AgentProvider,
@@ -8,6 +9,7 @@ import type {
 } from "@homebase/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { createDefaultRegistrations } from "../src/server.js";
 import {
   createTestHost,
   defaultMockRegistration,
@@ -236,7 +238,7 @@ describe("sessions", () => {
     const resolved = await host.runtime.app.request(`/api/v1/approvals/${requested.data.approval.id}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ optionId: "allow" }),
+      body: JSON.stringify({ optionId: "allow_once" }),
     });
     expect(resolved.status).toBe(202);
 
@@ -332,5 +334,235 @@ describe("sessions", () => {
     const unknownRoute = await host.runtime.app.request("/api/v1/definitely-not-a-route");
     expect(unknownRoute.status).toBe(404);
     expect((await jsonBody<ApiErrorBody>(unknownRoute)).error.code).toBe("not_found");
+  });
+});
+
+describe("message history and queue", () => {
+  it("returns paged message history after a turn", async () => {
+    const host = await setup();
+    const [project] = await getProjects(host);
+    if (!project) return;
+
+    const created = await createSession(host, project.id);
+    const { session } = await jsonBody<{ session: AgentSession }>(created);
+    const marker = host.runtime.bus.latestSequence;
+    await host.runtime.app.request(`/api/v1/sessions/${session.id}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "history please" }),
+    });
+    await waitForEvent(host.runtime, "turn.completed", (event) => event.sessionId === session.id, { since: marker });
+
+    const response = await host.runtime.app.request(`/api/v1/sessions/${session.id}/messages?limit=10`);
+    expect(response.status).toBe(200);
+    const body = await jsonBody<{
+      messages: Array<{ role: string }>;
+      nextCursor: string | null;
+      previousCursor: string | null;
+    }>(response);
+    expect(body.messages.length).toBeGreaterThan(0);
+    expect(body.messages.map((message) => message.role)).toContain("user");
+    expect(body.nextCursor).toBeNull();
+  });
+
+  it("rejects history for unknown sessions and invalid limits", async () => {
+    const host = await setup();
+    const missing = await host.runtime.app.request("/api/v1/sessions/ses_missing/messages");
+    expect(missing.status).toBe(404);
+
+    const badLimit = await host.runtime.app.request("/api/v1/sessions/ses_missing/messages?limit=nope");
+    expect(badLimit.status).toBe(400);
+    expect((await jsonBody<ApiErrorBody>(badLimit)).error.code).toBe("invalid_request");
+  });
+
+  it("accepts queued messages", async () => {
+    const host = await setup();
+    const [project] = await getProjects(host);
+    if (!project) return;
+    const created = await createSession(host, project.id);
+    const { session } = await jsonBody<{ session: AgentSession }>(created);
+
+    const marker = host.runtime.bus.latestSequence;
+    const response = await host.runtime.app.request(`/api/v1/sessions/${session.id}/queue`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "queued work" }),
+    });
+    expect(response.status).toBe(202);
+    await waitForEvent(host.runtime, "turn.completed", (event) => event.sessionId === session.id, { since: marker });
+  });
+});
+
+describe("provider catalogs", () => {
+  it("exposes models and modes through project/provider routes", async () => {
+    const host = await setup();
+    const [project] = await getProjects(host);
+    if (!project) return;
+
+    const modelsResponse = await host.runtime.app.request(`/api/v1/projects/${project.id}/providers/mock/models`);
+    expect(modelsResponse.status).toBe(200);
+    const models = (await jsonBody<{ models: Array<{ id: string; inputCapabilities?: unknown }> }>(modelsResponse))
+      .models;
+    expect(models.length).toBeGreaterThan(0);
+    expect(models[0]?.inputCapabilities).toBeDefined();
+
+    const modesResponse = await host.runtime.app.request(`/api/v1/projects/${project.id}/providers/mock/modes`);
+    expect(modesResponse.status).toBe(200);
+    expect((await jsonBody<{ modes: Array<{ id: string }> }>(modesResponse)).modes.length).toBeGreaterThan(0);
+  });
+
+  it("rejects unknown providers, unknown projects, and unsupported capabilities", async () => {
+    const host = await setup();
+    const [project] = await getProjects(host);
+    if (!project) return;
+
+    const unknownProvider = await host.runtime.app.request(`/api/v1/projects/${project.id}/providers/nope/models`);
+    expect(unknownProvider.status).toBe(404);
+    expect((await jsonBody<ApiErrorBody>(unknownProvider)).error.code).toBe("provider_not_found");
+
+    const unknownProject = await host.runtime.app.request("/api/v1/projects/prj_missing/providers/mock/models");
+    expect(unknownProject.status).toBe(404);
+
+    const limited = await setup({ registrations: [defaultMockRegistration({ capabilities: { models: false } })] });
+    const [limitedProject] = await getProjects(limited);
+    if (!limitedProject) return;
+    const unsupported = await limited.runtime.app.request(
+      `/api/v1/projects/${limitedProject.id}/providers/mock/models`,
+    );
+    expect(unsupported.status).toBe(409);
+    expect((await jsonBody<ApiErrorBody>(unsupported)).error.code).toBe("unsupported_capability");
+  });
+});
+
+describe("attachments", () => {
+  async function upload(host: TestHost, filename: string, mimeType: string, bytes: Uint8Array): Promise<Response> {
+    const form = new FormData();
+    form.append("file", new File([bytes], filename, { type: mimeType }));
+    return host.runtime.app.request("/api/v1/attachments", { method: "POST", body: form });
+  }
+
+  it("uploads attachments, returns refs, and serves the bytes back", async () => {
+    const host = await setup();
+    const response = await upload(host, "notes.txt", "text/plain", new TextEncoder().encode("hello attachment"));
+    expect(response.status).toBe(201);
+    const { attachments } = await jsonBody<{
+      attachments: Array<{ id: string; kind: string; name: string; mimeType: string }>;
+    }>(response);
+    expect(attachments[0]).toMatchObject({ kind: "file", name: "notes.txt", mimeType: "text/plain" });
+
+    const fetched = await host.runtime.app.request(`/api/v1/attachments/${attachments[0]?.id}`);
+    expect(fetched.status).toBe(200);
+    expect(await fetched.text()).toBe("hello attachment");
+    expect(fetched.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("rejects unsupported content and unknown ids", async () => {
+    const host = await setup();
+    const rejected = await upload(host, "app.exe", "application/octet-stream", new Uint8Array([1, 2, 3]));
+    expect(rejected.status).toBe(400);
+    expect((await jsonBody<ApiErrorBody>(rejected)).error.code).toBe("invalid_attachment");
+
+    const missing = await host.runtime.app.request("/api/v1/attachments/att_missing");
+    expect(missing.status).toBe(400);
+    expect((await jsonBody<ApiErrorBody>(missing)).error.code).toBe("invalid_attachment");
+
+    const empty = new FormData();
+    const noFiles = await host.runtime.app.request("/api/v1/attachments", { method: "POST", body: empty });
+    expect(noFiles.status).toBe(400);
+  });
+
+  it("lets sessions send attachment references that resolve host-side", async () => {
+    const host = await setup();
+    const [project] = await getProjects(host);
+    if (!project) return;
+
+    const uploadResponse = await upload(host, "diagram.txt", "text/plain", new TextEncoder().encode("diagram"));
+    const { attachments } = await jsonBody<{
+      attachments: Array<{ id: string; kind: "file" | "image"; name: string; mimeType: string }>;
+    }>(uploadResponse);
+
+    const created = await createSession(host, project.id);
+    const { session } = await jsonBody<{ session: AgentSession }>(created);
+    const marker = host.runtime.bus.latestSequence;
+    const sendResponse = await host.runtime.app.request(`/api/v1/sessions/${session.id}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "see attached", attachments }),
+    });
+    expect(sendResponse.status).toBe(202);
+    await waitForEvent(host.runtime, "turn.completed", (event) => event.sessionId === session.id, { since: marker });
+
+    const history = await host.runtime.app.request(`/api/v1/sessions/${session.id}/messages?limit=10`);
+    const messages = (
+      await jsonBody<{ messages: Array<{ role: string; parts: Array<{ type: string; attachmentId?: string }> }> }>(
+        history,
+      )
+    ).messages;
+    const user = messages.find((message) => message.role === "user");
+    expect(user?.parts.some((part) => part.type === "file" && part.attachmentId === attachments[0]?.id)).toBe(true);
+  });
+});
+
+describe("session pagination", () => {
+  it("pages merged sessions with opaque cursors and rejects bad cursors", async () => {
+    const host = await setup();
+    const [project] = await getProjects(host);
+    if (!project) return;
+
+    for (const title of ["one", "two", "three"]) {
+      await createSession(host, project.id, { title });
+    }
+
+    const first = await host.runtime.app.request(`/api/v1/projects/${project.id}/sessions?limit=2`);
+    expect(first.status).toBe(200);
+    const firstPage = await jsonBody<{ sessions: AgentSession[]; nextCursor: string | null }>(first);
+    expect(firstPage.sessions).toHaveLength(2);
+    expect(firstPage.nextCursor).toBeTypeOf("string");
+
+    const second = await host.runtime.app.request(
+      `/api/v1/projects/${project.id}/sessions?limit=2&cursor=${encodeURIComponent(firstPage.nextCursor ?? "")}`,
+    );
+    const secondPage = await jsonBody<{ sessions: AgentSession[] }>(second);
+    expect(secondPage.sessions).toHaveLength(1);
+    const firstIds = new Set(firstPage.sessions.map((session) => session.id));
+    expect(secondPage.sessions.every((session) => !firstIds.has(session.id))).toBe(true);
+
+    const bad = await host.runtime.app.request(`/api/v1/projects/${project.id}/sessions?cursor=not-a-cursor`);
+    expect(bad.status).toBe(400);
+    expect((await jsonBody<ApiErrorBody>(bad)).error.code).toBe("invalid_request");
+  });
+});
+
+describe("default registrations", () => {
+  it("includes the OpenCode reference provider", () => {
+    const ids = createDefaultRegistrations().map((registration) => registration.id);
+    expect(ids).toContain("mock");
+    expect(ids).toContain("opencode");
+  });
+
+  it("starts and reports a useful status when OpenCode is unreachable", async () => {
+    const host = await setup({
+      registrations: [
+        {
+          id: "opencode",
+          displayName: "OpenCode",
+          create: (config) =>
+            new OpenCodeAdapter({
+              config: { ...config, baseUrl: "http://127.0.0.1:9", requestTimeoutMs: 500 },
+              startEventStream: false,
+            }),
+        },
+      ],
+    });
+
+    const health = await host.runtime.app.request("/api/v1/health");
+    expect(health.status).toBe(200);
+
+    const providers = (
+      await jsonBody<{ providers: AgentProvider[] }>(await host.runtime.app.request("/api/v1/providers"))
+    ).providers;
+    const opencode = providers.find((provider) => provider.id === "opencode");
+    expect(opencode?.installed).toBe(false);
+    expect(opencode?.warning).toBeTruthy();
   });
 });

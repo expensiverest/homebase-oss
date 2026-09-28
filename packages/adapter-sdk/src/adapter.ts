@@ -2,13 +2,17 @@ import type {
   AgentCapabilities,
   AgentDiff,
   AgentEvent,
+  AgentMessage,
   AgentMode,
   AgentModel,
+  AgentPage,
   AgentProject,
   AgentSession,
   AgentUsage,
   ApprovalResult,
+  AttachmentId,
   CreateSessionInput,
+  PageRequest,
   ProjectId,
   ProviderDetection,
   ProviderId,
@@ -18,6 +22,8 @@ import type {
   SetModelInput,
   SetModeInput,
 } from "@homebase/protocol";
+
+import type { ResolvedAttachment } from "./attachments.js";
 
 /** Minimal logging surface handed to adapters. Never logs credentials. */
 export interface AdapterLogger {
@@ -45,6 +51,19 @@ export interface AdapterContext {
    * Throws `AdapterError` when the project is unknown or outside configured roots.
    */
   resolveProjectPath(projectId: ProjectId): Promise<string>;
+  /**
+   * Maps a canonical (or canonicalizable) directory back to a Homebase project
+   * id, or null when the directory is not inside any configured project root.
+   * Adapters use this to associate provider sessions/transcripts that carry
+   * their own working directory with a Homebase project.
+   */
+  findProjectByPath(path: string): Promise<ProjectId | null>;
+  /**
+   * Resolves an uploaded attachment id to Host-owned bytes. Adapters never read
+   * filesystem paths supplied by clients. Throws `AdapterError` with code
+   * `invalid_attachment` when the id is unknown or expired.
+   */
+  resolveAttachment(attachmentId: AttachmentId): Promise<ResolvedAttachment>;
   /**
    * Emits a normalized event to the Host. The Host stamps sequence numbers and
    * fans the event out to SSE clients; adapters never talk to clients directly.
@@ -78,18 +97,34 @@ export interface AgentAdapter {
   listModels(project: AgentProject): Promise<AgentModel[]>;
   listModes(project: AgentProject): Promise<AgentMode[]>;
 
-  listSessions(project: AgentProject): Promise<AgentSession[]>;
+  /**
+   * Lists sessions for a project. Newest-first by default; `page.cursor` moves
+   * through provider order and is opaque to callers.
+   */
+  listSessions(project: AgentProject, page?: PageRequest): Promise<AgentPage<AgentSession>>;
   getSession(sessionId: SessionId): Promise<AgentSession>;
   createSession(input: CreateSessionInput, project: AgentProject): Promise<AgentSession>;
   deleteSession?(sessionId: SessionId): Promise<void>;
 
   /**
+   * Returns historical messages for a session, newest-first by default, using
+   * opaque provider cursors. Fetched history is authoritative when reopening a
+   * session; live events are the incremental overlay.
+   */
+  listMessages(sessionId: SessionId, page?: PageRequest): Promise<AgentPage<AgentMessage>>;
+
+  /**
    * Sends a user message. Resolves once the provider has accepted the message,
    * not when the turn completes; progress arrives through normalized events.
+   * When the session is already working, providers may steer or queue according
+   * to their default behavior; clients should use `steer`/`queue` explicitly.
    */
   send(sessionId: SessionId, input: SendMessageInput): Promise<void>;
   interrupt?(sessionId: SessionId): Promise<void>;
+  /** Injects a message into the active turn. */
   steer?(sessionId: SessionId, input: SendMessageInput): Promise<void>;
+  /** Parks a message for delivery after the active turn (or starts one when idle). */
+  queue?(sessionId: SessionId, input: SendMessageInput): Promise<void>;
 
   resolveApproval?(requestId: string, result: ApprovalResult): Promise<void>;
   answerQuestion?(requestId: string, answer: QuestionAnswer): Promise<void>;

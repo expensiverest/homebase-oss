@@ -1,10 +1,13 @@
 import type { AdapterLogger, AgentAdapter } from "@homebase/adapter-sdk";
 import type {
   AgentDiff,
+  AgentMessage,
+  AgentPage,
   AgentSession,
   AgentUsage,
   ApprovalResult,
   CreateSessionInput,
+  PageRequest,
   ProjectId,
   ProviderId,
   QuestionAnswer,
@@ -19,6 +22,45 @@ import { HostError } from "../errors.js";
 import type { EventBus } from "../events/index.js";
 import type { ProjectRegistry } from "../projects/index.js";
 import type { ProviderRegistry } from "../providers/index.js";
+
+const DEFAULT_SESSION_PAGE_SIZE = 50;
+const MAX_SESSION_PAGE_SIZE = 100;
+const DEFAULT_MESSAGE_PAGE_SIZE = 50;
+const MAX_MESSAGE_PAGE_SIZE = 200;
+
+interface ProviderCursorState {
+  cursor: string | null;
+  done: boolean;
+}
+
+interface SessionCursor {
+  v: 1;
+  /** Per-provider progress through independently paginated session lists. */
+  providers: Record<ProviderId, ProviderCursorState>;
+  /** Merged items that did not fit in the previous page. */
+  pending: AgentSession[];
+}
+
+function clampPageSize(limit: number | null | undefined, fallback: number, max: number): number {
+  if (limit == null) return fallback;
+  return Math.max(1, Math.min(limit, max));
+}
+
+function encodeSessionCursor(cursor: SessionCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeSessionCursor(cursor: string): SessionCursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as SessionCursor;
+    if (parsed?.v !== 1 || typeof parsed.providers !== "object" || !Array.isArray(parsed.pending)) {
+      throw new Error("bad shape");
+    }
+    return parsed;
+  } catch {
+    throw new HostError("invalid_request", "Invalid pagination cursor.");
+  }
+}
 
 export interface SessionServiceOptions {
   providers: ProviderRegistry;
@@ -100,29 +142,79 @@ export class SessionService {
     }
   }
 
-  /** Sessions across all providers for one Homebase project. */
-  async listForProject(projectId: ProjectId): Promise<AgentSession[]> {
+  /**
+   * Sessions across all providers for one Homebase project.
+   *
+   * Providers paginate independently, so the Host merges their pages and wraps
+   * the per-provider cursors (plus any overflow) in one opaque cursor. Only
+   * forward paging is supported for the merged view; `previousCursor` is null.
+   */
+  async listForProject(projectId: ProjectId, page: PageRequest = {}): Promise<AgentPage<AgentSession>> {
     const project = this.#projects.require(projectId);
-    const collected: AgentSession[] = [];
+    const limit = clampPageSize(page.limit, DEFAULT_SESSION_PAGE_SIZE, MAX_SESSION_PAGE_SIZE);
+    const available = this.#providers.adapters();
+    const state: SessionCursor = page.cursor
+      ? decodeSessionCursor(page.cursor)
+      : {
+          v: 1,
+          providers: Object.fromEntries(available.map(({ id }) => [id, { cursor: null, done: false }])),
+          pending: [],
+        };
 
-    for (const { id, adapter } of this.#providers.adapters()) {
-      try {
-        const sessions = await adapter.listSessions(project);
-        for (const session of sessions) {
-          this.#sessions.set(session.id, session);
-          this.#providerBySession.set(session.id, id);
-          collected.push(session);
+    const collected: AgentSession[] = [...state.pending];
+    const participants = available.filter(({ id }) => id in state.providers);
+    const rounds = Math.max(1, participants.length * 4);
+
+    for (let round = 0; round < rounds && collected.length < limit; round += 1) {
+      let progressed = false;
+      for (const { id, adapter } of participants) {
+        const providerState = state.providers[id];
+        if (!providerState || providerState.done) continue;
+        try {
+          const result = await adapter.listSessions(project, {
+            limit,
+            ...(providerState.cursor !== null ? { cursor: providerState.cursor } : {}),
+          });
+          for (const session of result.items) {
+            this.#sessions.set(session.id, session);
+            this.#providerBySession.set(session.id, id);
+            collected.push(session);
+          }
+          providerState.cursor = result.nextCursor;
+          providerState.done = result.nextCursor === null;
+          progressed = true;
+        } catch (error) {
+          this.#logger.warn("Provider session listing failed.", {
+            provider: id,
+            project: projectId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          providerState.done = true;
         }
-      } catch (error) {
-        this.#logger.warn("Provider session listing failed.", {
-          provider: id,
-          project: projectId,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        if (collected.length >= limit) break;
       }
+      if (!progressed) break;
     }
 
-    return collected.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    collected.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const items = collected.slice(0, limit);
+    const overflow = collected.slice(limit);
+    const exhausted = participants.every(({ id }) => state.providers[id]?.done ?? true);
+    const nextCursor =
+      !exhausted || overflow.length > 0
+        ? encodeSessionCursor({ v: 1, providers: state.providers, pending: overflow })
+        : null;
+
+    return { items, nextCursor, previousCursor: null };
+  }
+
+  /** Historical messages for one session, newest-first, using opaque cursors. */
+  async listMessages(sessionId: SessionId, page: PageRequest = {}): Promise<AgentPage<AgentMessage>> {
+    const { adapter } = await this.#resolveAdapter(sessionId);
+    return adapter.listMessages(sessionId, {
+      limit: clampPageSize(page.limit, DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE),
+      ...(page.cursor != null ? { cursor: page.cursor } : {}),
+    });
   }
 
   async get(sessionId: SessionId): Promise<AgentSession> {
@@ -186,6 +278,15 @@ export class SessionService {
       throw new HostError("unsupported_capability", `Provider "${providerId}" does not support steering.`);
     }
     await adapter.steer(sessionId, input);
+  }
+
+  async queue(sessionId: SessionId, input: SendMessageInput): Promise<void> {
+    const { providerId, adapter } = await this.#resolveAdapter(sessionId);
+    this.#providers.requireCapability(providerId, "queue");
+    if (!adapter.queue) {
+      throw new HostError("unsupported_capability", `Provider "${providerId}" does not support queueing.`);
+    }
+    await adapter.queue(sessionId, input);
   }
 
   async setModel(sessionId: SessionId, input: SetModelInput): Promise<void> {

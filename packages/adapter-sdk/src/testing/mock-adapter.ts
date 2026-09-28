@@ -10,12 +10,14 @@ import {
   type AgentMessage,
   type AgentMode,
   type AgentModel,
+  type AgentPage,
   type AgentProject,
   type AgentSession,
   type AgentToolCall,
   type AgentUsage,
   type ApprovalResult,
   type CreateSessionInput,
+  type PageRequest,
   type ProviderDetection,
   type QuestionAnswer,
   type SendMessageInput,
@@ -43,9 +45,12 @@ interface MockSessionState {
   busy: boolean;
   abort: AbortController | null;
   queue: SendMessageInput[];
+  /** History in chronological order. */
+  messages: AgentMessage[];
 }
 
 const WORDS_PER_CHUNK = 2;
+const DEFAULT_PAGE_SIZE = 50;
 
 /**
  * Deterministic in-memory adapter used for Host development, protocol tests,
@@ -135,14 +140,16 @@ export class MockAdapter implements AgentAdapter {
           { id: "high", name: "High" },
         ],
         defaultThinkingLevel: "medium",
+        inputCapabilities: { text: true, image: true, file: true },
       },
       {
         id: "mock-beta",
         provider: this.id,
         name: "Mock Beta",
-        description: "Fast deterministic model",
+        description: "Fast deterministic text-only model",
         contextWindow: 32_000,
         maxOutputTokens: 4_096,
+        inputCapabilities: { text: true, image: false, file: false },
       },
     ];
   }
@@ -154,11 +161,12 @@ export class MockAdapter implements AgentAdapter {
     ];
   }
 
-  async listSessions(project: AgentProject): Promise<AgentSession[]> {
-    return [...this.#sessions.values()]
+  async listSessions(project: AgentProject, page: PageRequest = {}): Promise<AgentPage<AgentSession>> {
+    const sessions = [...this.#sessions.values()]
       .filter((state) => state.session.projectId === project.id)
       .map((state) => structuredClone(state.session))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return paginate(sessions, page);
   }
 
   async getSession(sessionId: string): Promise<AgentSession> {
@@ -179,7 +187,7 @@ export class MockAdapter implements AgentAdapter {
       mode: input.mode ?? "default",
       thinkingLevel: input.thinkingLevel ?? null,
     };
-    this.#sessions.set(session.id, { session, busy: false, abort: null, queue: [] });
+    this.#sessions.set(session.id, { session, busy: false, abort: null, queue: [], messages: [] });
     this.#emit(session, "session.created", { session: structuredClone(session) });
     return structuredClone(session);
   }
@@ -191,8 +199,19 @@ export class MockAdapter implements AgentAdapter {
     this.#emit(state.session, "session.deleted", { sessionId });
   }
 
+  async listMessages(sessionId: string, page: PageRequest = {}): Promise<AgentPage<AgentMessage>> {
+    const state = this.#require(sessionId);
+    const newestFirst = [...state.messages].reverse();
+    return paginate(
+      newestFirst.map((message) => structuredClone(message)),
+      page,
+      100,
+    );
+  }
+
   async send(sessionId: string, input: SendMessageInput): Promise<void> {
     const state = this.#require(sessionId);
+    await this.#recordUserMessage(state, input);
     if (state.busy) {
       state.queue.push(input);
       return;
@@ -210,16 +229,18 @@ export class MockAdapter implements AgentAdapter {
     if (!state.busy) {
       throw new AdapterError("session_not_active", "The session is not currently working.");
     }
-    const message: AgentMessage = {
-      id: `msg_${++this.#counter}`,
-      sessionId,
-      role: "user",
-      createdAt: nowTimestamp(),
-      state: "completed",
-      parts: [{ type: "text", id: `part_${++this.#counter}`, text: input.text }],
-    };
-    this.#emit(state.session, "message.started", { message });
-    this.#emit(state.session, "message.completed", { message });
+    await this.#recordUserMessage(state, input);
+    state.queue.push(input);
+  }
+
+  async queue(sessionId: string, input: SendMessageInput): Promise<void> {
+    const state = this.#require(sessionId);
+    if (!state.busy) {
+      // Nothing to queue behind: behave like a normal send.
+      await this.send(sessionId, input);
+      return;
+    }
+    await this.#recordUserMessage(state, input);
     state.queue.push(input);
   }
 
@@ -299,6 +320,34 @@ export class MockAdapter implements AgentAdapter {
     return state;
   }
 
+  async #recordUserMessage(state: MockSessionState, input: SendMessageInput): Promise<void> {
+    const parts: AgentMessage["parts"] = [{ type: "text", id: `part_${++this.#counter}`, text: input.text }];
+    for (const ref of input.attachments ?? []) {
+      if (!this.#context) {
+        throw new AdapterError("internal", "MockAdapter.init() has not been called.");
+      }
+      const resolved = await this.#context.resolveAttachment(ref.id);
+      parts.push({
+        type: ref.kind === "image" ? "image" : "file",
+        id: `part_${++this.#counter}`,
+        attachmentId: resolved.id,
+        name: resolved.filename,
+        mimeType: resolved.mimeType,
+        ...(ref.kind === "image" ? {} : { sizeBytes: resolved.size }),
+      });
+    }
+    const message: AgentMessage = {
+      id: `msg_${++this.#counter}`,
+      sessionId: state.session.id,
+      role: "user",
+      createdAt: nowTimestamp(),
+      state: "completed",
+      parts,
+    };
+    state.messages.push(message);
+    state.session.updatedAt = message.createdAt;
+  }
+
   #emit<T extends AgentEventType>(
     session: Pick<AgentSession, "id" | "projectId"> | null,
     type: T,
@@ -340,10 +389,17 @@ export class MockAdapter implements AgentAdapter {
     };
     const textPartId = `part_${++this.#counter}`;
     const textPart = { type: "text" as const, id: textPartId, text: "" };
+    const attachmentNote = (state.messages.at(-1)?.parts ?? [])
+      .filter((part) => part.type === "image" || part.type === "file")
+      .map((part) => (part.type === "image" || part.type === "file" ? part.name : undefined))
+      .filter((name): name is string => typeof name === "string" && name.length > 0);
     message.parts.push(textPart);
     this.#emit(session, "message.started", { message: structuredClone(message) });
 
     let replyText = `Mock reply to "${text}".`;
+    if (attachmentNote.length > 0) {
+      replyText += ` Received attachments: ${attachmentNote.join(", ")}.`;
+    }
 
     try {
       if (/\bthink\b/i.test(text)) {
@@ -364,6 +420,7 @@ export class MockAdapter implements AgentAdapter {
           text: reasoningText,
         });
         message.parts.push({ type: "reasoning", id: reasoningPartId, text: reasoningText });
+        this.#emit(session, "message.updated", { message: structuredClone(message) });
       }
 
       if (/\bapprove\b/i.test(text)) {
@@ -395,6 +452,7 @@ export class MockAdapter implements AgentAdapter {
       };
       this.#emit(session, "tool.completed", { toolCall: completedTool });
       message.parts.push({ type: "tool_call", id: completedTool.id, toolCall: completedTool });
+      this.#emit(session, "message.updated", { message: structuredClone(message) });
 
       for (const chunk of splitChunks(replyText)) {
         await this.#sleep(controller.signal);
@@ -405,12 +463,14 @@ export class MockAdapter implements AgentAdapter {
       message.state = "completed";
       message.updatedAt = nowTimestamp();
       this.#emit(session, "message.completed", { message: structuredClone(message) });
+      state.messages.push(structuredClone(message));
       this.#emit(session, "turn.completed", { turnId });
     } catch (error) {
       if (controller.signal.aborted) {
         message.state = "interrupted";
         message.updatedAt = nowTimestamp();
         this.#emit(session, "message.completed", { message: structuredClone(message) });
+        state.messages.push(structuredClone(message));
         this.#emit(session, "turn.interrupted", { turnId });
       } else {
         this.#emit(session, "turn.failed", { turnId, error: toAgentError(error, { provider: this.id }) });
@@ -441,8 +501,8 @@ export class MockAdapter implements AgentAdapter {
         title: `Run command: ${text}`,
         detail: text,
         options: [
-          { id: "allow", label: "Allow once", kind: "allow_once" },
-          { id: "always", label: "Always allow", kind: "allow_always" },
+          { id: "allow_once", label: "Allow once", kind: "allow_once" },
+          { id: "allow_always", label: "Always allow", kind: "allow_always" },
           { id: "deny", label: "Deny", kind: "deny" },
         ],
       },
@@ -540,6 +600,25 @@ export class MockAdapter implements AgentAdapter {
       signal.addEventListener("abort", onAbort, { once: true });
     });
   }
+}
+
+function paginate<T>(items: T[], page: PageRequest, defaultLimit = DEFAULT_PAGE_SIZE): AgentPage<T> {
+  const limit = Math.max(1, Math.min(page.limit ?? defaultLimit, 500));
+  let offset = 0;
+  if (page.cursor) {
+    const match = /^mock:(\d+)$/.exec(page.cursor);
+    if (!match) {
+      throw new AdapterError("invalid_request", "Invalid mock cursor.");
+    }
+    offset = Number(match[1]);
+  }
+  const slice = items.slice(offset, offset + limit);
+  const nextOffset = offset + slice.length;
+  return {
+    items: slice,
+    nextCursor: nextOffset < items.length ? `mock:${nextOffset}` : null,
+    previousCursor: offset > 0 ? `mock:${Math.max(0, offset - limit)}` : null,
+  };
 }
 
 function splitChunks(text: string): string[] {

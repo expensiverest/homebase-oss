@@ -8,7 +8,7 @@ import type { AdapterLogger } from "@homebase/adapter-sdk";
 import type { AgentProject, ProjectId } from "@homebase/protocol";
 
 import { HostError } from "../errors.js";
-import { canonicalizeExistingPath, pathComparisonKey, type PathAllowlist } from "../paths.js";
+import { canonicalizeExistingPath, isPathInsideRoot, pathComparisonKey, type PathAllowlist } from "../paths.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -165,5 +165,22 @@ export class ProjectRegistry {
   async resolvePath(projectId: ProjectId): Promise<string> {
     const project = this.require(projectId);
     return this.#allowlist.check(project.path);
+  }
+
+  /**
+   * Maps a provider-reported directory (for example a session location) back to
+   * a registered project, or undefined when it is outside every configured
+   * root. Exact matches win; containment covers sessions in subdirectories.
+   */
+  async findByPath(candidate: string): Promise<AgentProject | undefined> {
+    const canonical = await canonicalizeExistingPath(candidate).catch(() => path.resolve(candidate));
+    const key = pathComparisonKey(canonical);
+    for (const project of this.#projects.values()) {
+      if (pathComparisonKey(project.path) === key) return { ...project };
+    }
+    for (const project of this.#projects.values()) {
+      if (isPathInsideRoot(project.path, canonical)) return { ...project };
+    }
+    return undefined;
   }
 }

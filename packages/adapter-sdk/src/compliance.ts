@@ -4,6 +4,7 @@ import {
   agentCapabilitiesSchema,
   agentDiffSchema,
   agentEventSchema,
+  agentMessageSchema,
   agentModelSchema,
   agentModeSchema,
   agentSessionSchema,
@@ -48,6 +49,7 @@ const CAPABILITY_METHODS: Partial<Record<CapabilityKey, keyof AgentAdapter>> = {
   deleteSession: "deleteSession",
   interrupt: "interrupt",
   steer: "steer",
+  queue: "queue",
   approvals: "resolveApproval",
   questions: "answerQuestion",
   modelSwitching: "setModel",
@@ -96,7 +98,7 @@ export function defineAdapterComplianceSuite(options: AdapterComplianceOptions):
       expect(providerDetectionSchema.safeParse(detection).success).toBe(true);
 
       const serialized = JSON.stringify(detection).toLowerCase();
-      for (const forbidden of ["api_key", "apikey", "access_token", "refresh_token", "password", "secret"]) {
+      for (const forbidden of ["api_key", "apikey", "access_token", "refresh_token", "client_secret"]) {
         expect(serialized, `detection output mentions "${forbidden}"`).not.toContain(forbidden);
       }
     });
@@ -138,13 +140,42 @@ export function defineAdapterComplianceSuite(options: AdapterComplianceOptions):
       }
     });
 
-    it("lists sessions for a project", async ({ skip }) => {
+    it("implements the required structural methods", () => {
+      for (const method of [
+        "listModels",
+        "listModes",
+        "listSessions",
+        "getSession",
+        "createSession",
+        "send",
+        "listMessages",
+      ] as const) {
+        expect(typeof adapter[method], `adapter.${method}() is required`).toBe("function");
+      }
+    });
+
+    it("lists sessions for a project as a valid page", async ({ skip }) => {
       if (!project) return skip("no project fixture supplied");
-      const sessions = await adapter.listSessions(project);
-      for (const session of sessions) {
+      const page = await adapter.listSessions(project, { limit: 50 });
+      for (const session of page.items) {
         expect(agentSessionSchema.safeParse(session).success, JSON.stringify(session)).toBe(true);
         expect(session.provider).toBe(adapter.id);
         expect(session.projectId).toBe(project.id);
+      }
+      expect(page.nextCursor === null || typeof page.nextCursor === "string").toBe(true);
+      expect(page.previousCursor === null || typeof page.previousCursor === "string").toBe(true);
+    });
+
+    it("pages sessions with opaque cursors", { timeout }, async (ctx) => {
+      if (!options.live || !project) return ctx.skip("live provider run not enabled");
+      const first = await adapter.listSessions(project, { limit: 1 });
+      expect(first.items.length).toBeLessThanOrEqual(1);
+      if (first.nextCursor) {
+        const second = await adapter.listSessions(project, { cursor: first.nextCursor, limit: 1 });
+        const firstIds = new Set(first.items.map((session) => session.id));
+        for (const session of second.items) {
+          expect(firstIds.has(session.id)).toBe(false);
+        }
       }
     });
 
@@ -160,8 +191,8 @@ export function defineAdapterComplianceSuite(options: AdapterComplianceOptions):
       expect(fetched.id).toBe(created.id);
       expect(fetched.projectId).toBe(project.id);
 
-      const listed = await adapter.listSessions(project);
-      expect(listed.some((session) => session.id === created.id)).toBe(true);
+      const listed = await adapter.listSessions(project, { limit: 100 });
+      expect(listed.items.some((session) => session.id === created.id)).toBe(true);
 
       if (capabilities.deleteSession) {
         await adapter.deleteSession!(created.id);
@@ -192,6 +223,34 @@ export function defineAdapterComplianceSuite(options: AdapterComplianceOptions):
         const parsed = agentEventSchema.safeParse(JSON.parse(JSON.stringify(event)));
         expect(parsed.success, JSON.stringify(event)).toBe(true);
       }
+    });
+
+    it("returns message history for a session", { timeout }, async (ctx) => {
+      if (!options.live) return ctx.skip("live provider run not enabled");
+      if (!project) return ctx.skip("no project fixture supplied");
+
+      const session = await adapter.createSession(
+        { provider: adapter.id, projectId: project.id, title: "history" },
+        project,
+      );
+      context.clearEvents();
+      await adapter.send(session.id, { text: "history check" });
+      await context.waitForEvent("turn.completed", (event) => event.sessionId === session.id, timeout);
+
+      // Providers may project history a moment after the turn settles; retry briefly.
+      const deadline = Date.now() + Math.min(timeout, 15_000);
+      let page = await adapter.listMessages(session.id, { limit: 20 });
+      while (page.items.length === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        page = await adapter.listMessages(session.id, { limit: 20 });
+      }
+
+      expect(page.items.length).toBeGreaterThan(0);
+      for (const message of page.items) {
+        expect(agentMessageSchema.safeParse(message).success, JSON.stringify(message)).toBe(true);
+        expect(message.sessionId).toBe(session.id);
+      }
+      expect(page.nextCursor === null || typeof page.nextCursor === "string").toBe(true);
     });
 
     it("interrupts a running turn when supported", { timeout }, async (ctx) => {

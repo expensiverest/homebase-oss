@@ -17,4 +17,5 @@ export * from "./content.js";
 export * from "./events.js";
 export * from "./errors.js";
 export * from "./inputs.js";
+export * from "./pagination.js";
 export * from "./version.js";

@@ -1,15 +1,20 @@
 import type { AgentEvent, AgentEventType } from "@homebase/protocol";
 
-import { AdapterError } from "../errors.js";
 import type { AdapterLogger } from "../adapter.js";
+import type { ResolvedAttachment } from "../attachments.js";
+import { AdapterError } from "../errors.js";
 import { createRecordingLogger, type RecordedLogEntry } from "../logger.js";
 
 export interface TestAdapterContextOptions {
   /** Canonical project path returned by `resolveProjectPath`. */
   projectPath?: string;
+  /** Project id returned by `findProjectByPath` for the canonical path. */
+  projectId?: string;
   config?: Record<string, unknown>;
   hostVersion?: string;
   logger?: AdapterLogger;
+  /** Attachment bytes available to the adapter under test. */
+  attachments?: Map<string, ResolvedAttachment>;
 }
 
 interface Waiter {
@@ -27,6 +32,8 @@ export interface TestAdapterContext {
   /** Every event emitted through this context, in order. */
   readonly events: AgentEvent[];
   resolveProjectPath(projectId: string): Promise<string>;
+  findProjectByPath(path: string): Promise<string | null>;
+  resolveAttachment(attachmentId: string): Promise<ResolvedAttachment>;
   emit(event: AgentEvent): void;
   waitForEvent<T extends AgentEventType>(
     type: T,
@@ -39,13 +46,14 @@ export interface TestAdapterContext {
 
 /**
  * In-memory `AdapterContext` for unit tests, compliance suites, and examples.
- * Records emitted events, provides `waitForEvent`, and refuses project paths it
- * was not given (mirroring the Host's allowlist behavior).
+ * Records emitted events, provides `waitForEvent`, and refuses project paths and
+ * attachments it was not given (mirroring the Host's allowlist behavior).
  */
 export function createTestAdapterContext(options: TestAdapterContextOptions = {}): TestAdapterContext {
   const recording = createRecordingLogger();
   const events: AgentEvent[] = [];
   const waiters: Waiter[] = [];
+  const attachments = options.attachments ?? new Map();
 
   const emit = (event: AgentEvent) => {
     events.push(event);
@@ -68,6 +76,19 @@ export function createTestAdapterContext(options: TestAdapterContextOptions = {}
         throw new AdapterError("project_not_found", `Test context has no project path for project "${projectId}".`);
       }
       return options.projectPath;
+    },
+    async findProjectByPath(path) {
+      if (options.projectPath !== undefined && path === options.projectPath) {
+        return options.projectId ?? null;
+      }
+      return null;
+    },
+    async resolveAttachment(attachmentId) {
+      const attachment = attachments.get(attachmentId);
+      if (!attachment) {
+        throw new AdapterError("invalid_attachment", `Unknown or expired attachment "${attachmentId}".`);
+      }
+      return attachment;
     },
     emit,
     waitForEvent(type, predicate, timeoutMs = 5_000) {

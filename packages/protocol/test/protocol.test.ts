@@ -4,6 +4,7 @@ import {
   AGENT_EVENT_TYPES,
   agentEventSchema,
   agentMessageSchema,
+  agentModelSchema,
   agentProjectSchema,
   agentProviderSchema,
   agentSessionSchema,
@@ -13,10 +14,12 @@ import {
   defineCapabilities,
   noCapabilities,
   nowTimestamp,
+  pageRequestSchema,
   questionAnswerSchema,
   sendMessageInputSchema,
   sequencedAgentEventSchema,
   timestampSchema,
+  toAgentPage,
   type AgentEventType,
 } from "../src/index.js";
 
@@ -76,6 +79,7 @@ function sampleData(type: AgentEventType): unknown {
     case "turn.interrupted":
       return { turnId: "turn_1" };
     case "message.started":
+    case "message.updated":
     case "message.completed":
       return { message };
     case "message.delta":
@@ -194,6 +198,38 @@ describe("core entities", () => {
     const roundTripped = agentMessageSchema.parse(JSON.parse(JSON.stringify(parsed)));
     expect(roundTripped).toEqual(parsed);
   });
+
+  it("allows model-specific input capabilities", () => {
+    const model = {
+      id: "example/model",
+      provider: "mock",
+      name: "Example",
+      inputCapabilities: { text: true, image: true, file: false },
+    };
+    expect(agentModelSchema.parse(model).inputCapabilities?.image).toBe(true);
+    expect(agentModelSchema.safeParse({ ...model, inputCapabilities: { text: true } }).success).toBe(false);
+  });
+
+  it("allows historical image/file parts without a resolvable attachment id", () => {
+    const historical = {
+      ...message,
+      parts: [
+        { type: "image" as const, id: "part_img", mimeType: "image/png", name: "screenshot.png" },
+        { type: "file" as const, id: "part_file", name: "notes.pdf", mimeType: "application/pdf" },
+      ],
+    };
+    expect(agentMessageSchema.safeParse(historical).success).toBe(true);
+  });
+
+  it("pages opaque cursors through the neutral page shape", () => {
+    expect(pageRequestSchema.parse({ cursor: "abc", limit: 25 })).toEqual({ cursor: "abc", limit: 25 });
+    expect(pageRequestSchema.safeParse({ limit: 0 }).success).toBe(false);
+    expect(pageRequestSchema.safeParse({ limit: 5_000 }).success).toBe(false);
+
+    const page = toAgentPage([1, 2], { next: "n1", previous: "p1" });
+    expect(page).toEqual({ items: [1, 2], nextCursor: "n1", previousCursor: "p1" });
+    expect(toAgentPage([]).nextCursor).toBeNull();
+  });
 });
 
 describe("normalized events", () => {
@@ -210,6 +246,7 @@ describe("normalized events", () => {
       "turn.failed",
       "turn.interrupted",
       "message.started",
+      "message.updated",
       "message.delta",
       "message.completed",
       "reasoning.started",

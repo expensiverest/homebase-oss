@@ -52,6 +52,18 @@ This is the most important boundary in the product:
 - `redactSecrets()` in the adapter SDK is a best-effort safety net for logs (API keys, bearer tokens,
   private keys, `KEY=value` patterns). It is not a license to log secrets.
 
+### Attachments
+
+- Bytes are uploaded to the Host (`POST /api/v1/attachments`), stored in memory only, and addressed by
+  random ids. Clients never send or receive filesystem paths.
+- Initial allowlist: `text/plain`, `text/markdown`, and raster images (`png`, `jpeg`, `gif`, `webp`)
+  with magic-byte verification; NUL bytes are rejected in text files.
+- Limits: 20 MiB per file, 10 files per upload, 64 MiB total store with LRU eviction, 6-hour TTL, and a
+  route-specific 25 MiB request cap (the global JSON body limit stays 1 MiB).
+- Adapters receive bytes only through `AdapterContext.resolveAttachment(id)`; a provider adapter converts
+  them to its own representation internally (for example data URLs for OpenCode).
+- Attachment responses are `no-store`; nothing is written to disk, so nothing persists indefinitely.
+
 ### API hardening in place
 
 - 1 MiB request body limit; strict JSON validation with stable `invalid_request` errors.
@@ -64,7 +76,6 @@ This is the most important boundary in the product:
 
 - Pairing with QR flow, one-time credentials, and device revocation.
 - Strict CSP for the PWA; Markdown sanitization that never renders raw agent HTML; tool output escaping.
-- Attachment upload endpoint with MIME validation, size caps, and no cache.
 - Rate limiting for pairing, auth failures, and expensive actions.
 - Security headers on the served PWA.
 - Fixture privacy audit and secret scan in CI.

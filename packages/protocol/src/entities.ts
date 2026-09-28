@@ -59,6 +59,22 @@ export const agentThinkingLevelSchema = z.object({
 });
 export type AgentThinkingLevel = z.infer<typeof agentThinkingLevelSchema>;
 
+/**
+ * Input kinds a specific model accepts. `AgentCapabilities.attachments` /
+ * `imageInput` describe whether the provider supports the concept at all; this
+ * refines it per model (for example a provider that supports images while a
+ * selected model only accepts text).
+ *
+ * `file` covers opaque documents such as PDFs, audio, or video that the model
+ * treats as a file input rather than an inline image.
+ */
+export const modelInputCapabilitiesSchema = z.object({
+  text: z.boolean(),
+  image: z.boolean(),
+  file: z.boolean(),
+});
+export type ModelInputCapabilities = z.infer<typeof modelInputCapabilitiesSchema>;
+
 export const agentModelSchema = z.object({
   id: modelIdSchema,
   provider: providerIdSchema,
@@ -68,6 +84,8 @@ export const agentModelSchema = z.object({
   maxOutputTokens: z.number().int().positive().nullable().optional(),
   thinkingLevels: z.array(agentThinkingLevelSchema).optional(),
   defaultThinkingLevel: z.string().nullable().optional(),
+  /** What this specific model accepts. Absent means "unknown; assume provider level". */
+  inputCapabilities: modelInputCapabilitiesSchema.optional(),
   deprecated: z.boolean().optional(),
 });
 export type AgentModel = z.infer<typeof agentModelSchema>;

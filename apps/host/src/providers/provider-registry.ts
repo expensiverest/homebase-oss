@@ -5,13 +5,20 @@ import {
   type AdapterLogger,
   type AdapterRegistration,
   type AgentAdapter,
+  type ResolvedAttachment,
 } from "@homebase/adapter-sdk";
 import {
+  agentModeSchema,
+  agentModelSchema,
   defineCapabilities,
   noCapabilities,
   nowTimestamp,
   type AgentCapabilities,
+  type AgentModel,
+  type AgentMode,
   type AgentProvider,
+  type AgentProject,
+  type AttachmentId,
   type CapabilityKey,
   type ProjectId,
   type ProviderDetection,
@@ -29,6 +36,10 @@ export interface ProviderRegistryOptions {
   hostVersion: string;
   /** Canonical, allowlisted path resolver owned by the project registry. */
   resolveProjectPath: (projectId: ProjectId) => Promise<string>;
+  /** Reverse lookup used by adapters to associate provider directories with projects. */
+  findProjectByPath: (path: string) => Promise<ProjectId | null>;
+  /** Host-owned attachment resolver exposed to adapters. */
+  resolveAttachment: (attachmentId: AttachmentId) => Promise<ResolvedAttachment>;
 }
 
 interface RegisteredProvider {
@@ -51,6 +62,8 @@ export class ProviderRegistry {
   readonly #logger: AdapterLogger;
   readonly #hostVersion: string;
   readonly #resolveProjectPath: (projectId: ProjectId) => Promise<string>;
+  readonly #findProjectByPath: (path: string) => Promise<ProjectId | null>;
+  readonly #resolveAttachment: (attachmentId: AttachmentId) => Promise<ResolvedAttachment>;
   readonly #providers = new Map<ProviderId, RegisteredProvider>();
 
   constructor(options: ProviderRegistryOptions) {
@@ -59,6 +72,8 @@ export class ProviderRegistry {
     this.#logger = options.logger;
     this.#hostVersion = options.hostVersion;
     this.#resolveProjectPath = options.resolveProjectPath;
+    this.#findProjectByPath = options.findProjectByPath;
+    this.#resolveAttachment = options.resolveAttachment;
   }
 
   register(registration: AdapterRegistration): void {
@@ -119,6 +134,8 @@ export class ProviderRegistry {
       config: Object.freeze({ ...providerConfig }),
       logger: createConsoleLogger(`provider:${entry.registration.id}`, { level: this.#config.host.logLevel }),
       resolveProjectPath: this.#resolveProjectPath,
+      findProjectByPath: this.#findProjectByPath,
+      resolveAttachment: this.#resolveAttachment,
       emit: (event) => {
         this.#bus.publish(event);
       },
@@ -222,6 +239,47 @@ export class ProviderRegistry {
         details: { provider: providerId, capability },
       });
     }
+  }
+
+  /** Model catalog with capability gating and schema validation of adapter output. */
+  async listModels(providerId: ProviderId, project: AgentProject): Promise<AgentModel[]> {
+    this.requireCapability(providerId, "models");
+    const models = await this.requireAdapter(providerId).listModels(project);
+    return this.#validateCatalog(providerId, "model", models, agentModelSchema);
+  }
+
+  /** Mode catalog with capability gating and schema validation of adapter output. */
+  async listModes(providerId: ProviderId, project: AgentProject): Promise<AgentMode[]> {
+    this.requireCapability(providerId, "modes");
+    const modes = await this.requireAdapter(providerId).listModes(project);
+    return this.#validateCatalog(providerId, "mode", modes, agentModeSchema);
+  }
+
+  #validateCatalog<T>(
+    providerId: ProviderId,
+    kind: string,
+    entries: T[],
+    schema: {
+      safeParse: (value: unknown) => {
+        success: boolean;
+        data?: T;
+        error?: { issues: Array<{ path: PropertyKey[]; message: string }> };
+      };
+    },
+  ): T[] {
+    const valid: T[] = [];
+    for (const entry of entries) {
+      const parsed = schema.safeParse(entry);
+      if (parsed.success && parsed.data !== undefined) {
+        valid.push(parsed.data);
+      } else {
+        this.#logger.warn(`Adapter returned an invalid ${kind}; ignoring it.`, {
+          provider: providerId,
+          issues: parsed.error?.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`) ?? [],
+        });
+      }
+    }
+    return valid;
   }
 
   /** Providers that are installed and compatible, for project availability. */

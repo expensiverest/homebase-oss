@@ -59,6 +59,12 @@ export const agentEventSchema = z.discriminatedUnion("type", [
   event("turn.interrupted", z.object({ turnId: z.string().min(1) })),
 
   event("message.started", z.object({ message: agentMessageSchema })),
+  /**
+   * Full message snapshot after parts are added or changed (for example a tool
+   * part appearing mid-turn). Clients upsert by message id. Deltas remain the
+   * streaming mechanism for text.
+   */
+  event("message.updated", z.object({ message: agentMessageSchema })),
   event("message.delta", z.object({ messageId: messageIdSchema, partId: partIdSchema, delta: z.string() })),
   event("message.completed", z.object({ message: agentMessageSchema })),
 

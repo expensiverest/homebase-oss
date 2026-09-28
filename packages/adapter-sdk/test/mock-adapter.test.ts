@@ -42,7 +42,7 @@ describe("MockAdapter", () => {
     expect(created).toBeDefined();
 
     const listed = await adapter.listSessions(PROJECT);
-    expect(listed.map((entry) => entry.id)).toContain(session.id);
+    expect(listed.items.map((entry) => entry.id)).toContain(session.id);
   });
 
   it("streams a full turn as normalized events", async () => {
@@ -91,14 +91,14 @@ describe("MockAdapter", () => {
 
     const requested = await context.waitForEvent("approval.requested");
     expect(requested.data.approval.sessionId).toBe(session.id);
-    expect(requested.data.approval.options.map((option) => option.id)).toEqual(["allow", "always", "deny"]);
+    expect(requested.data.approval.options.map((option) => option.id)).toEqual(["allow_once", "allow_always", "deny"]);
 
-    await adapter.resolveApproval(requested.data.approval.id, { optionId: "allow" });
+    await adapter.resolveApproval(requested.data.approval.id, { optionId: "allow_once" });
     const completed = await context.waitForEvent("turn.completed");
     expect(completed.type).toBe("turn.completed");
 
     const resolution = context.events.find((event) => event.type === "approval.resolved");
-    expect(resolution?.type === "approval.resolved" ? resolution.data.resolution.optionId : "").toBe("allow");
+    expect(resolution?.type === "approval.resolved" ? resolution.data.resolution.optionId : "").toBe("allow_once");
   });
 
   it("treats a denied approval as a completed turn with a denial note", async () => {
@@ -190,7 +190,7 @@ describe("MockAdapter", () => {
   it("rejects operations on unknown sessions with stable errors", async () => {
     await expect(adapter.getSession("ses_missing")).rejects.toBeInstanceOf(AdapterError);
     await expect(adapter.getSession("ses_missing")).rejects.toMatchObject({ code: "session_not_found" });
-    await expect(adapter.resolveApproval("apr_missing", { optionId: "allow" })).rejects.toMatchObject({
+    await expect(adapter.resolveApproval("apr_missing", { optionId: "allow_once" })).rejects.toMatchObject({
       code: "not_found",
     });
   });
@@ -212,5 +212,106 @@ describe("MockAdapter", () => {
       expect(event.provider).toBe("mock");
       expect(() => JSON.stringify(event)).not.toThrow();
     }
+  });
+
+  it("pages sessions and message history with opaque cursors", async () => {
+    const first = await adapter.createSession({ provider: "mock", projectId: PROJECT.id, title: "one" }, PROJECT);
+    const second = await adapter.createSession({ provider: "mock", projectId: PROJECT.id, title: "two" }, PROJECT);
+    await adapter.createSession({ provider: "mock", projectId: PROJECT.id, title: "three" }, PROJECT);
+
+    const pageOne = await adapter.listSessions(PROJECT, { limit: 2 });
+    expect(pageOne.items).toHaveLength(2);
+    expect(pageOne.nextCursor).toBeTypeOf("string");
+    expect(pageOne.previousCursor).toBeNull();
+
+    const pageTwo = await adapter.listSessions(PROJECT, { cursor: pageOne.nextCursor ?? undefined, limit: 2 });
+    const seen = new Set(pageOne.items.map((session) => session.id));
+    for (const session of pageTwo.items) {
+      expect(seen.has(session.id)).toBe(false);
+    }
+    expect(pageTwo.items).toHaveLength(1);
+
+    await adapter.send(first.id, { text: "first message" });
+    await context.waitForEvent("turn.completed");
+    await adapter.send(second.id, { text: "second message" });
+    await context.waitForEvent("turn.completed", (event) => event.sessionId === second.id);
+
+    const history = await adapter.listMessages(first.id, { limit: 1 });
+    expect(history.items).toHaveLength(1);
+    expect(history.items[0]?.role).toBe("assistant");
+    expect(history.nextCursor).toBeTypeOf("string");
+    const older = await adapter.listMessages(first.id, { cursor: history.nextCursor ?? undefined, limit: 5 });
+    expect(older.items.some((message) => message.role === "user")).toBe(true);
+  });
+
+  it("keeps user and assistant messages in history", async () => {
+    const session = await adapter.createSession({ provider: "mock", projectId: PROJECT.id }, PROJECT);
+    context.clearEvents();
+    await adapter.send(session.id, { text: "remember this" });
+    await context.waitForEvent("turn.completed");
+
+    const history = await adapter.listMessages(session.id, { limit: 10 });
+    const roles = history.items.map((message) => message.role).sort();
+    expect(roles).toEqual(["assistant", "user"]);
+    const user = history.items.find((message) => message.role === "user");
+    const text = user?.parts.find((part) => part.type === "text");
+    expect(text?.type === "text" ? text.text : "").toBe("remember this");
+  });
+
+  it("queues behind an active turn and starts immediately when idle", async () => {
+    const slow = new MockAdapter({ stepDelayMs: 5 });
+    slow.init(context);
+    const session = await slow.createSession({ provider: "mock", projectId: PROJECT.id }, PROJECT);
+    context.clearEvents();
+
+    // Idle queue behaves like a normal send.
+    await slow.queue(session.id, { text: "idle queue" });
+    await context.waitForEvent("turn.completed");
+
+    context.clearEvents();
+    await slow.send(session.id, { text: "first" });
+    await slow.queue(session.id, { text: "second" });
+    await vi.waitFor(() => {
+      expect(context.events.filter((event) => event.type === "turn.completed").length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it("resolves attachments through the adapter context", async () => {
+    const bytes = new TextEncoder().encode("notes");
+    const withAttachments = createTestAdapterContext({
+      projectPath: PROJECT.path,
+      attachments: new Map([
+        ["att_1", { id: "att_1", filename: "notes.txt", mimeType: "text/plain", size: bytes.byteLength, bytes }],
+      ]),
+    });
+    const attachmentAdapter = new MockAdapter({ stepDelayMs: 0 });
+    attachmentAdapter.init(withAttachments);
+    const session = await attachmentAdapter.createSession({ provider: "mock", projectId: PROJECT.id }, PROJECT);
+
+    await attachmentAdapter.send(session.id, {
+      text: "see attachment",
+      attachments: [{ id: "att_1", kind: "file", name: "notes.txt", mimeType: "text/plain" }],
+    });
+    await withAttachments.waitForEvent("turn.completed");
+
+    const history = await attachmentAdapter.listMessages(session.id, { limit: 10 });
+    const user = history.items.find((message) => message.role === "user");
+    const filePart = user?.parts.find((part) => part.type === "file");
+    expect(filePart?.type === "file" ? filePart.attachmentId : undefined).toBe("att_1");
+
+    await expect(
+      attachmentAdapter.send(session.id, {
+        text: "missing",
+        attachments: [{ id: "att_missing", kind: "file", name: "x.txt", mimeType: "text/plain" }],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_attachment" });
+  });
+
+  it("declares per-model input capabilities", async () => {
+    const models = await adapter.listModels(PROJECT);
+    const alpha = models.find((model) => model.id === "mock-alpha");
+    const beta = models.find((model) => model.id === "mock-beta");
+    expect(alpha?.inputCapabilities).toEqual({ text: true, image: true, file: true });
+    expect(beta?.inputCapabilities).toEqual({ text: true, image: false, file: false });
   });
 });

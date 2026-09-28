@@ -48,11 +48,12 @@ apps/
 packages/
   protocol/    @homebase/protocol    provider-neutral entities, events, capabilities, errors
   adapter-sdk/ @homebase/adapter-sdk adapter contract, compliance suite, test utilities
+  adapter-opencode/                  OpenCode reference adapter (first real provider)
 docs/
 ```
 
-`apps/web` (the PWA) is created in Phase 4; no web code exists yet. Provider packages
-(`adapter-opencode`, `adapter-claude`, `transport-acp`, ...) are added in their phases.
+`apps/web` (the PWA) is created in Phase 4; no web code exists yet. Claude and the ACP providers are
+added in their phases.
 
 ## Packages
 
@@ -90,18 +91,19 @@ Rules:
 
 `apps/host` is the Phase 1 control plane. It wires:
 
-| Module                               | Responsibility                                                                                                 |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `src/config/config.ts`               | JSON file + env loading, Zod validation, security invariants, secret-free summaries                            |
-| `src/paths.ts`                       | `PathAllowlist`: realpath canonicalization, containment checks, loopback detection                             |
-| `src/projects/project-registry.ts`   | Filesystem discovery of git repositories under configured roots, stable project ids, canonical path resolution |
-| `src/providers/provider-registry.ts` | Adapter registration, initialization, detection, capabilities, availability, capability assertions             |
-| `src/events/event-bus.ts`            | Global monotonic sequence numbers, bounded replay buffer, fanout                                               |
-| `src/sessions/session-service.ts`    | Session routing to adapters, in-memory index, pending approval/question routing                                |
-| `src/auth/auth.ts`                   | Dev-token authentication with constant-time comparison and failure throttling                                  |
-| `src/api/app.ts`                     | REST API, stable errors, auth middleware, body limits, no-store                                                |
-| `src/api/sse.ts`                     | `GET /api/v1/events`: replay via `Last-Event-ID`/`?since=`, `ready`/`resync` control events                    |
-| `src/server.ts`                      | Runtime wiring; `createDefaultRegistrations()` provides the built-in mock provider                             |
+| Module                                | Responsibility                                                                                                 |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `src/config/config.ts`                | JSON file + env loading, Zod validation, security invariants, secret-free summaries                            |
+| `src/paths.ts`                        | `PathAllowlist`: realpath canonicalization, containment checks, loopback detection                             |
+| `src/projects/project-registry.ts`    | Filesystem discovery of git repositories under configured roots, stable project ids, canonical path resolution |
+| `src/providers/provider-registry.ts`  | Adapter registration, initialization, detection, capabilities, availability, capability assertions             |
+| `src/events/event-bus.ts`             | Global monotonic sequence numbers, bounded replay buffer, fanout                                               |
+| `src/sessions/session-service.ts`     | Session routing to adapters, in-memory index, pending approval/question routing                                |
+| `src/auth/auth.ts`                    | Dev-token authentication with constant-time comparison and failure throttling                                  |
+| `src/attachments/attachment-store.ts` | Ephemeral Host-owned attachment bytes (upload, TTL/LRU, MIME and magic-byte checks)                            |
+| `src/api/app.ts`                      | REST API, stable errors, auth middleware, body limits, no-store, catalogs, attachments                         |
+| `src/api/sse.ts`                      | `GET /api/v1/events`: replay via `Last-Event-ID`/`?since=`, `ready`/`resync` control events                    |
+| `src/server.ts`                       | Runtime wiring; `createDefaultRegistrations()` provides the mock and OpenCode providers                        |
 
 ### Request and event flow
 
@@ -149,8 +151,8 @@ log and here:
    `adapter.subscribe(handler)`. The final contract inverts it: the Host owns sequencing and fanout, and
    adapters emit into a Host-provided sink. This removes duplicated listener plumbing from every adapter.
 2. **Adapter methods receive `AgentProject`.** `listSessions`/`createSession`/`listModels`/`listModes`
-   take the project record (or rely on `resolveProjectPath` for session-scoped operations), so adapters
-   never need to resolve paths themselves.
+   take the project record (or rely on `resolveProjectPath`/`findProjectByPath` for session-scoped
+   operations), so adapters never resolve paths themselves.
 3. **`AgentSession.state` includes `unknown`.** Transcript-backed providers cannot always report the run
    state of a persisted session; `unknown` prevents lying with a stale `idle`/`working` state.
 4. **The mock adapter is SDK test tooling.** It lives in `@homebase/adapter-sdk/testing` so the compliance
@@ -158,14 +160,21 @@ log and here:
    it by default and it can be disabled with `providers.mock.enabled = false`.
 5. **Every event is sequenced, not only durable ones.** The plan asks for global monotonic sequencing;
    applying it to deltas as well makes reconnect replay uniform.
+6. **History and queue are first-class contract members (Phase 2).** `listMessages` and `queue` were
+   added when the first real adapter exposed the gaps; session listing became page-based because the
+   OpenCode server is naturally cursor-paginated.
+7. **`message.updated` exists.** Tool parts appear mid-turn, and text deltas alone cannot announce new
+   parts; the snapshot event keeps clients coherent without provider-specific event names.
+8. **Attachments are Host-owned bytes.** `POST /api/v1/attachments` + `AdapterContext.resolveAttachment`
+   replaced any notion of adapters reading client paths; storage is in-memory with TTL/LRU cleanup.
 
 ## Current status
 
-| Phase                                       | Status                                                                     |
-| ------------------------------------------- | -------------------------------------------------------------------------- |
-| 0 — Repository and specification foundation | Complete                                                                   |
-| 1 — Host core                               | Implemented (config, registries, bus, SSE, REST, auth placeholder, health) |
-| 2 — OpenCode reference adapter              | Next                                                                       |
-| 3 — Claude adapter                          | Planned                                                                    |
-| 4 — PWA                                     | Planned                                                                    |
-| 5 — Security and pairing                    | Planned (auth placeholder exists)                                          |
+| Phase                                       | Status                                                                                        |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 0 — Repository and specification foundation | Complete                                                                                      |
+| 1 — Host core                               | Implemented (config, registries, bus, SSE, REST, auth placeholder, health)                    |
+| 2 — OpenCode reference adapter              | Complete (protocol/SDK corrections, Host attachments/catalogs/history, adapter + live checks) |
+| 3 — Claude adapter                          | Planned                                                                                       |
+| 4 — PWA                                     | Planned                                                                                       |
+| 5 — Security and pairing                    | Planned (auth placeholder exists)                                                             |

@@ -1612,3 +1612,22 @@ diverge (rule 17).
     canonical project allowlisting, mock provider registration, and stable errors; covered by 54 Host
     tests plus protocol/adapter-SDK suites.
 
+- **2026-09-27 — Phase 2 (OpenCode reference adapter + provider-neutral contract corrections).**
+  - **§9:** the adapter contract gained a required `listMessages(sessionId, page?)` returning
+    `AgentPage<AgentMessage>`; `listSessions(project, page?)` now returns `AgentPage<AgentSession>`
+    (opaque cursors, bounded pages); and an optional `queue(sessionId, input)` gated by the existing
+    `queue` capability. Send/steer/queue are distinct neutral operations.
+  - **§8:** added `message.updated` (full message snapshot when parts change mid-turn, for example tool
+    calls); `message.delta` remains the text streaming mechanism.
+  - **§7:** `AgentModel.inputCapabilities` (`text`/`image`/`file`) lets per-model input support refine
+    provider-level `attachments`/`imageInput`; image/file parts may omit `attachmentId` when a provider
+    exposes only historical attachment metadata.
+  - **Attachments:** the Host owns an ephemeral attachment store (multipart upload, MIME allowlist,
+    magic-byte checks, size caps, TTL/LRU cleanup, no disk writes). Adapters receive bytes through
+    `AdapterContext.resolveAttachment`; clients never provide paths.
+  - **OpenCode:** `packages/adapter-opencode` implements the adapter against OpenCode 2.0.18's `/api/*`
+    server API and is a default Host registration; `plans`, `usage`, and `slashCommands` are honestly
+    declared unsupported/deferred.
+  - **Live checks:** `HOMEBASE_TEST_OPENCODE=1` verified detection, catalogs, session lifecycle,
+    streaming, history reload, resume, interrupt, and diffs against OpenCode 2.0.18.
+
