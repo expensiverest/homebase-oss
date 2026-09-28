@@ -8,8 +8,8 @@ const AnimatedBrain = lazy(() => import("./AnimatedBrain.js"));
  * Adapted from Beautiful UI "Thinking" (MIT, © 2026 Shane Levine; see
  * THIRD_PARTY_NOTICES.md). Kept: the header that shimmers while working and
  * settles to a quiet label, the chevron, and the expandable trace behind a thin
- * left rail. Changed: the sparkle glyph is replaced by lucide-react-motion's
- * Brain (looping "spinner" timing while active, static when settled); open
+ * left rail. Changed: the sparkle glyph is replaced by a Brain
+ * whose fold-ripple animation loops while active (AnimatedBrain.tsx) and is static when settled; open
  * state follows the real `active` prop instead of a scripted timeline.
  * Removed: the self-running STAGES sequence and the demo Steps/Search/Coding
  * content. Homebase renders only reasoning text a provider actually sent.

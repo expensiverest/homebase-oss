@@ -1695,8 +1695,8 @@ diverge (rule 17).
     content, `@` sources, slash commands, dictation and the Prompt Bar shader were removed. Provenance is in
     `THIRD_PARTY_NOTICES.md`.
   - **Execution trace:** each run is one narrative. Live: Orbit until anything is visible (elapsed time from
-    `turn.started`, recorded in the live overlay as `runStartedAt`), then Thinking (lucide-react-motion `Brain`,
-    looping only while reasoning streams), Task Rows for tools and plan steps, then streaming text. Finished:
+    `turn.started`, recorded in the live overlay as `runStartedAt`), then Thinking (fold-ripple `Brain`, adapted
+    from Lucide-React-Motion and looping only while reasoning streams), Task Rows for tools and plan steps, then streaming text. Finished:
     "Worked for …" folds Thinking, interim updates and Tool Chips, whose rows still expand to input, output and
     error.
   - **Rules:** no confidence is shown or inferred (the protocol has none); the Recommendation Card is used only

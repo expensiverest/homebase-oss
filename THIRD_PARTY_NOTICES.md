@@ -52,10 +52,43 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Runtime dependencies added for the web client's animated icon
+## Lucide-React-Motion (Brain animation)
 
-These are regular npm dependencies (not copied into the source tree), listed because they were added specifically
-for the Thinking indicator:
+- Source: <https://github.com/Aadil1505/Lucide-React-Motion>
+- Copyright (c) 2026 Aadil Alli
+- License: MIT (full text below)
 
-- `lucide-react-motion` 0.5.x — MIT, © 2026 Aadil Alli — animated Lucide icons; only the `Brain` icon is used.
-- `motion` 13.x — MIT — the animation engine `lucide-react-motion` requires as a peer dependency.
+Homebase does **not** depend on the `lucide-react-motion` package at runtime. `apps/web/src/components/beautiful/AnimatedBrain.tsx`
+contains a narrow, purpose-built adaptation of that project's `brain` signature animation and its `brain-fold-ripple`
+motion (`packages/lucide-react-motion/src/modes/signatures/brain.ts` and `.../motions/brain-fold-ripple.ts`): the
+per-path propagation order, the fold/outline roles, the keyframes and the 1.2 s ease-in-out cycle. It is reimplemented
+directly on `motion/react` for the Thinking indicator only; nothing else from the library (icon catalog, mode registry,
+other animations) is included.
+
+The Brain's static path geometry is Lucide's `brain` icon (ISC License, Copyright (c) 2026 Lucide Icons and Contributors;
+see the `lucide-react` package's LICENSE file).
+`lucide-react` and `motion` remain ordinary npm runtime dependencies, so they are not copied here.
+
+```
+MIT License
+
+Copyright (c) 2026 Aadil Alli
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

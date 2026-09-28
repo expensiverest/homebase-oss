@@ -566,8 +566,7 @@ export function DevUI() {
           </div>
         </Thinking>
         <p className="mt-1 text-caption text-muted">
-          The Brain loops only while reasoning streams; with reduced motion it holds still (lucide-react-motion respects
-          the OS setting).
+          The Brain loops only while reasoning streams; with reduced motion it holds still (it follows the OS setting).
         </p>
       </Section>
 

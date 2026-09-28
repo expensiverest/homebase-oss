@@ -123,18 +123,18 @@ scripted stages, hard-coded content, hover-only reveals, `@` sources, slash comm
 
 **One narrative per run** (`activeRunView` in `lib/viewmodel.ts`, `buildTrace` for the steps):
 
-| Moment                            | Surface                                                                                                                     |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Turn started, nothing visible yet | **Loading State (Orbit)**: "Starting…"/"Working…" with elapsed time from `turn.started`                                     |
-| Reasoning streaming               | **Thinking**, open, with lucide-react-motion's `Brain` looping (`trigger="mount"`, `repeat={Infinity}`, `mode="signature"`) |
-| Tools / plan in the live run      | **Task Rows** (status ring → check / cross, expandable input/output/error)                                                  |
-| Text                              | streaming Markdown; the Orbit never shows beside real work                                                                  |
-| Run finished                      | "Worked for …" folded; open: settled **Thinking**, interim updates, **Tool Chips**                                          |
+| Moment                            | Surface                                                                                        |
+| --------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Turn started, nothing visible yet | **Loading State (Orbit)**: "Starting…"/"Working…" with elapsed time from `turn.started`        |
+| Reasoning streaming               | **Thinking**, open, with the fold-ripple `Brain` looping (local `AnimatedBrain`, ~1.2 s cycle) |
+| Tools / plan in the live run      | **Task Rows** (status ring → check / cross, expandable input/output/error)                     |
+| Text                              | streaming Markdown; the Orbit never shows beside real work                                     |
+| Run finished                      | "Worked for …" folded; open: settled **Thinking**, interim updates, **Tool Chips**             |
 
 - **Orbit** is agent activity only; ordinary loading keeps skeletons. Elapsed time comes from the real turn start
   (the live overlay's `runStartedAt`, else the prompt's time), never from page mount.
 - **Thinking** renders only reasoning text the provider sent; the Brain loops only while that reasoning streams
-  and is a still icon once settled. lucide-react-motion honors `prefers-reduced-motion` (the icon stays `resting`).
+  and is a still icon once settled. The animated Brain follows `prefers-reduced-motion` (it stays `resting`, no loop).
 - **Tool Chips / Task Rows** take any `AgentToolCall`; unknown tools render generically from `toolPresentation`.
   Details mount only when opened and render as text in Code Blocks (never HTML).
 - **Approval Card** renders `request.options` as full-width actions (allow once primary, deny destructive, custom

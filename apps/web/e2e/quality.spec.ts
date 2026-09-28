@@ -232,6 +232,50 @@ test.describe("agent work presentation", () => {
     await expect(brain).toHaveCount(1);
     // The suite runs with prefers-reduced-motion: reduce; the icon must not loop.
     await expect(brain).toHaveAttribute("data-motion-state", "resting");
+    // Not merely slowed down: no path is animating and every path holds full opacity.
+    await expect(brain.locator("path")).toHaveCount(8);
+    const state = await brain.evaluate((svg) => ({
+      running: svg.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length,
+      opacities: [...svg.querySelectorAll("path")].map((path) => getComputedStyle(path).opacity),
+      hidden: svg.getAttribute("aria-hidden"),
+    }));
+    expect(state.running).toBe(0);
+    expect(new Set(state.opacities)).toEqual(new Set(["1"]));
+    expect(state.hidden).toBe("true");
+  });
+
+  test.describe("with motion allowed", () => {
+    test.use({ reducedMotion: "no-preference" });
+
+    test("the animated brain ripples a wave through the folds while the outline holds", async ({ page }) => {
+      await page.goto("/?mock=run-thinking");
+      await openProject(page, "aurora-api");
+      await openSession(page, "Document the gateway endpoints");
+      const brain = page.locator('[data-brain="animated"] svg');
+      await expect(brain).toHaveAttribute("data-motion-state", "looping");
+      await expect(brain.locator("path")).toHaveCount(8);
+      // Sample every path across two cycles (1.2s each).
+      const min = await brain.evaluate(async (svg) => {
+        const paths = [...svg.querySelectorAll("path")];
+        const lowest = paths.map(() => 1);
+        const started = performance.now();
+        while (performance.now() - started < 2600) {
+          paths.forEach((path, index) => {
+            lowest[index] = Math.min(lowest[index]!, Number(getComputedStyle(path).opacity));
+          });
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+        return { lowest, folds: [paths[0]!.getAttribute("d"), paths[1]!.getAttribute("d")] };
+      });
+      // Paths 0 and 1 are the interior fissures: they dip deep (0.35).
+      expect(min.lowest[0]).toBeLessThan(0.6);
+      expect(min.lowest[1]).toBeLessThan(0.6);
+      // The enclosing outline only ever brushes (0.72), so it stays above the fold dip.
+      for (const outline of min.lowest.slice(2)) {
+        expect(outline).toBeLessThan(0.95);
+        expect(outline).toBeGreaterThan(0.6);
+      }
+    });
   });
 
   test("settled reasoning shows a still brain", async ({ page }) => {
