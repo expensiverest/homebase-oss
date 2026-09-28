@@ -5,37 +5,40 @@ import { connectionPillText, expectNoHorizontalOverflow, openProject, openSessio
 test.describe("provider resilience", () => {
   test("a provider outage degrades the project instead of the whole screen", async ({ page }) => {
     await page.goto("/?mock=provider-down");
-    await expect(page.getByText("Unavailable")).toBeVisible();
-    const retry = page.getByRole("button", { name: "Retry" });
+    const outage = page.getByRole("alert");
+    await expect(outage).toContainText(/OpenCode · unavailable/i);
+    const retry = outage.getByRole("button", { name: "Retry" });
     await expect(retry).toBeVisible();
     await retry.click();
-    await expect(page.getByText("Unavailable")).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText(/OpenCode · unavailable/i);
+    // The healthy provider stays quietly listed as ready.
+    await expect(page.getByText("Claude Code", { exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     await openProject(page, "aurora-api");
-    await expect(page.getByText("OpenCode unavailable")).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText(/OpenCode · unavailable/i);
     // Claude sessions from the healthy provider stay usable.
     await openSession(page, "Fix the flaky auth test");
     await expect(page.getByText("I found the race")).toBeVisible();
     await page.getByLabel("Back").click();
-    await page.getByLabel("New session").click();
-    const sheet = page.getByRole("dialog", { name: "New session" });
-    await expect(sheet.getByRole("radio", { name: "Claude Code" })).toBeVisible();
-    await expect(sheet.getByRole("radio", { name: "OpenCode" })).toHaveCount(0);
+    const launcher = page.getByRole("region", { name: "Start a session" });
+    // Only the healthy provider can start sessions; no provider switch is offered.
+    await expect(launcher.getByText("Claude Code")).toBeVisible();
+    await expect(launcher.getByRole("radio", { name: "OpenCode" })).toHaveCount(0);
+    await expect(launcher.getByRole("button", { name: "New session" })).toBeEnabled();
   });
 
   test("a signed-out provider explains itself and blocks starting a session", async ({ page }) => {
     await page.goto("/?mock=signed-out");
-    await expect(page.getByText("Sign in required")).toBeVisible();
+    await expect(page.getByRole("alert")).toContainText(/Claude Code · sign in required/i);
     await openProject(page, "aurora-api");
-    await page.getByLabel("New session").click();
-    const sheet = page.getByRole("dialog", { name: "New session" });
-    await sheet.getByRole("radio", { name: "Claude Code" }).click();
-    await expect(sheet.getByText(/not signed in/).first()).toBeVisible();
-    await expect(sheet.getByRole("button", { name: "Start session" })).toBeDisabled();
+    const launcher = page.getByRole("region", { name: "Start a session" });
+    await launcher.getByRole("radio", { name: "Claude Code" }).click();
+    await expect(launcher.getByText(/not signed in/).first()).toBeVisible();
+    await expect(launcher.getByRole("button", { name: "New session" })).toBeDisabled();
     // OpenCode still works.
-    await sheet.getByRole("radio", { name: "OpenCode" }).click();
-    await expect(sheet.getByRole("button", { name: "Start session" })).toBeEnabled();
+    await launcher.getByRole("radio", { name: "OpenCode" }).click();
+    await expect(launcher.getByRole("button", { name: "New session" })).toBeEnabled();
   });
 
   test("reconnects after the event stream drops and resumes streaming", async ({ page }) => {

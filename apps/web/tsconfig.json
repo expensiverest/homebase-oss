@@ -8,5 +8,5 @@
       "@homebase/protocol": ["../../packages/protocol/src/index.ts"]
     }
   },
-  "include": ["src", "e2e", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
+  "include": ["src", "e2e", "vite.config.ts", "vitest.config.ts", "playwright.config.ts", "playwright.visual.config.ts"]
 }

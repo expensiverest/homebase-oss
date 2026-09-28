@@ -14,7 +14,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "screenshots": "playwright test -c playwright.visual.config.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

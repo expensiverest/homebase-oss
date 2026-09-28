@@ -5,7 +5,7 @@ import { expectNoHorizontalOverflow, ONE_PIXEL_PNG, openProject, openSession, se
 test.describe("primary user journey", () => {
   test("projects list shows mixed provider status", async ({ page }) => {
     await page.goto("/?mock=normal");
-    await expect(page.getByRole("heading", { name: "Homebase" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Projects", level: 1 })).toBeVisible();
     await expect(page.getByText("OpenCode", { exact: true })).toBeVisible();
     await expect(page.getByText("Claude Code", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Open project aurora-api" })).toBeVisible();
@@ -26,12 +26,16 @@ test.describe("primary user journey", () => {
   test("creates an OpenCode session through provider, model, mode, and thinking", async ({ page }) => {
     await page.goto("/?mock=normal");
     await openProject(page, "aurora-api");
-    await page.getByLabel("New session").click();
-    await expect(page.getByRole("dialog", { name: "New session" })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "OpenCode" })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "Claude Code" })).toBeVisible();
-    await page.getByLabel("Thinking level").getByRole("radio", { name: "High" }).click();
-    await page.getByRole("button", { name: "Start session" }).click();
+    // The launcher is part of the project screen, not hidden behind a "+".
+    const launcher = page.getByRole("region", { name: "Start a session" });
+    await expect(launcher.getByRole("radio", { name: "OpenCode" })).toBeVisible();
+    await expect(launcher.getByRole("radio", { name: "Claude Code" })).toBeVisible();
+    await launcher.getByRole("radio", { name: "OpenCode" }).click();
+    await launcher.getByLabel("Thinking level").getByRole("radio", { name: "High" }).click();
+    await launcher.getByRole("button", { name: /^Mode:/ }).click();
+    await page.getByRole("dialog", { name: "Mode" }).getByRole("radio", { name: /Plan/ }).click();
+    await expect(launcher.getByRole("button", { name: "Mode: Plan. Change mode" })).toBeVisible();
+    await launcher.getByRole("button", { name: "New session" }).click();
     await expect(page.getByRole("heading", { name: "New session" })).toBeVisible();
     await expect(page.getByText("No messages yet")).toBeVisible();
     await expectNoHorizontalOverflow(page);
@@ -105,7 +109,7 @@ test.describe("primary user journey", () => {
     await sheet.getByRole("radio", { name: /Aurora 1/ }).click();
     await sheet.getByRole("radio", { name: "High" }).click();
     await sheet.getByRole("button", { name: "Use this model" }).click();
-    await expect(page.getByLabel(/^Model: Aurora 1/)).toContainText("high");
+    await expect(page.getByLabel(/^Model: Aurora 1/)).toContainText(/high/i);
   });
 
   test("searches a large model catalog", async ({ page }) => {

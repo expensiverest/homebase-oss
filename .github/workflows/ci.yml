@@ -52,6 +52,16 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run web E2E
         run: npm run test:e2e:web
+      - name: Render visual QA screenshots
+        if: always()
+        run: npm run screenshots -w @homebase/web
+      - name: Upload visual QA screenshots
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: visual-qa-screenshots
+          path: apps/web/screenshots
+          retention-days: 14
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@v5

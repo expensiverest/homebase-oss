@@ -60,7 +60,7 @@ export function ImagePart({ part }: { part: Extract<AgentContentPart, { type: "i
         </div>
       )}
       {part.name ? (
-        <figcaption className="mt-1 truncate font-mono text-[11px] text-faint">{part.name}</figcaption>
+        <figcaption className="mt-1 truncate readout text-caption text-muted">{part.name}</figcaption>
       ) : null}
     </figure>
   );
@@ -68,11 +68,11 @@ export function ImagePart({ part }: { part: Extract<AgentContentPart, { type: "i
 
 export function FileChip({ name, mimeType, sizeBytes }: { name: string; mimeType: string; sizeBytes?: number | null }) {
   return (
-    <span className="inline-flex max-w-full items-center gap-2 rounded-[12px] border border-border bg-surface px-2.5 py-1.5">
+    <span className="inline-flex max-w-full items-center gap-2 rounded-[14px] bg-fill px-3 py-2">
       <FileText size={14} className="shrink-0 text-muted" aria-hidden />
       <span className="min-w-0">
-        <span className="block truncate text-[12px] font-medium text-text">{shorten(name, 42)}</span>
-        <span className="block truncate font-mono text-[10px] text-faint">
+        <span className="block truncate text-callout font-medium text-text">{shorten(name, 42)}</span>
+        <span className="block truncate readout text-caption text-muted">
           {mimeType}
           {sizeBytes ? ` · ${bytesLabel(sizeBytes)}` : ""}
         </span>
@@ -118,7 +118,7 @@ export function PendingAttachmentChip({
 }) {
   const previewUrl = useAttachmentObjectUrl(attachment.id, attachment.kind === "image" && !uploading);
   return (
-    <span className="relative inline-flex items-center gap-2 rounded-[12px] border border-border bg-surface p-1.5 pr-2.5">
+    <span className="relative inline-flex items-center gap-2 rounded-[14px] bg-fill p-1.5 pr-1">
       {attachment.kind === "image" ? (
         previewUrl ? (
           <img src={previewUrl} alt="" className="h-9 w-9 rounded-[8px] object-cover" />
@@ -132,13 +132,13 @@ export function PendingAttachmentChip({
           <FileText size={14} aria-hidden />
         </span>
       )}
-      <span className="max-w-[120px]">
-        <span className="block truncate text-[12px] font-medium text-text">{shorten(attachment.name, 26)}</span>
-        <span className="block font-mono text-[10px] text-faint">
+      <span className="min-w-0 max-w-[9rem]">
+        <span className="block truncate text-callout font-medium text-text">{shorten(attachment.name, 26)}</span>
+        <span className="block readout text-caption text-muted">
           {uploading ? "uploading…" : (bytesLabel(attachment.sizeBytes) ?? attachment.mimeType)}
         </span>
       </span>
-      <IconButton label={`Remove ${attachment.name}`} onClick={onRemove} className="h-11 w-11">
+      <IconButton label={`Remove ${attachment.name}`} onClick={onRemove} className="h-11 w-11 -ml-1">
         <X size={14} aria-hidden />
       </IconButton>
     </span>

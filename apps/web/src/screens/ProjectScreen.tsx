@@ -1,35 +1,70 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ChevronRight, Inbox, Plus, RefreshCw } from "lucide-react";
-import { useState } from "react";
 
-import type { AgentProvider, AgentProject, AgentSession } from "@homebase/protocol";
+import type { AgentProvider, AgentSession } from "@homebase/protocol";
 
 import { api } from "../lib/api.js";
-import { relativeTime } from "../lib/format.js";
+import { relativeTime, shortenPath } from "../lib/format.js";
 import { qk, useProject, useProviders, useSessions } from "../lib/queries.js";
-import { providerStatus, sessionStatus } from "../lib/viewmodel.js";
-import { ScreenHeader } from "../components/chrome.js";
-import { NewSessionSheet } from "./NewSessionSheet.js";
-import { Button, EmptyState, ErrorState, Group, IconButton, Pill, Row, Skeleton, Spinner } from "../components/ui.js";
+import { modelDisplayName, providerStatus, sessionStatus } from "../lib/viewmodel.js";
+import { BackButton, ProviderHealth, TopBar } from "../components/chrome.js";
+import { ProjectMark, ProviderMark } from "../components/marks.js";
+import { SessionLauncher } from "../components/SessionLauncher.js";
+import { BranchChip, Button, EmptyState, ErrorState, Group, Pill, Skeleton } from "../components/ui.js";
 
-function providerInitial(provider: AgentProvider | undefined, providerId: string): string {
-  return (provider?.name ?? providerId).slice(0, 1).toUpperCase();
-}
-
-function sessionModelLabel(session: AgentSession): string | null {
-  const modelId = session.model?.modelId;
-  if (!modelId) return null;
-  const tail = modelId.includes("/") ? modelId.split("/").pop() : modelId;
-  return tail ?? null;
-}
-
-function trailingFor(session: AgentSession) {
+function SessionState({ session }: { session: AgentSession }) {
   const status = sessionStatus(session.state);
   if (status.tone === "waiting") return <Pill tone="waiting">Needs you</Pill>;
-  if (status.tone === "working") return <Pill tone="working">Working</Pill>;
-  if (status.tone === "failed") return <Pill tone="failed">Failed</Pill>;
-  return <ChevronRight size={16} className="text-faint" aria-hidden />;
+  if (status.tone === "working")
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1.5 font-medium text-accent">
+        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent" />
+        Working
+      </span>
+    );
+  if (status.tone === "failed") return <span className="shrink-0 font-medium text-bad">Failed</span>;
+  return null;
+}
+
+function SessionRow({
+  session,
+  provider,
+  onOpen,
+}: {
+  session: AgentSession;
+  provider: AgentProvider | undefined;
+  onOpen: () => void;
+}) {
+  const title = session.title?.trim() || "Untitled session";
+  const model = modelDisplayName(session.model?.modelId);
+  const working = session.state === "working";
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={`Open session ${title}`}
+      className="hairline-top flex min-h-[76px] w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors first:shadow-none active:bg-surface-2"
+    >
+      <ProviderMark providerId={session.provider} provider={provider} working={working} size={38} />
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-start gap-2">
+          <span
+            className={`line-clamp-2 min-w-0 flex-1 break-words text-row font-medium ${session.title ? "text-text" : "italic text-muted"}`}
+          >
+            {title}
+          </span>
+          <span className="readout mt-[3px] shrink-0 text-caption text-muted">{relativeTime(session.updatedAt)}</span>
+        </span>
+        <span className="mt-1 flex min-w-0 items-center gap-2 text-callout text-muted">
+          <SessionState session={session} />
+          <span className="min-w-0 truncate">
+            {provider?.name ?? session.provider}
+            {model ? ` · ${model}` : ""}
+          </span>
+        </span>
+      </span>
+    </button>
+  );
 }
 
 export function ProjectScreen() {
@@ -39,153 +74,122 @@ export function ProjectScreen() {
   const project = useProject(projectId);
   const providers = useProviders();
   const sessions = useSessions(projectId);
-  const [newOpen, setNewOpen] = useState(false);
+  const refresh = useMutation({
+    mutationFn: () => api.refreshProviders(),
+    onSuccess: (list) => client.setQueryData(qk.providers, list),
+  });
 
   const providerList = providers.data ?? [];
   const items = sessions.data?.pages.flatMap((page) => page.items) ?? [];
-  const projectProviders = (project.data?.providersAvailable ?? []).map((providerId) => ({
-    providerId,
-    provider: providerList.find((candidate) => candidate.id === providerId),
-  }));
-  const outage = projectProviders.filter(({ provider }) => (provider ? providerStatus(provider).tone !== "ok" : false));
+  const projectValue = project.data;
+  const projectProviders = providerList.filter((provider) =>
+    (projectValue?.providersAvailable ?? []).includes(provider.id),
+  );
+  const name = projectValue?.name ?? "";
 
   const openSession = (session: AgentSession) => {
     void navigate({ to: "/s/$sessionId", params: { sessionId: session.id } });
   };
 
   const created = (session: AgentSession) => {
-    setNewOpen(false);
     void client.invalidateQueries({ queryKey: qk.sessions(session.projectId) });
     void navigate({ to: "/s/$sessionId", params: { sessionId: session.id } });
   };
 
-  const goBack = () => {
-    void navigate({ to: "/" });
-  };
-
-  const projectValue: AgentProject | undefined = project.data;
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ScreenHeader
-        title={projectValue?.name ?? "Project"}
-        subtitle={
-          <>
-            {projectValue?.branch ? <span className="truncate font-mono">{projectValue.branch}</span> : null}
-            <span className="shrink-0">
-              {sessions.data ? `${items.length}${sessions.hasNextPage ? "+" : ""} sessions` : ""}
-            </span>
-          </>
-        }
-        onBack={goBack}
-        trailing={
-          <IconButton label="New session" onClick={() => setNewOpen(true)} disabled={projectProviders.length === 0}>
-            <Plus size={20} aria-hidden />
-          </IconButton>
-        }
-      />
-
-      <main className="min-h-0 flex-1 overflow-y-auto px-safe pb-10">
-        {outage.length > 0 ? (
-          <div className="mb-4 flex items-start gap-2 rounded-[var(--radius-md)] border border-border bg-surface px-3 py-2.5">
-            <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-medium text-text">
-                {outage.map(({ provider, providerId }) => provider?.name ?? providerId).join(", ")} unavailable
-              </p>
-              <p className="mt-0.5 text-[12px] text-muted">
-                Sessions from other providers still work. Start the provider or retry once it is ready.
-              </p>
+      <main className="min-h-0 flex-1 overflow-y-auto px-safe pb-12">
+        <header className="pt-safe">
+          <TopBar leading={<BackButton label="Projects" onClick={() => void navigate({ to: "/" })} />} />
+          {project.isLoading ? (
+            <div className="mt-4 flex items-center gap-4">
+              <Skeleton className="h-14 w-14 rounded-[30%]" />
+              <Skeleton className="h-9 w-48" />
             </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() =>
-                void api.refreshProviders().then((list) => {
-                  client.setQueryData(qk.providers, list);
-                })
-              }
-            >
-              <RefreshCw size={13} aria-hidden />
-              Retry
-            </Button>
-          </div>
-        ) : null}
+          ) : project.isError || !projectValue ? (
+            <ErrorState
+              title="Project unavailable"
+              detail="The Host could not find this project."
+              onRetry={() => void project.refetch()}
+            />
+          ) : (
+            <div className="mt-4 flex items-center gap-4">
+              <ProjectMark name={name} size={56} working={items.some((session) => session.state === "working")} />
+              <div className="min-w-0 flex-1">
+                <h1
+                  className={`line-clamp-2 break-words font-serif text-text ${name.length > 20 ? "text-[1.875rem] leading-[1.08]" : "text-title"}`}
+                >
+                  {name}
+                </h1>
+                <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  {projectValue.branch ? <BranchChip branch={projectValue.branch} className="max-w-full" /> : null}
+                  <span className="readout min-w-0 max-w-full truncate text-caption text-muted">
+                    {shortenPath(projectValue.path)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </header>
 
-        {sessions.isLoading ? (
-          <div className="flex flex-col gap-2">
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
-          </div>
-        ) : sessions.isError ? (
-          <ErrorState
-            title="Could not load sessions"
-            detail="Sessions from this project are unavailable right now."
-            onRetry={() => void sessions.refetch()}
-          />
-        ) : items.length === 0 ? (
-          <EmptyState
-            icon={<Inbox size={22} aria-hidden />}
-            title="No sessions yet"
-            detail="Start a session with OpenCode or Claude Code in this project."
-            action={
-              <Button variant="primary" onClick={() => setNewOpen(true)} disabled={projectProviders.length === 0}>
-                <Plus size={16} aria-hidden />
-                New session
-              </Button>
-            }
-          />
-        ) : (
+        {projectValue ? (
           <>
-            <Group title="Sessions">
-              {items.map((session) => {
-                const provider = providerList.find((candidate) => candidate.id === session.provider);
-                const model = sessionModelLabel(session);
-                return (
-                  <Row
-                    key={session.id}
-                    onClick={() => openSession(session)}
-                    ariaLabel={`Open session ${session.title ?? "Untitled session"}`}
-                    leading={
-                      <span
-                        title={provider?.name ?? session.provider}
-                        className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface-2 font-mono text-[12px] text-muted"
-                      >
-                        {providerInitial(provider, session.provider)}
-                      </span>
-                    }
-                    title={session.title ?? "Untitled session"}
-                    subtitle={
-                      <>
-                        <span className="shrink-0 text-faint">{relativeTime(session.updatedAt)}</span>
-                        {model ? <span className="min-w-0 truncate font-mono text-faint">· {model}</span> : null}
-                      </>
-                    }
-                    trailing={trailingFor(session)}
-                  />
-                );
-              })}
-            </Group>
-            {sessions.hasNextPage ? (
-              <div className="flex justify-center py-2">
-                <Button size="sm" onClick={() => void sessions.fetchNextPage()} loading={sessions.isFetchingNextPage}>
-                  {sessions.isFetchingNextPage ? <Spinner label="Loading older sessions" /> : null}
-                  Load older sessions
-                </Button>
+            {projectProviders.some((provider) => providerStatus(provider).tone !== "ok") ? (
+              <div className="mt-6">
+                <ProviderHealth
+                  providers={projectProviders}
+                  context="project"
+                  onRetry={() => refresh.mutate()}
+                  retrying={refresh.isPending}
+                />
               </div>
             ) : null}
-          </>
-        )}
-      </main>
 
-      {projectValue ? (
-        <NewSessionSheet
-          open={newOpen}
-          onClose={() => setNewOpen(false)}
-          project={projectValue}
-          providers={providerList}
-          onCreated={created}
-        />
-      ) : null}
+            <div className="mt-7">
+              <SessionLauncher project={projectValue} providers={providerList} onCreated={created} />
+            </div>
+
+            <div className="mt-9">
+              {sessions.isLoading ? (
+                <div className="flex flex-col gap-2">
+                  <Skeleton className="h-[76px] w-full rounded-[var(--radius-lg)]" />
+                  <Skeleton className="h-[76px] w-full rounded-[var(--radius-lg)]" />
+                </div>
+              ) : sessions.isError ? (
+                <ErrorState
+                  title="Could not load sessions"
+                  detail="Sessions from this project are unavailable right now."
+                  onRetry={() => void sessions.refetch()}
+                />
+              ) : items.length === 0 ? (
+                <EmptyState title="A clean slate" detail={`No sessions in ${name} yet. Start one above.`} />
+              ) : (
+                <>
+                  <Group title="Sessions" trailing={`${items.length}${sessions.hasNextPage ? "+" : ""}`}>
+                    {items.map((session) => (
+                      <SessionRow
+                        key={session.id}
+                        session={session}
+                        provider={providerList.find((candidate) => candidate.id === session.provider)}
+                        onOpen={() => openSession(session)}
+                      />
+                    ))}
+                  </Group>
+                  {sessions.hasNextPage ? (
+                    <Button
+                      className="mt-3 w-full"
+                      onClick={() => void sessions.fetchNextPage()}
+                      loading={sessions.isFetchingNextPage}
+                    >
+                      Load older sessions
+                    </Button>
+                  ) : null}
+                </>
+              )}
+            </div>
+          </>
+        ) : null}
+      </main>
     </div>
   );
 }

@@ -4,11 +4,18 @@ import {
   Brain,
   Check,
   ChevronDown,
-  ChevronRight,
   CircleDot,
+  FilePen,
+  FilePlus2,
+  FileText,
+  Globe,
+  ListChecks,
   Loader2,
-  MessageSquare,
-  Terminal,
+  MessageCircleQuestion,
+  Search,
+  SquareTerminal,
+  Users,
+  Wrench,
 } from "lucide-react";
 import { memo, useState, type ReactNode } from "react";
 
@@ -25,38 +32,51 @@ function TextPart({ text, streaming }: { text: string; streaming: boolean }) {
   const trailing = streaming && smooth.length < text.length;
   if (streaming && smooth.length === 0) return null;
   return (
-    <div className={trailing ? "hb-streaming-caret" : undefined}>
+    <div className={`my-1 ${trailing ? "hb-streaming-caret" : ""}`}>
       <Markdown text={streaming ? smooth : text} />
     </div>
   );
 }
 
-function toolIcon(name: string) {
-  const verb = toolPresentation({ id: "", name, status: "completed", input: null }).verb;
-  switch (verb) {
-    case "Run":
-      return <Terminal size={14} aria-hidden />;
-    case "Read":
-    case "Write":
-    case "Edit":
-      return <CircleDot size={14} aria-hidden />;
-    case "Ask":
-      return <MessageSquare size={14} aria-hidden />;
-    default:
-      return <CircleDot size={14} aria-hidden />;
-  }
+const VERB_ICONS: Record<string, typeof Wrench> = {
+  Run: SquareTerminal,
+  Read: FileText,
+  Write: FilePlus2,
+  Edit: FilePen,
+  Search: Search,
+  Find: Search,
+  Fetch: Globe,
+  Agent: Users,
+  Plan: ListChecks,
+  Ask: MessageCircleQuestion,
+};
+
+function toolIcon(verb: string) {
+  const Icon = VERB_ICONS[verb] ?? Wrench;
+  return <Icon size={16} strokeWidth={2} aria-hidden />;
 }
 
+/** Completed tools stay quiet; only running, failed and denied say anything. */
 function statusIcon(status: AgentToolCall["status"]) {
   switch (status) {
     case "running":
-      return <Loader2 size={13} className="animate-spin text-accent" aria-hidden />;
+      return <Loader2 size={15} className="animate-spin text-accent" aria-label="Running" />;
     case "completed":
-      return <Check size={13} className="text-ok" aria-hidden />;
+      return <Check size={15} className="text-faint" aria-label="Done" />;
     case "failed":
-      return <AlertTriangle size={13} className="text-bad" aria-hidden />;
+      return (
+        <span className="inline-flex items-center gap-1 text-caption font-medium text-bad">
+          <AlertTriangle size={14} aria-hidden />
+          Failed
+        </span>
+      );
     case "denied":
-      return <Ban size={13} className="text-warn" aria-hidden />;
+      return (
+        <span className="inline-flex items-center gap-1 text-caption font-medium text-muted">
+          <Ban size={14} aria-hidden />
+          Denied
+        </span>
+      );
   }
 }
 
@@ -90,41 +110,47 @@ export function ToolRow({ tool, dense = false }: { tool: AgentToolCall; dense?: 
         type="button"
         onClick={() => hasDetail && setExpanded((value) => !value)}
         aria-expanded={hasDetail ? expanded : undefined}
-        className="flex min-h-11 w-full items-center gap-2 rounded-[10px] px-1.5 py-1 text-left transition-colors hover:bg-surface-2"
+        className="-mx-2 flex min-h-11 w-[calc(100%+1rem)] items-center gap-2.5 rounded-[12px] px-2 py-1.5 text-left transition-colors active:bg-fill"
       >
         <span className={`shrink-0 ${presentation.tone === "failed" ? "text-bad" : "text-muted"}`}>
-          {toolIcon(tool.name)}
+          {toolIcon(presentation.verb)}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[13px]">
-          <span
-            className={`font-medium ${presentation.tone === "failed" ? "text-bad" : presentation.tone === "working" ? "text-text" : "text-muted"}`}
-          >
+        <span className="flex min-w-0 flex-1 items-baseline gap-2 text-callout">
+          <span className={`shrink-0 font-medium ${presentation.tone === "working" ? "text-text" : "text-muted"}`}>
             {presentation.verb}
           </span>
           {presentation.detail ? (
-            <span className="ml-2 font-mono text-[12px] text-muted">{presentation.detail}</span>
+            <span className="readout min-w-0 truncate text-caption text-muted">{presentation.detail}</span>
           ) : null}
         </span>
         <span className="shrink-0">{statusIcon(tool.status)}</span>
         {hasDetail ? (
-          <span className="shrink-0 text-faint">
-            {expanded ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
-          </span>
+          <ChevronDown
+            size={15}
+            className={`shrink-0 text-faint transition-transform ${expanded ? "rotate-180" : ""}`}
+            aria-hidden
+          />
         ) : null}
       </button>
       {expanded ? (
-        <div className="mb-2 ml-7 rounded-[10px] border border-border bg-inset p-2">
+        <div className="mb-2 ml-[1.625rem] mt-1 flex flex-col gap-2 border-l border-border pl-3">
           {tool.input ? (
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted">
-              {JSON.stringify(tool.input, null, 2)}
-            </pre>
+            <div>
+              <p className="eyebrow mb-1">Input</p>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-[10px] bg-fill px-2.5 py-2 font-mono text-caption text-text">
+                {JSON.stringify(tool.input, null, 2)}
+              </pre>
+            </div>
           ) : null}
           {output ? (
-            <pre className="mt-1 max-h-52 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted">
-              {output}
-            </pre>
+            <div>
+              <p className="eyebrow mb-1">Output</p>
+              <pre className="max-h-52 overflow-auto whitespace-pre-wrap break-words rounded-[10px] bg-fill px-2.5 py-2 font-mono text-caption text-text">
+                {output}
+              </pre>
+            </div>
           ) : null}
-          {tool.error ? <p className="mt-1 text-[12px] text-bad">{tool.error}</p> : null}
+          {tool.error ? <p className="text-callout text-bad">{tool.error}</p> : null}
         </div>
       ) : null}
     </div>
@@ -135,19 +161,19 @@ function ReasoningBlock({ text, active }: { text: string; active: boolean }) {
   const [open, setOpen] = useState(active);
   if (text.trim().length === 0 && !active) return null;
   return (
-    <div className="my-1.5">
+    <div className="my-1">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="flex min-h-11 items-center gap-2 rounded-[10px] px-1.5 text-[12px] font-medium text-muted hover:text-text"
+        className="-ml-2 flex min-h-11 items-center gap-2 rounded-[12px] px-2 text-callout font-medium text-muted transition-colors hover:text-text active:bg-fill"
       >
-        <Brain size={13} aria-hidden />
-        <span>{active ? "Thinking…" : "Thought process"}</span>
-        {open ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
+        <Brain size={16} aria-hidden />
+        <span className={active ? "shimmer" : undefined}>{active ? "Thinking…" : "Thought process"}</span>
+        <ChevronDown size={15} className={`text-faint transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
       </button>
       {open ? (
-        <div className="mb-1 ml-1.5 border-l-2 border-border pl-3 text-[13px] text-muted">
+        <div className="hb-markdown-quiet mb-2 ml-2 border-l border-border pl-3.5">
           <Markdown text={text} />
         </div>
       ) : null}
@@ -157,7 +183,7 @@ function ReasoningBlock({ text, active }: { text: string; active: boolean }) {
 
 function StatusPart({ label, detail }: { label: string; detail?: string | null }) {
   return (
-    <p className="my-1 text-[12px] text-faint">
+    <p className="my-1 text-caption text-muted">
       {label}
       {detail ? ` — ${detail}` : ""}
     </p>
@@ -166,20 +192,20 @@ function StatusPart({ label, detail }: { label: string; detail?: string | null }
 
 function PlanPart({ parts }: { parts: Array<Extract<AgentContentPart, { type: "plan" }>> }) {
   return (
-    <div className="my-2 rounded-[var(--radius-md)] border border-border bg-surface p-3">
+    <div className="surface my-3 px-4 py-3.5">
       {parts.map((part) => (
         <div key={part.id}>
-          {part.plan.title ? <p className="mb-1 text-[13px] font-medium text-text">{part.plan.title}</p> : null}
-          <ul className="flex flex-col gap-1">
+          {part.plan.title ? <p className="mb-2 text-callout font-semibold text-text">{part.plan.title}</p> : null}
+          <ul className="flex flex-col gap-1.5">
             {part.plan.steps.map((step) => (
-              <li key={step.id} className="flex items-start gap-2 text-[13px] text-muted">
-                <span className="mt-0.5 shrink-0">
+              <li key={step.id} className="flex items-start gap-2.5 text-callout text-muted">
+                <span className="mt-[3px] shrink-0">
                   {step.status === "completed" ? (
-                    <Check size={13} className="text-ok" aria-hidden />
+                    <Check size={15} className="text-ok" aria-hidden />
                   ) : step.status === "in_progress" ? (
-                    <Loader2 size={13} className="animate-spin text-accent" aria-hidden />
+                    <Loader2 size={15} className="animate-spin text-accent" aria-hidden />
                   ) : (
-                    <CircleDot size={13} className="text-faint" aria-hidden />
+                    <CircleDot size={15} className="text-faint" aria-hidden />
                   )}
                 </span>
                 <span>{step.title}</span>
@@ -217,7 +243,7 @@ export function MessageParts({ message }: { message: AgentMessage }) {
             return <StatusPart key={part.id} label={part.label} detail={part.detail} />;
           case "error":
             return (
-              <p key={part.id} className="my-1.5 rounded-[10px] bg-bad-soft px-3 py-2 text-[13px] text-bad">
+              <p key={part.id} className="my-2 rounded-[var(--radius-md)] bg-bad-soft px-4 py-3 text-callout text-bad">
                 {part.message}
               </p>
             );
@@ -228,20 +254,25 @@ export function MessageParts({ message }: { message: AgentMessage }) {
         }
       })}
       {plans.length > 0 ? <PlanPart parts={plans} /> : null}
-      {message.state === "failed" ? <p className="mt-1 text-[12px] font-medium text-bad">Run failed</p> : null}
-      {message.state === "interrupted" ? <p className="mt-1 text-[12px] font-medium text-warn">Interrupted</p> : null}
+      {message.state === "failed" ? (
+        <p className="mt-2 flex items-center gap-1.5 text-callout font-medium text-bad">
+          <AlertTriangle size={15} aria-hidden />
+          The run failed
+        </p>
+      ) : null}
+      {message.state === "interrupted" ? <p className="mt-2 text-callout font-medium text-muted">Stopped</p> : null}
     </div>
   );
 }
 
 function UserMessage({ message }: { message: AgentMessage }) {
   return (
-    <div className="mb-4 flex justify-end">
-      <div className="max-w-[86%] rounded-[18px] rounded-br-[6px] bg-accent-soft px-3.5 py-2 text-[15px] text-text">
+    <div className="mb-6 mt-2 flex justify-end pl-10">
+      <div className="min-w-0 max-w-full rounded-[22px] rounded-br-[8px] bg-[var(--user-bubble)] px-4 py-3 text-body leading-[1.5] text-text">
         {message.parts.map((part) => {
           if (part.type === "text")
             return (
-              <p key={part.id} className="whitespace-pre-wrap">
+              <p key={part.id} className="whitespace-pre-wrap break-words">
                 {part.text}
               </p>
             );
@@ -258,7 +289,7 @@ function FinalMessage({ message }: { message: AgentMessage }) {
   const failed = message.state === "failed";
   const interrupted = message.state === "interrupted";
   return (
-    <div className={`mb-4 ${failed || interrupted ? "opacity-90" : ""}`}>
+    <div className={`mb-8 ${failed || interrupted ? "opacity-90" : ""}`}>
       <MessageParts message={message} />
     </div>
   );
@@ -272,21 +303,26 @@ function WorkRow({ item, children }: { item: Extract<TimelineItem, { kind: "work
   if (item.reasoningCount > 0) bits.push(`${item.reasoningCount} thinking`);
   if (item.foldedTextCount > 0) bits.push(plural(item.foldedTextCount, "update"));
   return (
-    <div className="mb-3">
+    <div className="-mt-2 mb-3">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="flex min-h-11 items-center gap-2 rounded-[10px] px-1.5 text-[12px] font-medium text-muted hover:text-text"
+        className="-ml-2 inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-[12px] px-2 text-left text-callout text-muted transition-colors hover:text-text active:bg-fill"
       >
-        {open ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
-        <span>
-          Worked{duration ? ` for ${duration}` : ""}
-          {bits.length > 0 ? ` · ${bits.join(" · ")}` : ""}
+        <span className="min-w-0">
+          <span className="font-medium">Worked{duration ? ` for ${duration}` : ""}</span>
+          {bits.length > 0 ? <span className="text-muted/80"> · {bits.join(" · ")}</span> : null}
         </span>
+        <ChevronDown
+          size={15}
+          strokeWidth={2.25}
+          className={`shrink-0 text-faint transition-transform duration-300 ${open ? "rotate-180" : ""}`}
+          aria-hidden
+        />
       </button>
       {open ? (
-        <div className="ml-3 border-l-2 border-border pl-3">
+        <div className="mb-2 ml-1 mt-1 border-l border-border pl-4">
           {item.tools.map((tool) => (
             <ToolRow key={tool.id} tool={tool} dense />
           ))}
@@ -299,8 +335,8 @@ function WorkRow({ item, children }: { item: Extract<TimelineItem, { kind: "work
 
 export function WorkingRow() {
   return (
-    <div className="mb-3 flex items-center gap-2 text-[13px] text-muted" role="status">
-      <Loader2 size={13} className="animate-spin text-accent" aria-hidden />
+    <div className="-mt-3 mb-4 flex min-h-11 items-center gap-2.5 text-callout text-muted" role="status">
+      <Loader2 size={16} className="animate-spin text-accent" aria-hidden />
       <span className="shimmer font-medium">Working…</span>
     </div>
   );
@@ -315,9 +351,12 @@ export const Timeline = memo(function Timeline({
   running: boolean;
   hasMessages: boolean;
 }) {
+  // A streaming reply only replaces the working line once it has something to show.
+  const last = items[items.length - 1];
   const lastStreaming =
-    items[items.length - 1]?.kind === "final" &&
-    (items[items.length - 1] as { message: AgentMessage }).message.state === "streaming";
+    last?.kind === "final" &&
+    last.message.state === "streaming" &&
+    last.message.parts.some((part) => (part.type === "text" ? part.text.length > 0 : part.type !== "reasoning"));
   return (
     <div>
       {items.map((item) => {
@@ -325,8 +364,7 @@ export const Timeline = memo(function Timeline({
         if (item.kind === "final") return <FinalMessage key={item.id} message={item.message} />;
         return <WorkRow key={item.id} item={item} />;
       })}
-      {running && !lastStreaming ? <WorkingRow /> : null}
-      {running && !hasMessages ? <WorkingRow /> : null}
+      {running && (!lastStreaming || !hasMessages) ? <WorkingRow /> : null}
     </div>
   );
 });

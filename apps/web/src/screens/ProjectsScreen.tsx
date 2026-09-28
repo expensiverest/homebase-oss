@@ -1,84 +1,68 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronRight, FolderOpen, RefreshCw } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
-import type { AgentProject, AgentProvider } from "@homebase/protocol";
+import type { AgentProject } from "@homebase/protocol";
 
 import { api } from "../lib/api.js";
-import { plural, relativeTime } from "../lib/format.js";
+import { relativeTime } from "../lib/format.js";
 import { qk, useProviders, useProjects, useSessions } from "../lib/queries.js";
-import { providerStatus, summarizeSessions } from "../lib/viewmodel.js";
-import { ConnectionPill, ScreenHeader, ThemeToggle } from "../components/chrome.js";
-import { Button, EmptyState, ErrorState, Group, Pill, Row, Skeleton, StatusDot } from "../components/ui.js";
+import { summarizeSessions } from "../lib/viewmodel.js";
+import { ConnectionPill, ProviderHealth, ThemeToggle, TopBar } from "../components/chrome.js";
+import { ProjectMark } from "../components/marks.js";
+import { BranchChip, EmptyState, ErrorState, Group, Pill, Skeleton } from "../components/ui.js";
 
-function providerInitial(provider: AgentProvider | undefined, providerId: string): string {
-  const name = provider?.name ?? providerId;
-  return name.slice(0, 1).toUpperCase();
-}
-
-function ProjectRow({
-  project,
-  providers,
-  onOpen,
-}: {
-  project: AgentProject;
-  providers: AgentProvider[];
-  onOpen: () => void;
-}) {
+function ProjectRow({ project, onOpen }: { project: AgentProject; onOpen: () => void }) {
   const sessions = useSessions(project.id);
   const items = sessions.data?.pages.flatMap((page) => page.items) ?? [];
   const summary = summarizeSessions(items);
   const latest = items[0]?.updatedAt;
-  const parts = [
-    project.branch ?? null,
-    summary.total > 0 ? plural(summary.total, "session") : null,
-    summary.working > 0 ? `${summary.working} working` : null,
-    summary.waiting > 0 ? `${summary.waiting} needs you` : null,
-  ].filter((entry): entry is string => Boolean(entry));
+  const more = sessions.hasNextPage ? "+" : "";
+
+  const activity = sessions.isLoading ? (
+    <span className="text-muted">Loading…</span>
+  ) : sessions.isError ? (
+    <span className="text-warn">Sessions unavailable</span>
+  ) : summary.working > 0 ? (
+    <span className="inline-flex items-center gap-1.5 text-accent">
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent" />
+      {summary.working} working
+    </span>
+  ) : summary.total > 0 ? (
+    <span>
+      {summary.total}
+      {more} {summary.total === 1 && !more ? "session" : "sessions"}
+    </span>
+  ) : (
+    <span>No sessions yet</span>
+  );
 
   return (
-    <Row
+    <button
+      type="button"
       onClick={onOpen}
-      ariaLabel={`Open project ${project.name}`}
-      leading={
-        <span className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-surface-2 text-muted">
-          <FolderOpen size={18} aria-hidden />
-        </span>
-      }
-      title={project.name}
-      subtitle={
-        <>
-          <span className="min-w-0 truncate">
-            {sessions.isLoading ? "Loading sessions…" : parts.length > 0 ? parts.join(" · ") : "No sessions yet"}
-          </span>
-          {latest ? <span className="shrink-0 text-faint">· {relativeTime(latest)}</span> : null}
-          {sessions.isError ? <span className="shrink-0 text-warn">· sessions unavailable</span> : null}
-        </>
-      }
-      trailing={
-        <span className="flex items-center gap-1.5">
+      aria-label={`Open project ${project.name}`}
+      className="hairline-top flex min-h-[76px] w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors first:shadow-none active:bg-surface-2"
+    >
+      <ProjectMark name={project.name} working={summary.working > 0} />
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="min-w-0 flex-1 truncate text-row font-semibold text-text">{project.name}</span>
           {summary.waiting > 0 ? (
-            <Pill tone="waiting">Needs you</Pill>
-          ) : summary.working > 0 ? (
-            <Pill tone="working">Working</Pill>
+            <span className="self-center">
+              <Pill tone="waiting">Needs you</Pill>
+            </span>
+          ) : latest ? (
+            <span className="readout shrink-0 text-caption text-muted">{relativeTime(latest)}</span>
           ) : null}
-          {project.providersAvailable.map((providerId) => {
-            const provider = providers.find((candidate) => candidate.id === providerId);
-            const status = provider ? providerStatus(provider) : null;
-            return (
-              <span
-                key={providerId}
-                title={provider ? `${provider.name}: ${status?.label}` : providerId}
-                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border bg-surface font-mono text-[10px] text-muted"
-              >
-                {providerInitial(provider, providerId)}
-              </span>
-            );
-          })}
-          <ChevronRight size={16} className="text-faint" aria-hidden />
         </span>
-      }
-    />
+        <span className="mt-1 flex min-w-0 items-center gap-2 text-callout text-muted">
+          {project.branch ? <BranchChip branch={project.branch} className="max-w-[55%] shrink" /> : null}
+          <span className="min-w-0 shrink-0 truncate">{activity}</span>
+        </span>
+      </span>
+      <ChevronRight size={18} className="-mr-1 shrink-0 text-faint" aria-hidden />
+    </button>
   );
 }
 
@@ -92,76 +76,69 @@ export function ProjectsScreen() {
     onSuccess: (list) => client.setQueryData(qk.providers, list),
   });
 
-  const providerList = providers.data ?? [];
-  const unavailable = providerList.filter((provider) => providerStatus(provider).tone !== "ok");
-  const warning = unavailable
-    .map((provider) => `${provider.name}: ${providerStatus(provider).detail ?? providerStatus(provider).label}`)
-    .join(" ");
+  const list = projects.data ?? [];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ScreenHeader large title="Homebase" subtitle={<ConnectionPill />} trailing={<ThemeToggle />} />
-      <main className="min-h-0 flex-1 overflow-y-auto px-safe pb-10">
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          {providers.isLoading ? (
-            <>
-              <Skeleton className="h-8 w-28" />
-              <Skeleton className="h-8 w-28" />
-            </>
-          ) : (
-            providerList.map((provider) => {
-              const status = providerStatus(provider);
-              return (
-                <span
-                  key={provider.id}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-[12px]"
-                >
-                  <StatusDot tone={status.tone} />
-                  <span className="font-medium text-text">{provider.name}</span>
-                  <span className="text-muted">{status.label}</span>
-                </span>
-              );
-            })
-          )}
-          {unavailable.length > 0 ? (
-            <Button size="sm" variant="ghost" onClick={() => refresh.mutate()} loading={refresh.isPending}>
-              <RefreshCw size={13} aria-hidden />
-              Retry
-            </Button>
-          ) : null}
-        </div>
-        {warning ? <p className="mb-4 text-[12px] text-muted">{warning}</p> : null}
-
-        {projects.isLoading ? (
-          <div className="flex flex-col gap-2">
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
+      <main className="min-h-0 flex-1 overflow-y-auto px-safe pb-12">
+        <header className="pt-safe">
+          <TopBar
+            leading={
+              <span className="inline-flex items-center gap-2.5">
+                <span className="eyebrow">Homebase</span>
+                <ConnectionPill />
+              </span>
+            }
+            trailing={<ThemeToggle />}
+          />
+          <h1 className="mt-4 font-serif text-display text-text">Projects</h1>
+          <p className="mt-2 text-row text-muted">Your coding agents, on your computer.</p>
+          <div className="mt-4">
+            <ProviderHealth
+              providers={providers.data ?? []}
+              loading={providers.isLoading}
+              onRetry={() => refresh.mutate()}
+              retrying={refresh.isPending}
+            />
           </div>
-        ) : projects.isError ? (
-          <ErrorState
-            title="Homebase cannot reach the Host"
-            detail="Make sure the Host is running on your computer, then try again."
-            onRetry={() => void projects.refetch()}
-          />
-        ) : (projects.data ?? []).length === 0 ? (
-          <EmptyState
-            icon={<FolderOpen size={22} aria-hidden />}
-            title="No projects yet"
-            detail="Add a repository to your Homebase config on your computer; it will show up here."
-          />
-        ) : (
-          <Group title="Projects">
-            {(projects.data ?? []).map((project) => (
-              <ProjectRow
-                key={project.id}
-                project={project}
-                providers={providerList}
-                onOpen={() => void navigate({ to: "/p/$projectId", params: { projectId: project.id } })}
-              />
-            ))}
-          </Group>
-        )}
+        </header>
+
+        <div className="mt-9">
+          {projects.isLoading ? (
+            <div className="surface overflow-hidden">
+              {[0, 1, 2].map((index) => (
+                <div key={index} className="hairline-top flex min-h-[76px] items-center gap-3.5 px-4 first:shadow-none">
+                  <Skeleton className="h-11 w-11 rounded-[30%]" />
+                  <div className="flex flex-1 flex-col gap-2">
+                    <Skeleton className="h-4 w-32" />
+                    <Skeleton className="h-3.5 w-48" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : projects.isError ? (
+            <ErrorState
+              title="Homebase cannot reach the Host"
+              detail="Make sure the Host is running on your computer, then try again."
+              onRetry={() => void projects.refetch()}
+            />
+          ) : list.length === 0 ? (
+            <EmptyState
+              title="No projects yet"
+              detail="Add a repository to your Homebase config on your computer; it will show up here."
+            />
+          ) : (
+            <Group title="Projects" trailing={list.length}>
+              {list.map((project) => (
+                <ProjectRow
+                  key={project.id}
+                  project={project}
+                  onOpen={() => void navigate({ to: "/p/$projectId", params: { projectId: project.id } })}
+                />
+              ))}
+            </Group>
+          )}
+        </div>
       </main>
     </div>
   );

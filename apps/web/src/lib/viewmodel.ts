@@ -294,3 +294,34 @@ export function summarizeSessions(sessions: AgentSession[]): ProjectSummary {
   summary.lastProvider = sessions[0]?.provider ?? null;
   return summary;
 }
+
+// --- display names ----------------------------------------------------------
+
+/** Providers that can start sessions here, limited to the project's providers when it names any. */
+export function usableProviders(providers: AgentProvider[], available?: string[] | null): AgentProvider[] {
+  const allowed = available && available.length > 0 ? new Set(available) : null;
+  return providers.filter(
+    (provider) => provider.installed && provider.compatible && (!allowed || allowed.has(provider.id)),
+  );
+}
+
+/** A thinking level's display name: the catalog's name, capitalised when it is a bare id. */
+export function levelLabel(model: AgentModel | undefined, level: string): string {
+  const name = model?.thinkingLevels?.find((entry) => entry.id === level)?.name ?? level;
+  return /[A-Z]/.test(name) ? name : name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/**
+ * A readable model name: the catalog name when known, otherwise the id's last
+ * segment ("example-provider/aurora-1" → "Aurora 1").
+ */
+export function modelDisplayName(modelId: string | null | undefined, models?: AgentModel[]): string | null {
+  if (!modelId) return null;
+  const known = models?.find((model) => model.id === modelId)?.name;
+  if (known) return known;
+  const tail = modelId.split("/").pop() ?? modelId;
+  return tail
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
