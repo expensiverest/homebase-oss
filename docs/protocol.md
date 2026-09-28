@@ -235,3 +235,17 @@ provider-native errors.
    and a plan revision entry if they change architecture.
 3. Never add provider-native names or payloads to this package. Use `provider.event` inside the adapter
    if a provider concept genuinely has no normalized home yet.
+
+## Pending actions and provider refresh (Phase 4)
+
+Two Host additions serve the web client without new concepts:
+
+- `GET /api/v1/sessions/:sessionId/actions` returns the Host's pending read model:
+  `{ approvals: AgentApprovalRequest[], questions: AgentQuestionRequest[] }`, oldest first, with the same
+  provider-scoped public ids used everywhere else. The Host retains the full normalized requests while they
+  are actionable and drops them on resolution, session deletion, or a terminal turn, so a reloading client can
+  rebuild approval/question cards without provider-specific state.
+- `POST /api/v1/providers/refresh` re-runs provider detection, publishes the resulting normalized provider
+  events (`provider.connected`/`provider.updated`/`provider.disconnected`), and returns the refreshed provider
+  list. Clients use it on explicit Retry after a provider was signed out or a server was started; it is not a
+  polling endpoint.

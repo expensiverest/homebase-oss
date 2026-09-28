@@ -519,6 +519,9 @@ export class MockAdapter implements AgentAdapter {
         () => {
           clearTimeout(timer);
           this.#pendingApprovals.delete(requestId);
+          this.#emit(session, "approval.resolved", {
+            resolution: { requestId, optionId: "deny", resolvedAt: nowTimestamp(), resolvedBy: "system" },
+          });
           reject(new DOMException("Aborted", "AbortError"));
         },
         { once: true },
@@ -569,6 +572,9 @@ export class MockAdapter implements AgentAdapter {
         "abort",
         () => {
           this.#pendingQuestions.delete(requestId);
+          this.#emit(session, "question.resolved", {
+            resolution: { requestId, answers: [], resolvedAt: nowTimestamp() },
+          });
           reject(new DOMException("Aborted", "AbortError"));
         },
         { once: true },

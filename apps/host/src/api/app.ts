@@ -27,6 +27,7 @@ import type { EventBus } from "../events/index.js";
 import type { ProjectRegistry } from "../projects/index.js";
 import type { ProviderRegistry } from "../providers/index.js";
 import type { SessionService } from "../sessions/index.js";
+import { createStaticWebHandler } from "../static.js";
 import { sseEventsHandler } from "./sse.js";
 
 export interface ApiDependencies {
@@ -40,6 +41,8 @@ export interface ApiDependencies {
   attachments: AttachmentStore;
   auth: Authenticator;
   logger: AdapterLogger;
+  /** Absolute path to the built web client; enables static serving when set. */
+  webDist?: string | null;
 }
 
 export interface ApiEnv {
@@ -235,6 +238,16 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
 
   app.get("/api/v1/events", (c) => sseEventsHandler(c, deps));
 
+  app.get("/api/v1/sessions/:sessionId/actions", async (c) => {
+    const actions = await deps.sessions.listActions(c.req.param("sessionId"));
+    return c.json(actions);
+  });
+
+  app.post("/api/v1/providers/refresh", async (c) => {
+    await deps.providers.refresh();
+    return c.json({ providers: deps.providers.listProviders(), latestSequence: deps.bus.latestSequence });
+  });
+
   app.post(
     "/api/v1/attachments",
     bodyLimit({
@@ -282,6 +295,10 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
   app.all("/api/*", (c) =>
     c.json(errorBody(new HostError("not_found", "No such API route."), c.get("requestId")), 404),
   );
+
+  if (deps.webDist) {
+    app.get("*", createStaticWebHandler({ distPath: deps.webDist, logger: deps.logger }));
+  }
 
   return app;
 }

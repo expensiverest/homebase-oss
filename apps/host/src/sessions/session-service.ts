@@ -1,9 +1,11 @@
 import type { AdapterLogger, AgentAdapter } from "@homebase/adapter-sdk";
 import { parsePublicId } from "@homebase/adapter-sdk";
 import type {
+  AgentApprovalRequest,
   AgentDiff,
   AgentMessage,
   AgentPage,
+  AgentQuestionRequest,
   AgentSession,
   AgentUsage,
   ApprovalResult,
@@ -85,8 +87,13 @@ export class SessionService {
 
   readonly #sessions = new Map<SessionId, AgentSession>();
   readonly #providerBySession = new Map<SessionId, ProviderId>();
-  readonly #pendingApprovals = new Map<string, ProviderId>();
-  readonly #pendingQuestions = new Map<string, ProviderId>();
+  /**
+   * Full normalized pending requests, not just routing ids, so a browser
+   * reload can rebuild approval/question cards from the Host after it has
+   * already emitted `approval.requested` / `question.requested`.
+   */
+  readonly #pendingApprovals = new Map<string, { providerId: ProviderId; request: AgentApprovalRequest }>();
+  readonly #pendingQuestions = new Map<string, { providerId: ProviderId; request: AgentQuestionRequest }>();
 
   constructor(options: SessionServiceOptions) {
     this.#providers = options.providers;
@@ -107,6 +114,7 @@ export class SessionService {
       case "session.deleted":
         this.#sessions.delete(event.data.sessionId);
         this.#providerBySession.delete(event.data.sessionId);
+        this.#dropActionsForSession(event.data.sessionId);
         break;
       case "turn.started":
         this.#setState(event.sessionId, "working");
@@ -114,24 +122,43 @@ export class SessionService {
       case "turn.completed":
       case "turn.interrupted":
         this.#setState(event.sessionId, "idle");
+        // A terminal run cannot leave actionable requests behind.
+        this.#dropActionsForSession(event.sessionId);
         break;
       case "turn.failed":
         this.#setState(event.sessionId, "failed");
+        this.#dropActionsForSession(event.sessionId);
         break;
       case "approval.requested":
-        this.#pendingApprovals.set(event.data.approval.id, event.provider);
+        this.#pendingApprovals.set(event.data.approval.id, {
+          providerId: event.provider,
+          request: event.data.approval,
+        });
         break;
       case "approval.resolved":
         this.#pendingApprovals.delete(event.data.resolution.requestId);
         break;
       case "question.requested":
-        this.#pendingQuestions.set(event.data.question.id, event.provider);
+        this.#pendingQuestions.set(event.data.question.id, {
+          providerId: event.provider,
+          request: event.data.question,
+        });
         break;
       case "question.resolved":
         this.#pendingQuestions.delete(event.data.resolution.requestId);
         break;
       default:
         break;
+    }
+  }
+
+  #dropActionsForSession(sessionId: SessionId | null): void {
+    if (!sessionId) return;
+    for (const [requestId, entry] of [...this.#pendingApprovals]) {
+      if (entry.request.sessionId === sessionId) this.#pendingApprovals.delete(requestId);
+    }
+    for (const [requestId, entry] of [...this.#pendingQuestions]) {
+      if (entry.request.sessionId === sessionId) this.#pendingQuestions.delete(requestId);
     }
   }
 
@@ -316,29 +343,50 @@ export class SessionService {
   }
 
   async resolveApproval(requestId: string, result: ApprovalResult): Promise<void> {
-    const providerId = this.#pendingApprovals.get(requestId);
-    if (!providerId) {
+    const entry = this.#pendingApprovals.get(requestId);
+    if (!entry) {
       throw new HostError("not_found", `No pending approval with id "${requestId}".`);
     }
-    this.#providers.requireCapability(providerId, "approvals");
-    const adapter = this.#providers.requireAdapter(providerId);
+    this.#providers.requireCapability(entry.providerId, "approvals");
+    const adapter = this.#providers.requireAdapter(entry.providerId);
     if (!adapter.resolveApproval) {
-      throw new HostError("unsupported_capability", `Provider "${providerId}" does not support approvals.`);
+      throw new HostError("unsupported_capability", `Provider "${entry.providerId}" does not support approvals.`);
     }
     await adapter.resolveApproval(requestId, result);
   }
 
   async answerQuestion(requestId: string, answer: QuestionAnswer): Promise<void> {
-    const providerId = this.#pendingQuestions.get(requestId);
-    if (!providerId) {
+    const entry = this.#pendingQuestions.get(requestId);
+    if (!entry) {
       throw new HostError("not_found", `No pending question with id "${requestId}".`);
     }
-    this.#providers.requireCapability(providerId, "questions");
-    const adapter = this.#providers.requireAdapter(providerId);
+    this.#providers.requireCapability(entry.providerId, "questions");
+    const adapter = this.#providers.requireAdapter(entry.providerId);
     if (!adapter.answerQuestion) {
-      throw new HostError("unsupported_capability", `Provider "${providerId}" does not support questions.`);
+      throw new HostError("unsupported_capability", `Provider "${entry.providerId}" does not support questions.`);
     }
     await adapter.answerQuestion(requestId, answer);
+  }
+
+  /**
+   * Pending approval/question state for one session, oldest first, rebuilt
+   * from normalized events so a browser reload can re-render action cards.
+   */
+  async listActions(
+    sessionId: SessionId,
+  ): Promise<{ approvals: AgentApprovalRequest[]; questions: AgentQuestionRequest[] }> {
+    // Resolving the session validates scope and lets adapters that reconcile
+    // provider-side pending state (OpenCode) refresh it.
+    await this.get(sessionId);
+    const approvals = [...this.#pendingApprovals.values()]
+      .filter((entry) => entry.request.sessionId === sessionId)
+      .map((entry) => structuredClone(entry.request))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const questions = [...this.#pendingQuestions.values()]
+      .filter((entry) => entry.request.sessionId === sessionId)
+      .map((entry) => structuredClone(entry.request))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return { approvals, questions };
   }
 
   async getUsage(providerId: ProviderId): Promise<AgentUsage | null> {

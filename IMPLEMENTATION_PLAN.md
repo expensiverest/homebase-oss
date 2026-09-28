@@ -1653,3 +1653,32 @@ diverge (rule 17).
   - **Testing:** fake-CLI compliance suite for normal runs, live suite (`HOMEBASE_TEST_CLAUDE=1`)
     verified against Claude Code 2.1.268, and Host multi-provider coverage with colliding native ids.
 
+- **2026-09-27 - Phase 4 (mobile web client and normalized live UX).**
+  - **Correction A15 (pending actions read model):** `SessionService` now retains complete normalized
+    `AgentApprovalRequest`/`AgentQuestionRequest` objects (not just routing ids) and drops them on
+    resolution, session deletion, or a terminal turn. `GET /api/v1/sessions/:sessionId/actions`
+    returns them oldest-first so approval/question cards survive a browser reload. The mock adapter now
+    emits resolutions when a pending request is aborted.
+  - **Correction A16 (provider refresh):** `POST /api/v1/providers/refresh` re-runs detection, publishes
+    the resulting provider events, and returns the refreshed list, so a signed-out Claude or stopped
+    OpenCode server can recover without restarting Homebase.
+  - **Static serving:** the Host serves `apps/web/dist` (SPA fallback for deep links, immutable hashed
+    assets, revalidated shell, `/api/*` never falls back, traversal blocked, dev message when unbuilt).
+  - **Web client (`@homebase/web`):** Vite 8 + React 19 + Tailwind v4 + TanStack Router/Query + Zustand;
+    design tokens with light/dark/system, installable PWA with an app-shell-only service worker that
+    never touches `/api/*`; provider-neutral Projects -> Sessions -> Chat navigation.
+  - **Networking:** typed REST client and a fetch-based SSE client (native `EventSource` cannot carry
+    `Authorization`), one global event stream, sequence replay via `?since`, `ready`/`resync` handling,
+    visibility reconnect for iOS, and event-driven query invalidation instead of polling.
+  - **Live UX:** global overlay reducer with sequence de-duplication; streaming text with smooth
+    reveal; tool rows, reasoning disclosure (content-driven, not provider-driven), run folding into
+    "Worked for …"; optimistic user messages pruned against fetched history; capabilities drive
+    queue/steer/stop, attachments (images vs files), model/mode/thinking pickers, diffs, and deletion.
+  - **Mock/test architecture:** `?mock=<scenario>` installs a deterministic transport and event script
+    for browser use; unit suites cover the SSE parser, overlay reducer, invalidation map, timeline
+    folding, capability gating, and token contrast; Playwright covers the mobile journey, quality gates,
+    and resilience against 402x874. Mock fixtures are fictional and excluded from production bundles.
+  - **Limitations carried forward:** pairing/login, Attention/Activity, and usage rendering belong to
+    later phases; queue/steer and approval denial remain verified at the adapter/fixture level rather
+    than live UI runs.
+

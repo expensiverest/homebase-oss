@@ -1,8 +1,8 @@
 # Homebase architecture
 
-> **Status:** Phase 0 complete, Phase 1 in progress (Host core).
-> This document describes what exists in the repository today and the intended end-state from
-> [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md).
+> **Status:** Phases 0-4 implemented: protocol, adapter SDK, Host core, OpenCode and Claude Code adapters,
+> and the Phase 4 mobile web client. This document describes what exists in the repository today and the
+> intended end-state from [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md).
 
 ## Overview
 
@@ -45,6 +45,7 @@ Shared code (Host logic and UI) branches on **capabilities**, never on provider 
 ```text
 apps/
   host/        @homebase/host        Node HTTP/SSE control plane
+  web/         @homebase/web         React/Vite PWA (Phase 4)
 packages/
   protocol/    @homebase/protocol    provider-neutral entities, events, capabilities, errors
   adapter-sdk/ @homebase/adapter-sdk adapter contract, compliance suite, identity helpers, test utilities
@@ -53,8 +54,7 @@ packages/
 docs/
 ```
 
-`apps/web` (the PWA) is created in Phase 4; no web code exists yet. Claude and the ACP providers are
-added in their phases.
+The web client speaks only to the Host. Grok/Gemini (ACP) and later providers are added in their phases.
 
 ## Packages
 
@@ -104,6 +104,8 @@ Rules:
 | `src/attachments/attachment-store.ts` | Ephemeral Host-owned attachment bytes (upload, TTL/LRU, MIME and magic-byte checks)                            |
 | `src/api/app.ts`                      | REST API, stable errors, auth middleware, body limits, no-store, catalogs, attachments                         |
 | `src/api/sse.ts`                      | `GET /api/v1/events`: replay via `Last-Event-ID`/`?since=`, `ready`/`resync` control events                    |
+| `src/api/app.ts` (actions/refresh)    | `GET /api/v1/sessions/:id/actions` pending read model; `POST /api/v1/providers/refresh` re-detects providers   |
+| `src/static.ts`                       | Serves the built web client with SPA fallback, cache policy, and traversal protection                          |
 | `src/server.ts`                       | Runtime wiring; `createDefaultRegistrations()` provides the mock and OpenCode providers                        |
 
 ### Request and event flow
@@ -175,13 +177,25 @@ log and here:
     user's `claude` CLI with stream-json, uses control requests for interrupt/model/mode, and keeps a
     loopback-only approval channel for the MCP permission-prompt tool. Credentials stay with the CLI.
 
+## Web client (Phase 4)
+
+`apps/web` is a provider-neutral React 19 PWA. It holds server state in TanStack Query, reducer state for the
+global live overlay in Zustand, and one fetch-based SSE connection (`GET /api/v1/events`) that reconnects with
+`?since=<sequence>`, handles `ready`/`resync`, and reconnects on `visibilitychange`. Events invalidate queries;
+they are never applied twice because every event carries a global sequence.
+
+The Host serves the production build from `apps/web/dist` (`src/static.ts`): `/api/*` stays API, hashed assets
+are immutable, the shell revalidates, deep links fall back to `index.html`, and the service worker caches only
+app-shell assets, never `/api/*`. See [web-client.md](web-client.md) for the full client architecture, mock
+scenarios, and PWA caching policy.
+
 ## Current status
 
-| Phase                                          | Status                                                                                        |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| 0 — Repository and specification foundation    | Complete                                                                                      |
-| 1 — Host core                                  | Implemented (config, registries, bus, SSE, REST, auth placeholder, health)                    |
-| 2 — OpenCode reference adapter                 | Complete (protocol/SDK corrections, Host attachments/catalogs/history, adapter + live checks) |
-| 3 — Claude adapter and multi-provider identity | Complete (provider-scoped ids, deterministic routing, Claude adapter + fake CLI/live suites)  |
-| 4 — PWA                                        | Next                                                                                          |
-| 5 — Security and pairing                       | Planned (auth placeholder exists)                                                             |
+| Phase                                          | Status                                                                                         |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 0 — Repository and specification foundation    | Complete                                                                                       |
+| 1 — Host core                                  | Implemented (config, registries, bus, SSE, REST, auth placeholder, health)                     |
+| 2 — OpenCode reference adapter                 | Complete (protocol/SDK corrections, Host attachments/catalogs/history, adapter + live checks)  |
+| 3 — Claude adapter and multi-provider identity | Complete (provider-scoped ids, deterministic routing, Claude adapter + fake CLI/live suites)   |
+| 4 — PWA (mobile web client)                    | Complete (Projects/Sessions/Chat, global event client, capabilities, mock E2E, static serving) |
+| 5 — Security and pairing                       | Planned (auth placeholder exists)                                                              |

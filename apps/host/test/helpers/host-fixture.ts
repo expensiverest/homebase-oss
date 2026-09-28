@@ -31,6 +31,8 @@ export interface TestHostOptions {
   config?: Record<string, unknown>;
   registrations?: AdapterRegistration[];
   eventBufferSize?: number;
+  /** Absolute path to a built web client, or null to disable static serving. */
+  webDistPath?: string | null;
 }
 
 export interface TestHost {
@@ -76,6 +78,7 @@ export async function createTestHost(options: TestHostOptions = {}): Promise<Tes
     registrations: options.registrations ?? [defaultMockRegistration()],
     git: fakeGitReader,
     eventBufferSize: options.eventBufferSize ?? 200,
+    webDistPath: options.webDistPath ?? null,
     logger: createConsoleLogger("host-test", { level: "error", sink: silentSink }),
   });
 

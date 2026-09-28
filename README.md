@@ -6,8 +6,10 @@ Your development machine stays the execution environment. Your phone becomes the
 Claude Code, OpenCode, Grok Build, Gemini CLI, Codex CLI, GitHub Copilot CLI, and future agent adapters one coherent
 mobile experience for projects, sessions, streaming output, approvals, questions, diffs, models, and usage.
 
-> **Status: pre-alpha (0.0.x).** The provider-neutral protocol, adapter SDK, and Host core are being built in the
-> open. No public release exists yet. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the authoritative plan.
+> **Status: pre-alpha (0.0.x).** The provider-neutral protocol, adapter SDK, Host core, OpenCode and Claude Code
+> adapters, and the Phase 4 mobile web client (installable PWA) are being built in the open. No public release exists
+> yet. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the authoritative plan and
+> [docs/web-client.md](docs/web-client.md) for the client architecture.
 
 ## Why Homebase
 

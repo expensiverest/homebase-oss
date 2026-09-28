@@ -97,3 +97,19 @@ This is the most important boundary in the product:
   do not enable a public relay.
 - Tailscale (or an equivalent private overlay) is transport privacy, not a substitute for authentication:
   device pairing is still required before remote control is allowed.
+
+## Web client (Phase 4)
+
+- The browser receives provider-neutral data only: no provider credentials, no native payloads, no
+  provider-owned error strings. Model output is rendered as Markdown without raw HTML; Shiki highlights code
+  from escaped source text, and remote images inside model output are not fetched.
+- Credentials, when Phase 5 adds them, flow through one transport injection point shared by REST and SSE. The
+  client never places tokens in URLs or query strings; native `EventSource` is deliberately unused because it
+  cannot send an `Authorization` header.
+- Attachment bytes are fetched with the same credentials and exposed through object URLs that are revoked on
+  unmount. Attachment text is never persisted locally, and the query cache is memory-only.
+- The service worker caches app-shell assets only. `/api/*`, the event stream, transcripts, approvals,
+  questions, attachments, and usage are never cached; going offline reports that Homebase cannot reach the
+  Host instead of showing stale private data.
+- HTTP static serving of the built PWA denies path traversal outside `apps/web/dist`, never SPA-falls back for
+  `/api/*` or extension paths, and keeps `no-store` on API responses.

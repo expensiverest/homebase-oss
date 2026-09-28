@@ -3,6 +3,9 @@ import { createConsoleLogger, type AdapterLogger, type AdapterRegistration } fro
 import { claudeRegistration } from "@homebase/adapter-claude";
 import { opencodeRegistration } from "@homebase/adapter-opencode";
 import { MockAdapter } from "@homebase/adapter-sdk/testing";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import type { Hono } from "hono";
 
 import { createApiApp, type ApiEnv } from "./api/index.js";
@@ -25,6 +28,8 @@ export interface CreateHostRuntimeOptions {
   git?: GitMetadataReader;
   /** Event replay buffer size, for tests. */
   eventBufferSize?: number;
+  /** Absolute path to a built web client; defaults to apps/web/dist when present. */
+  webDistPath?: string | null;
 }
 
 export interface HostRuntime {
@@ -107,6 +112,16 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
   const auth = createAuthenticator(config);
   const attachments = new AttachmentStore();
 
+  const defaultWebDist = path.resolve(fileURLToPath(new URL("../../web/dist", import.meta.url)));
+  const webDist =
+    options.webDistPath === null
+      ? null
+      : options.webDistPath !== undefined
+        ? options.webDistPath
+        : existsSync(path.join(defaultWebDist, "index.html"))
+          ? defaultWebDist
+          : null;
+
   const app = createApiApp({
     version: HOST_VERSION,
     startedAt: Date.now(),
@@ -118,6 +133,7 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     attachments,
     auth,
     logger,
+    webDist,
   });
 
   let server: ReturnType<typeof serve> | null = null;
