@@ -365,6 +365,16 @@
   animation: hb-pulse 1.1s ease-in-out infinite;
 }
 
+/* Code Block lines are <code> elements; keep Markdown's inline-code tint off them. */
+.hb-markdown .bui-code code,
+.bui-code code {
+  background: none;
+  border-radius: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: inherit;
+}
+
 /* Code Block: Shiki tokens carry both theme colors as variables; pick one per theme. */
 .bui-code code span[style] {
   color: var(--shiki-light);

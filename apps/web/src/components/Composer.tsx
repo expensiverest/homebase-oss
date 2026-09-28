@@ -236,7 +236,7 @@ export function Composer({
                 disabled={primaryDisabled}
                 aria-label="Queue message"
                 title="Send after this run"
-                className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-callout font-semibold text-on-accent shadow-[var(--shadow-accent)] transition-[transform,opacity] active:scale-95 disabled:opacity-40 disabled:shadow-none"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-callout font-semibold text-on-accent shadow-[var(--shadow-accent)] transition-[transform,background-color,color,box-shadow] duration-200 enabled:active:scale-[0.96] disabled:bg-fill-strong disabled:text-muted disabled:shadow-none"
               >
                 <ListEnd size={17} strokeWidth={2.25} aria-hidden />
                 Queue
@@ -247,7 +247,7 @@ export function Composer({
                 onClick={() => void submit(requestAction)}
                 disabled={primaryDisabled}
                 aria-label="Send message"
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent shadow-[var(--shadow-accent)] transition-[transform,opacity] active:scale-95 disabled:scale-90 disabled:opacity-35 disabled:shadow-none"
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent shadow-[var(--shadow-accent)] transition-[transform,background-color,color,box-shadow] duration-200 enabled:active:scale-[0.94] disabled:bg-fill-strong disabled:text-muted disabled:shadow-none"
               >
                 <ArrowUp size={20} strokeWidth={2.5} aria-hidden />
               </button>

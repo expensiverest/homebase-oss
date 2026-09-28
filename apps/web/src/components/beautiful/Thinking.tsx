@@ -1,6 +1,8 @@
 import { Brain as StaticBrain, ChevronDown } from "lucide-react";
-import { Brain as AnimatedBrain } from "lucide-react-motion";
-import { useId, useState, type ReactNode } from "react";
+import { lazy, Suspense, useId, useState, type ReactNode } from "react";
+
+// Code-split: see AnimatedBrain.tsx. The static Brain holds the slot while it loads.
+const AnimatedBrain = lazy(() => import("./AnimatedBrain.js"));
 
 /*
  * Adapted from Beautiful UI "Thinking" (MIT, © 2026 Shane Levine; see
@@ -45,7 +47,9 @@ export function Thinking({
           data-brain={active ? "animated" : "static"}
         >
           {active ? (
-            <AnimatedBrain trigger="mount" repeat={Infinity} mode="signature" size={17} strokeWidth={2} aria-hidden />
+            <Suspense fallback={<StaticBrain size={17} strokeWidth={2} aria-hidden />}>
+              <AnimatedBrain size={17} />
+            </Suspense>
           ) : (
             <StaticBrain size={17} strokeWidth={2} aria-hidden />
           )}

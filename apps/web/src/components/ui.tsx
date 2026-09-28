@@ -39,7 +39,7 @@ export function Button({
       {...rest}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={`inline-flex min-w-11 items-center justify-center gap-2 font-semibold tracking-[-0.01em] transition-[transform,background-color,opacity] duration-150 active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${className}`}
+      className={`inline-flex min-w-11 items-center justify-center gap-2 font-semibold [&>svg]:shrink-0 tracking-[-0.01em] transition-[transform,background-color,opacity] duration-150 active:scale-[0.98] disabled:opacity-40 disabled:active:scale-100 ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${className}`}
     >
       {loading ? <Loader2 size={16} className="animate-spin" aria-hidden /> : null}
       {children}

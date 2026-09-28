@@ -113,10 +113,46 @@ every text color, including status on its tinted `*-soft` background, is checked
 `/dev/ui` (development only) shows the type scale, colors, marks, rows, controls, buttons, a folded conversation, tool
 states, action cards, attachments, and the composer idle and running.
 
+## Agent work presentation (Phase 4.2)
+
+Agent-facing surfaces are Beautiful UI components (MIT, © Shane Levine) adapted in
+`src/components/beautiful/` and fed only normalized `Agent*` state by Homebase adapters (`ChatTimeline.tsx`,
+`ActionCards.tsx`, `Composer.tsx`, `Sheets.tsx`). Provenance and what each adaptation removed are in
+`THIRD_PARTY_NOTICES.md` and the folder README. Upstream demo behavior is gone everywhere: no self-running timers,
+scripted stages, hard-coded content, hover-only reveals, `@` sources, slash commands, dictation or shaders.
+
+**One narrative per run** (`activeRunView` in `lib/viewmodel.ts`, `buildTrace` for the steps):
+
+| Moment                            | Surface                                                                                                                     |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Turn started, nothing visible yet | **Loading State (Orbit)**: "Starting…"/"Working…" with elapsed time from `turn.started`                                     |
+| Reasoning streaming               | **Thinking**, open, with lucide-react-motion's `Brain` looping (`trigger="mount"`, `repeat={Infinity}`, `mode="signature"`) |
+| Tools / plan in the live run      | **Task Rows** (status ring → check / cross, expandable input/output/error)                                                  |
+| Text                              | streaming Markdown; the Orbit never shows beside real work                                                                  |
+| Run finished                      | "Worked for …" folded; open: settled **Thinking**, interim updates, **Tool Chips**                                          |
+
+- **Orbit** is agent activity only; ordinary loading keeps skeletons. Elapsed time comes from the real turn start
+  (the live overlay's `runStartedAt`, else the prompt's time), never from page mount.
+- **Thinking** renders only reasoning text the provider sent; the Brain loops only while that reasoning streams
+  and is a still icon once settled. lucide-react-motion honors `prefers-reduced-motion` (the icon stays `resting`).
+- **Tool Chips / Task Rows** take any `AgentToolCall`; unknown tools render generically from `toolPresentation`.
+  Details mount only when opened and render as text in Code Blocks (never HTML).
+- **Approval Card** renders `request.options` as full-width actions (allow once primary, deny destructive, custom
+  options as-is) plus an optional note. **Questions** step one at a time with the odometer counter; a single choice
+  advances but never submits on its own.
+- **Recommendation Card** is used only when a request is a single `confirm` question. Its signal meter and
+  alternatives drawer are optional and unused today: the protocol carries no confidence, so none is shown or
+  inferred.
+- **Prompt Bar** is the composer's surface: pickers above, a full-width input, attach/Stop left and Steer/Queue (or
+  Send) right on a toolbar below that wraps as a group. Send/Queue change fill with readiness.
+- **Code Block** tokenises with Shiki (web bundle, preloaded and cached) into text nodes; line numbers, wrapping,
+  copy. Diff mode is used only for real `AgentDiff` patches in the Changes sheet.
+
 ## Visual QA
 
-`npm run screenshots -w @homebase/web` renders the key screens at 402×874 (@3×) in both themes and at 130% text, and
-writes PNGs to `apps/web/screenshots/` (git-ignored). It asserts composition invariants (no horizontal overflow, a
+`npm run screenshots -w @homebase/web` renders the key screens at 402×874 (@3×) in both themes and at 130% text,
+including Orbit, active Thinking, live tools, folded work, approval, recommendation, both prompt-bar states and a
+code block, and writes PNGs to `apps/web/screenshots/` (git-ignored). It asserts composition invariants (no horizontal overflow, a
 composer textarea wider than 70% of the viewport) but never compares pixels, so it is a review artifact rather than a
 brittle golden-image gate. CI uploads the images as the `visual-qa-screenshots` artifact. Functional design
 regressions (running composer width, long names, 130% text, large model names, quiet/loud provider health) are
@@ -127,7 +163,8 @@ covered by `e2e/quality.spec.ts`.
 In development, `?mock=<scenario>` installs a deterministic in-memory transport and event stream. Scenarios include
 `normal`, `empty`, `many-sessions`, `active-stream`, `approval`, `question`, `failed`, `provider-down`, `signed-out`,
 `reconnecting`, `resync`, `models-large`, `attachments`, `diff`, `reasoning`, `claude-image-only`,
-`long-conversation`, and `host-error`. Fixtures are fictional; the normal scenario deliberately includes short and
+`long-conversation`, `host-error`, and the held live turns `run-starting`, `run-thinking`, `run-tools` plus `confirm`.
+Fixtures are fictional; the normal scenario deliberately includes short and
 very long project names, a long branch, a long session title, mixed providers and states, and a long tool-heavy reply
 so screenshots exercise the design. The module is loaded through a dynamic import behind
 `import.meta.env.DEV || VITE_MOCK === "1"`, so scenario payloads are excluded from the production bundle. Playwright
@@ -166,6 +203,7 @@ is a centered, naturally expanded version of the same product.
 - Attention and Activity screens are later phases; the connection pill and provider warnings are the only global
   status surfaces.
 - Usage (`capabilities.usage`) is fetched by the API client but not yet rendered.
+- Thinking shows "Thought process" rather than a duration: the protocol has no per-part reasoning timing.
 - Steer is an explicit secondary button beside Queue; the private client's press-and-hold gesture was not ported.
 - Diffs are read-only; there is no git command execution from the browser.
 - Queue/steer behaviour is verified against mocks; Claude/OpenCode live queue/steer proofs remain adapter-level.

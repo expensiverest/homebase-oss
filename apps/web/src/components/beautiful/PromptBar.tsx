@@ -1,17 +1,21 @@
 import type { ReactNode, Ref, TextareaHTMLAttributes } from "react";
 
 /*
- * Prompt Bar. Upstream source for Beautiful UI's "Prompt Bar" was not
- * available to this project (see THIRD_PARTY_NOTICES.md); this is a Homebase
- * presentational shell in the same idiom as the vendored primitives: a lit
- * input surface with a focus glow, attachments inside the surface, pickers
- * above it and a tool/action row below it. It only lays things out; the
- * Homebase Composer owns drafts, uploads, queue/steer/stop and capabilities.
+ * Adapted from Beautiful UI "Prompt Bar" (MIT, © 2026 Shane Levine; source
+ * pinned at slev12397/beautiful-ui@44a274e; see THIRD_PARTY_NOTICES.md).
+ * Kept: the "tall" composer — one lit surface holding attachment chips, a
+ * multi-line input that owns the width, and controls on their own row below
+ * it; the quiet focus treatment (the border steps up, no glow ring); chips
+ * that pop in; a send control that changes fill with readiness and presses
+ * down. Changed: Homebase tokens and 44px targets; the pickers (model · effort,
+ * mode) sit above the surface; slots take real Homebase controls. Removed:
+ * the self-running AUTO_STEPS walkthrough, the glimm rainbow shader, @ data
+ * sources, / commands, dictation, branded source icons, the in-bar model menu
+ * and the Pill variant — Homebase supports none of those, so the bar does not
+ * pretend to.
  *
  * Structural rule (Phase 4.1): the textarea always owns the full width.
  * Actions live on a toolbar beneath it and wrap as a group, never beside it.
- * There are no @-source, slash-command or dictation affordances: Homebase does
- * not support them, so the bar does not pretend to.
  */
 
 export interface PromptBarProps {
@@ -46,12 +50,15 @@ export function PromptBar({
       {controls ? <div className="flex min-w-0 items-center gap-2">{controls}</div> : null}
 
       <div
-        className={`rounded-[24px] border bg-surface shadow-[var(--shadow-surface)] transition-[border-color,box-shadow] duration-200 focus-within:border-[color-mix(in_srgb,var(--accent)_55%,var(--border))] focus-within:shadow-[0_0_0_4px_color-mix(in_srgb,var(--accent)_14%,transparent)] ${
-          busy ? "border-[color-mix(in_srgb,var(--accent)_28%,var(--border))]" : "border-border"
+        className={`flex flex-col gap-1.5 rounded-[22px] border bg-surface p-1.5 shadow-[var(--shadow-surface)] transition-[border-color] duration-150 focus-within:border-[color-mix(in_srgb,var(--accent)_45%,var(--border-strong))] ${
+          busy ? "border-[color-mix(in_srgb,var(--accent)_24%,var(--border))]" : "border-border"
         }`}
       >
         {attachments ? (
-          <div className="flex flex-wrap gap-2 px-2.5 pt-2.5" aria-label="Attached files">
+          <div
+            className="flex flex-wrap gap-1.5 px-1 pt-1 [&>*]:animate-[bui-pop-in_200ms_cubic-bezier(0.23,1,0.32,1)_both]"
+            aria-label="Attached files"
+          >
             {attachments}
           </div>
         ) : null}
@@ -60,11 +67,11 @@ export function PromptBar({
           ref={textareaRef}
           rows={1}
           {...textarea}
-          className="block min-h-[3rem] w-full resize-none bg-transparent px-4 pb-1 pt-3 text-body text-text outline-none placeholder:text-muted focus-visible:outline-none"
+          className="block min-h-[3rem] w-full resize-none bg-transparent px-2.5 pb-0.5 pt-2 text-body text-text outline-none [overflow-wrap:anywhere] placeholder:text-muted focus-visible:outline-none"
         />
 
         {/* Leading tools and trailing actions; actions wrap below as a group at very large text sizes. */}
-        <div className="flex flex-wrap items-center gap-1.5 px-1.5 pb-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <div className="flex items-center gap-1.5">{leading}</div>
           <div className="ml-auto flex items-center gap-1.5">{trailing}</div>
         </div>

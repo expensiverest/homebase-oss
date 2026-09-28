@@ -6,26 +6,27 @@ Homebase is licensed under Apache-2.0 (see [LICENSE](LICENSE)). This file lists 
 
 ## Beautiful UI
 
-- Source: <https://www.beautifului.dev>
+- Source: <https://www.beautifului.dev>, repository `slev12397/beautiful-ui`
 - Copyright © 2026 Shane Levine
 - License: MIT (full text below)
 
-The following files in `apps/web/src/components/beautiful/` are adapted from Beautiful UI components. The original
-component sources were taken verbatim from the site's "Copy code" buttons (2026-09-27) and then rewritten as
-data-driven components in Homebase's design tokens. Each file's header comment names the upstream component, what
-was kept, what was changed, and which demo behavior was removed.
+The following files in `apps/web/src/components/beautiful/` are adapted from Beautiful UI components. They were
+rewritten as data-driven components in Homebase's design tokens; each file's header comment names the upstream
+component, what was kept, what was changed, and which demo behavior was removed.
 
-| Homebase file      | Upstream Beautiful UI component |
-| ------------------ | ------------------------------- |
-| `LoadingState.tsx` | Loading State (Orbit variant)   |
-| `Thinking.tsx`     | Thinking                        |
-| `ToolChips.tsx`    | Tool Chips                      |
-| `TaskRows.tsx`     | Task Rows                       |
-| `ApprovalCard.tsx` | Approval Card                   |
+| Homebase file            | Upstream Beautiful UI component | Upstream source used                                      |
+| ------------------------ | ------------------------------- | --------------------------------------------------------- |
+| `LoadingState.tsx`       | Loading State (Orbit variant)   | beautifului.dev "Copy code", 2026-09-27                   |
+| `Thinking.tsx`           | Thinking                        | beautifului.dev "Copy code", 2026-09-27                   |
+| `ToolChips.tsx`          | Tool Chips                      | beautifului.dev "Copy code", 2026-09-27                   |
+| `TaskRows.tsx`           | Task Rows                       | beautifului.dev "Copy code", 2026-09-27                   |
+| `ApprovalCard.tsx`       | Approval Card                   | beautifului.dev "Copy code", 2026-09-27                   |
+| `PromptBar.tsx`          | Prompt Bar                      | `slev12397/beautiful-ui@44a274e` `components/primitives/` |
+| `RecommendationCard.tsx` | Recommendation Card             | `slev12397/beautiful-ui@44a274e` `components/primitives/` |
+| `CodeBlock.tsx`          | Code Block                      | `slev12397/beautiful-ui@44a274e` `components/primitives/` |
 
-`PromptBar.tsx`, `RecommendationCard.tsx` and `CodeBlock.tsx` are **original Homebase components** written in the
-same visual idiom. The upstream sources for Beautiful UI's Prompt Bar, Recommendation Card and Code Block were not
-available to this project when they were written, so no Beautiful UI code is contained in them.
+Upstream dependencies that were **not** brought over: `glimm` (Prompt Bar's shader), `class-variance-authority`, and
+the site's `Button`, `EntityChip`, `ValuePill` and `GlideMenu` helpers.
 
 ```
 MIT License

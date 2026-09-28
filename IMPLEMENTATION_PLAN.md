@@ -1682,3 +1682,27 @@ diverge (rule 17).
     later phases; queue/steer and approval denial remain verified at the adapter/fixture level rather
     than live UI runs.
 
+
+- **2026-09-28 - Phase 4.1 (mobile UI craft pass).** Warm "evening instrument" tokens, a rebuilt rem type
+  scale that respects Dynamic Type, project monograms, an inline session launcher on the project screen, a
+  chat heading and a full-width composer whose actions sit on a toolbar below the text. Screenshot QA
+  (`npm run screenshots -w @homebase/web`) and design-regression tests were added. Web-only; no protocol change.
+
+- **2026-09-28 - Phase 4.2 (AI-native components and final polish).** Web-only; no protocol or adapter change.
+  - **Beautiful UI integration:** Loading State (Orbit), Thinking, Tool Chips, Task Rows, Approval Card, Prompt
+    Bar, Recommendation Card and Code Block (MIT, © Shane Levine) are adapted in
+    `apps/web/src/components/beautiful/` and driven only by normalized `Agent*` state; demo timers, scripted
+    content, `@` sources, slash commands, dictation and the Prompt Bar shader were removed. Provenance is in
+    `THIRD_PARTY_NOTICES.md`.
+  - **Execution trace:** each run is one narrative. Live: Orbit until anything is visible (elapsed time from
+    `turn.started`, recorded in the live overlay as `runStartedAt`), then Thinking (lucide-react-motion `Brain`,
+    looping only while reasoning streams), Task Rows for tools and plan steps, then streaming text. Finished:
+    "Worked for …" folds Thinking, interim updates and Tool Chips, whose rows still expand to input, output and
+    error.
+  - **Rules:** no confidence is shown or inferred (the protocol has none); the Recommendation Card is used only
+    for a single `confirm` question; Code Block diff mode is used only for real `AgentDiff` patches.
+  - **Fix:** syntax highlighting had never run — asking Shiki's web bundle for `diff` made the highlighter reject.
+    Code is now tokenised (no HTML injection), cached, and preloaded; plain and highlighted renders share one
+    layout.
+  - **Polish:** warm app icon and a service-worker cache bump, text-scaled but capped marks, roomier list rows,
+    and a "Worked for …" chevron that wraps with its summary.

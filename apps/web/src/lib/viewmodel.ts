@@ -129,7 +129,7 @@ function firstString(input: unknown, keys: string[]): string | null {
   return null;
 }
 
-const DETAIL_KEYS = ["command", "file_path", "path", "pattern", "query", "url", "description", "text"];
+const DETAIL_KEYS = ["command", "file_path", "pattern", "query", "url", "path", "description", "text"];
 
 export function toolPresentation(tool: AgentToolCall): ToolPresentation {
   const verb =

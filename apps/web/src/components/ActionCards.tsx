@@ -66,12 +66,12 @@ export function ApprovalCard({
         {subject}
       </pre>
 
-      <div className="mt-3.5 flex flex-wrap gap-2">
+      <div className="mt-3.5 flex flex-col gap-2">
         {request.options.map((option) => (
           <Button
             key={option.id}
             variant={OPTION_STYLES[option.kind] ?? "secondary"}
-            className={option.kind === "allow_once" ? "basis-full" : "flex-1 basis-[8rem]"}
+            className="w-full"
             disabled={busy}
             onClick={() => onResolve(option.id, note.trim().length > 0 ? note.trim() : null)}
           >

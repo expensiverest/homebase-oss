@@ -1,58 +1,86 @@
-import { Check, Copy } from "lucide-react";
-import { useEffect, useState, type CSSProperties } from "react";
+import { Check, Copy, FileCode2 } from "lucide-react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 
+import { parsePatch } from "../../lib/diff.js";
 import { normalizeLanguage, tokensLater, tokensNow, type TokenLines } from "../../lib/highlight.js";
 
 /*
- * Code Block. Upstream source for Beautiful UI's "Code Block" was not
- * available to this project (see THIRD_PARTY_NOTICES.md); this is a Homebase
- * component written in the same idiom as the vendored Beautiful UI primitives
- * (quiet header with a language label, copy action, mono body, diff mode).
+ * Adapted from Beautiful UI "Code Block" (MIT, © 2026 Shane Levine; source
+ * pinned at slev12397/beautiful-ui@44a274e; see THIRD_PARTY_NOTICES.md).
+ * Kept: the editor panel — a header with a code glyph and mono file/language
+ * name, Copy/Copied on the right (a +/− stat instead in Diff); a body with one
+ * narrow line-number gutter behind a hairline rule; wrapped lines; and the
+ * unified Diff layout (removals keep the old number, additions/context show the
+ * new one, green bar + tint for adds, red hatched bar + tint for removals).
+ * Changed: Homebase tokens; a 44px copy target; syntax colors come from Shiki
+ * tokens (both themes) instead of the upstream regex highlighter; diff rows are
+ * parsed from a real unified patch (hunk headers become quiet separators).
+ * Removed: the demo FILE/CODE_LINES/DIFF content, the Code⇄Diff variant switch
+ * (diff mode is only used for real AgentDiff data), and word-level highlights
+ * (a unified patch does not carry them).
  *
- * Safety: code is rendered from Shiki *tokens* as React text nodes; nothing is
- * ever injected as HTML. Stability: the plain and highlighted renders share one
- * layout (same lines, gutter and metrics), so colors arrive without a shift.
- * Diff mode is only used for real normalized diffs (the Changes sheet), never
- * inferred from a snippet.
+ * Safety: every line is rendered as React text nodes; nothing is injected as
+ * HTML. Stability: plain and highlighted renders share one layout, so colors
+ * arrive without a shift.
  */
 
-type DiffTone = "add" | "del" | "hunk" | "ctx";
+const HATCH = "repeating-linear-gradient(45deg, var(--bad) 0, var(--bad) 1.5px, transparent 1.5px, transparent 3px)";
 
-function diffTone(line: string): DiffTone {
-  if (line.startsWith("@@")) return "hunk";
-  if (line.startsWith("+") && !line.startsWith("+++")) return "add";
-  if (line.startsWith("-") && !line.startsWith("---")) return "del";
-  return "ctx";
-}
-
-const DIFF_ROW: Record<DiffTone, string> = {
-  add: "bg-[color-mix(in_srgb,var(--ok)_12%,transparent)] text-ok",
-  del: "bg-[color-mix(in_srgb,var(--bad)_12%,transparent)] text-bad",
-  hunk: "text-accent",
-  ctx: "text-text/85",
-};
-
-function useTokens(code: string, language: string | null, enabled: boolean): TokenLines | null {
-  const [tokens, setTokens] = useState<TokenLines | null>(() => (enabled ? tokensNow(code, language) : null));
+/** Tokens for a block; `settled` is true once highlighting succeeded or gave up (plain text stays). */
+function useTokens(code: string, language: string | null): { tokens: TokenLines | null; settled: boolean } {
+  const [state, setState] = useState<{ key: string; tokens: TokenLines | null; settled: boolean }>(() => {
+    const ready = tokensNow(code, language);
+    return { key: `${language}:${code}`, tokens: ready, settled: Boolean(ready) || !language };
+  });
+  const key = `${language}:${code}`;
   useEffect(() => {
-    if (!enabled || !language) {
-      setTokens(null);
+    if (!language) {
+      setState({ key, tokens: null, settled: true });
       return;
     }
     const ready = tokensNow(code, language);
     if (ready) {
-      setTokens(ready);
+      setState({ key, tokens: ready, settled: true });
       return;
     }
     let cancelled = false;
+    setState((current) => (current.key === key ? current : { key, tokens: null, settled: false }));
     void tokensLater(code, language).then((result) => {
-      if (!cancelled) setTokens(result);
+      if (!cancelled) setState({ key, tokens: result, settled: true });
     });
     return () => {
       cancelled = true;
     };
-  }, [code, language, enabled]);
-  return tokens;
+  }, [code, language, key]);
+  return state.key === key ? state : { tokens: null, settled: false };
+}
+
+function Line({
+  number,
+  gutter,
+  children,
+  className = "",
+  bar,
+}: {
+  number: ReactNode;
+  gutter: boolean;
+  children: ReactNode;
+  className?: string;
+  bar?: string;
+}) {
+  return (
+    <div
+      className={`relative grid items-start ${gutter ? "grid-cols-[2.5rem_minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)]"} ${className}`}
+    >
+      {bar ? <span aria-hidden className="absolute inset-y-0 left-0 w-[3px]" style={{ background: bar }} /> : null}
+      {gutter ? (
+        <span aria-hidden className="select-none pr-1 text-center text-[0.6875rem] text-faint">
+          {number}
+        </span>
+      ) : null}
+      <code className={`whitespace-pre-wrap break-words pr-3.5 ${gutter ? "pl-2" : "pl-3.5"}`}>{children}</code>
+    </div>
+  );
 }
 
 export function CodeBlock({
@@ -67,9 +95,9 @@ export function CodeBlock({
   language?: string | null;
   /** Render as a unified diff (only for real diff data). */
   diff?: boolean;
-  /** Defaults to on for blocks longer than three lines (never for diffs). */
+  /** Defaults to on for multi-line blocks. */
   lineNumbers?: boolean;
-  /** Header label; defaults to the language. */
+  /** Header label: a file name, or defaults to the language. */
   title?: string | null;
   /** Tighter variant for tool output inside traces. */
   compact?: boolean;
@@ -77,11 +105,14 @@ export function CodeBlock({
   const text = code.replace(/\n$/, "");
   const lines = text.split("\n");
   const normalized = diff ? null : normalizeLanguage(language);
-  const tokens = useTokens(text, normalized, !diff);
+  const { tokens, settled } = useTokens(text, normalized);
+  const rows = diff ? parsePatch(text) : null;
   const [copied, setCopied] = useState(false);
-  const showNumbers = !diff && (lineNumbers ?? lines.length > 3);
+  const gutter = diff || (lineNumbers ?? lines.length > 1);
   const label = title ?? (diff ? "diff" : (language ?? "text"));
-  const highlightState = diff || !normalized ? "plain" : tokens ? "done" : "pending";
+  const highlightState = diff || !normalized ? "plain" : tokens ? "done" : settled ? "plain" : "pending";
+  const added = rows?.filter((row) => row.kind === "add").length ?? 0;
+  const removed = rows?.filter((row) => row.kind === "del").length ?? 0;
 
   const copy = async () => {
     try {
@@ -93,70 +124,81 @@ export function CodeBlock({
     }
   };
 
-  const gutterWidth = `${String(lines.length).length + 1}ch`;
-
   return (
     <figure
-      className="bui-code not-prose my-1 min-w-0 overflow-hidden rounded-[var(--radius-md)] border border-border bg-inset"
+      className="bui-code my-1 min-w-0 overflow-hidden rounded-[var(--radius-md)] border border-border bg-inset"
       data-code-block
       data-highlight={highlightState}
     >
-      <figcaption className="flex min-h-9 items-center justify-between gap-2 border-b border-border pl-3.5 pr-1">
-        <span className="readout min-w-0 truncate text-caption text-muted">{label}</span>
-        <button
-          type="button"
-          onClick={() => void copy()}
-          aria-label={copied ? "Copied" : "Copy code"}
-          title="Copy code"
-          className="inline-flex h-11 min-w-11 items-center justify-center gap-1.5 rounded-full px-2 text-caption font-medium text-muted transition-colors hover:text-text active:bg-fill"
-        >
-          {copied ? <Check size={15} className="text-ok" aria-hidden /> : <Copy size={15} aria-hidden />}
-          <span aria-hidden>{copied ? "Copied" : null}</span>
-        </button>
+      <figcaption className="flex min-h-11 items-center gap-2 border-b border-border pl-3.5 pr-1">
+        <span className="inline-flex min-w-0 items-center gap-[7px]">
+          <FileCode2 size={15} strokeWidth={1.8} className="shrink-0 text-muted" aria-hidden />
+          <span className="readout truncate text-caption text-text">{label}</span>
+        </span>
+        {diff ? (
+          <span className="readout ml-auto inline-flex items-center gap-2 pr-2.5 text-caption">
+            <span className="text-ok">+{added}</span>
+            <span className="text-bad">−{removed}</span>
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void copy()}
+            aria-label={copied ? "Copied" : "Copy code"}
+            className={`ml-auto inline-flex h-11 items-center gap-1 rounded-full px-2.5 text-caption font-medium transition-colors active:bg-fill ${
+              copied ? "text-ok" : "text-muted hover:text-text"
+            }`}
+          >
+            {copied ? <Check size={13} strokeWidth={3} aria-hidden /> : <Copy size={13} aria-hidden />}
+            <span aria-hidden>{copied ? "Copied" : "Copy"}</span>
+          </button>
+        )}
       </figcaption>
-      <pre
-        className={`overflow-x-auto font-mono leading-[1.65] ${compact ? "py-2 text-[0.75rem]" : "py-3 text-[0.8125rem]"}`}
-        tabIndex={0}
+      <div
+        className={`relative font-mono leading-[1.65] text-text/90 ${compact ? "py-2 text-[0.75rem]" : "py-3 text-[0.8125rem]"}`}
+        role="region"
         aria-label={`${label} code`}
       >
-        <code className="grid min-w-max">
-          {lines.map((line, index) => {
-            const tone = diff ? diffTone(line) : null;
-            const lineTokens = tokens?.[index];
-            return (
-              <span
-                key={index}
-                className={`flex pr-4 ${tone ? DIFF_ROW[tone] : ""} ${showNumbers || diff ? "" : "pl-3.5"}`}
-              >
-                {showNumbers ? (
-                  <span
-                    aria-hidden
-                    className="sticky left-0 shrink-0 select-none bg-inset pl-3.5 pr-3 text-right text-faint"
-                    style={{ minWidth: `calc(${gutterWidth} + 1.625rem)` }}
-                  >
-                    {index + 1}
-                  </span>
-                ) : null}
-                {diff ? (
-                  <span className="whitespace-pre pl-3.5">{line || " "}</span>
-                ) : lineTokens ? (
-                  <span className="whitespace-pre">
-                    {lineTokens.length === 0
-                      ? " "
-                      : lineTokens.map((token, tokenIndex) => (
-                          <span key={tokenIndex} style={token.htmlStyle as CSSProperties | undefined}>
-                            {token.content}
-                          </span>
-                        ))}
-                  </span>
-                ) : (
-                  <span className="whitespace-pre">{line || " "}</span>
-                )}
-              </span>
-            );
-          })}
-        </code>
-      </pre>
+        {gutter ? <span aria-hidden className="pointer-events-none absolute inset-y-0 left-10 w-px bg-border" /> : null}
+        {rows
+          ? rows.map((row, index) =>
+              row.kind === "hunk" ? (
+                <Line key={index} number="" gutter className="my-0.5 text-muted">
+                  {row.text}
+                </Line>
+              ) : (
+                <Line
+                  key={index}
+                  number={row.number ?? ""}
+                  gutter
+                  bar={row.kind === "add" ? "var(--ok)" : row.kind === "del" ? HATCH : undefined}
+                  className={
+                    row.kind === "add"
+                      ? "bg-[color-mix(in_srgb,var(--ok)_12%,transparent)]"
+                      : row.kind === "del"
+                        ? "bg-[color-mix(in_srgb,var(--bad)_12%,transparent)]"
+                        : ""
+                  }
+                >
+                  {row.text || " "}
+                </Line>
+              ),
+            )
+          : lines.map((line, index) => {
+              const lineTokens = tokens?.[index];
+              return (
+                <Line key={index} number={index + 1} gutter={gutter}>
+                  {lineTokens && lineTokens.length > 0
+                    ? lineTokens.map((token, tokenIndex) => (
+                        <span key={tokenIndex} style={token.htmlStyle as CSSProperties | undefined}>
+                          {token.content}
+                        </span>
+                      ))
+                    : line || " "}
+                </Line>
+              );
+            })}
+      </div>
     </figure>
   );
 }

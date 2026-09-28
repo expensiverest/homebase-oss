@@ -19,9 +19,11 @@ const LANGS = [
   "css",
   "html",
   "markdown",
-  "diff",
   "yaml",
 ] as const;
+// Not "diff": Shiki's web bundle does not include it, and asking for it makes
+// createHighlighter reject (which silently disabled all highlighting before
+// Phase 4.2). Diffs render through CodeBlock's diff mode instead.
 
 const ALIASES: Record<string, string> = {
   ts: "typescript",
@@ -53,6 +55,11 @@ export function loadHighlighter(): Promise<Highlighter> {
       .then((instance) => {
         highlighter = instance;
         return instance;
+      })
+      .catch((error: unknown) => {
+        // Allow a later retry instead of caching the failure forever.
+        highlighterPromise = null;
+        throw error;
       });
   }
   return highlighterPromise;
