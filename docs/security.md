@@ -6,7 +6,7 @@
 Homebase remotely controls software that can read files, modify repositories, and run shell commands.
 Security is architecture, not polish; unsafe defaults are bugs.
 
-## Current guarantees (Phase 5)
+## Current guarantees (Phase 5 + 5.5)
 
 ### Network exposure
 
@@ -29,6 +29,19 @@ Security is architecture, not polish; unsafe defaults are bugs.
 - `HOMEBASE_STATE_DIR` overrides `~/.homebase`. State is schema-versioned JSON written through a private temporary file and atomic rename; corrupt or future-version state fails startup closed. POSIX files use mode 0600 and the directory 0700. Windows file ACLs are inherited from the account's profile/selected directory; operators should choose a private directory on shared Windows machines.
 - The Host throttles failed authentication and pairing (10 failures per client and a high global invalid-pairing ceiling). Valid credentials are checked before per-client lockout so a bad request through Serve's shared loopback address cannot lock out a paired device. Expensive agent-command throttling remains a later hardening item.
 - Cookie mutations check `Origin` when present against the browser-visible origin, reject cross-site Fetch Metadata, and require `X-Homebase-Client: 1`. To support local Tailscale Serve, `X-Forwarded-Proto` and `X-Forwarded-Host` reconstruct that origin only when the actual socket peer is loopback; malformed or incomplete trusted forwarding headers fail closed. Direct non-loopback clients cannot redefine their origin with forwarded headers. No permissive CORS is enabled. Local admin requests use a separate header and reject browser Origin and proxy forwarding headers.
+
+### Local configuration and the CLI
+
+- The user-scoped config (`${HOMEBASE_STATE_DIR:-~/.homebase}/config.json`) is written atomically: unique temp file in
+  the same directory, `fsync`, rename over the target, temp cleanup on failure. POSIX files are `0600` and the state
+  directory `0700`; Windows inherits the account's profile/selected-directory ACLs (same limitation as state files).
+- A legacy `./homebase.config.json` is validated with the full schema and security invariants before being copied
+  into the user config; the legacy file is never deleted.
+- Project roots can only be changed by the local `homebase projects add/remove` CLI, which canonicalizes with
+  `realpath`, requires an existing directory, de-duplicates with platform case rules, validates the complete
+  resulting configuration, and persists atomically. There is no REST endpoint or web field that accepts a
+  filesystem path; `AgentProject.path` still comes only from the Host registry.
+- Project-root changes apply at the next Host start; they are not hot-swapped under active sessions.
 
 ### Project paths
 
@@ -65,6 +78,26 @@ This is the most important boundary in the product:
 - **Claude "always allow" rules are session-scoped and in-memory.** Homebase never writes
   `.claude/settings*.json` or any provider settings file to implement the mobile button.
 - **No Claude bypass modes.** `bypassPermissions` and `dontAsk` cannot be selected through Homebase.
+- **OpenCode managed servers are Homebase-owned and loopback-only.** In `auto`/`managed` mode Homebase spawns
+  `opencode serve --hostname 127.0.0.1` with a random 256-bit in-memory password (`OPENCODE_PASSWORD` /
+  `OPENCODE_SERVER_PASSWORD`). The password is never logged, persisted, returned to the browser, or exposed through
+  Tailscale; only the authenticated Homebase Host is remotely reachable. Homebase never reads OpenCode daemon
+  password files, edits service configuration, or kills a server it did not spawn. Shutdown terminates the complete
+  process tree Homebase created (Windows `taskkill /PID <pid> /T`, escalating to `/T /F`), so npm `.cmd` wrappers
+  cannot orphan the real server; external/shared servers are never passed to that path.
+- **Grok credentials stay with Grok.** The adapter accepts only executable/timeout configuration (strict schema);
+  API keys, OAuth tokens, refresh tokens, emails, and browser sessions are rejected as unknown fields. Non-interactive
+  auth methods are preferred; interactive login is never started from Homebase. Grok's child environment is inherited,
+  so a user-managed `XAI_API_KEY` reaches Grok without Homebase copying or storing it.
+- **ACP processes are spawned without a shell** (`shell: false`, argv as an array; the only platform exception is the
+  dependency-free Windows `.cmd`/`.bat` shim wrapper described in `packages/adapter-sdk/src/exec.ts`, which still
+  passes argv as an array and never interpolates user content). stdout is protocol-only; stderr is bounded (default
+  64 KiB) for local diagnostics and is never returned to the PWA. The ACP client advertises no `fs/*` or `terminal/*`
+  capabilities, so a provider cannot use Homebase as a file or shell execution surface. Shutdown uses the shared
+  owned-process-tree terminator: stdin EOF for ACP first, then SIGTERM → SIGKILL on POSIX or `taskkill /T` → `/T /F`
+  on Windows, only ever against children Homebase spawned.
+- **Provider crashes cannot leave a session "Working".** Transport exit rejects outstanding requests, cancels pending
+  permission bridges, and fails active turns; provider refresh can reconnect.
 
 ### Attachments
 

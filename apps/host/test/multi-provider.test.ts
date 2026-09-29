@@ -213,4 +213,37 @@ describe("multi-provider identity and routing", () => {
     const page = await jsonBody<{ sessions: AgentSession[] }>(listed);
     expect(page.sessions.some((session) => session.provider === "healthy")).toBe(true);
   });
+
+  it("routes colliding native ids across opencode, claude, and grok", async () => {
+    const opencode = new FixedAdapter("opencode", { nativeId: "same-native-id", messageText: "reply from opencode" });
+    const claude = new FixedAdapter("claude", { nativeId: "same-native-id", messageText: "reply from claude" });
+    const grok = new FixedAdapter("grok", { nativeId: "same-native-id", messageText: "reply from grok" });
+    const host = await setup([opencode, claude, grok]);
+    const [project] = await projects(host);
+    if (!project) return;
+
+    const opencodeSession = await createSession(host, "opencode", project.id);
+    const claudeSession = await createSession(host, "claude", project.id);
+    const grokSession = await createSession(host, "grok", project.id);
+    expect(new Set([opencodeSession.id, claudeSession.id, grokSession.id]).size).toBe(3);
+    expect(opencodeSession.id.startsWith("hb1~opencode~")).toBe(true);
+    expect(claudeSession.id.startsWith("hb1~claude~")).toBe(true);
+    expect(grokSession.id.startsWith("hb1~grok~")).toBe(true);
+
+    await host.runtime.app.request(`/api/v1/sessions/${grokSession.id}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "hello grok" }),
+    });
+    expect(grok.calls).toContain(`send ${grokSession.id}`);
+    expect(opencode.calls.filter((call) => call.startsWith("send"))).toHaveLength(0);
+    expect(claude.calls.filter((call) => call.startsWith("send"))).toHaveLength(0);
+    expect(grok.calls.filter((call) => call.startsWith("getSession"))).toHaveLength(0);
+
+    const grokMessages = await jsonBody<{ messages: Array<{ parts: Array<{ type: string; text?: string }> }> }>(
+      await host.runtime.app.request(`/api/v1/sessions/${grokSession.id}/messages`),
+    );
+    expect(JSON.stringify(grokMessages)).toContain("reply from grok");
+    expect(JSON.stringify(grokMessages)).not.toContain("reply from opencode");
+  });
 });

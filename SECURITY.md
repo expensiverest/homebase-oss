@@ -39,7 +39,10 @@ Homebase is pre-alpha. There are no supported release versions yet; security fix
 ## Security model summary
 
 - The Host binds to `127.0.0.1` with per-device authentication by default. Non-loopback binds require authentication.
-- Provider credentials never leave the machine and are never returned by the Homebase API.
-- Project paths are canonicalized and checked against Host-configured roots before any provider process starts.
+- Provider credentials never leave the machine and are never returned by the Homebase API. OpenCode managed servers
+  use an in-memory random password; Grok keeps its own login and Homebase stores no xAI credentials.
+- Project paths are canonicalized and checked against Host-configured roots before any provider process starts. Only
+  the local `homebase projects` CLI can change those roots; no browser request can.
 - Remote access is expected through private Tailscale Serve with HTTPS and Homebase pairing, not Funnel or router port forwarding.
+- Provider processes are spawned without a shell; ACP agents get no filesystem or terminal client capabilities.
 - Secrets are redacted from logs and diagnostics where practical.

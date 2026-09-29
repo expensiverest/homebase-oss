@@ -146,6 +146,22 @@ Checks:
 The mock adapter is the reference implementation and runs the suite with `live: true` in
 `packages/adapter-sdk/test/compliance.test.ts`.
 
+## ACP providers
+
+Providers that speak the Agent Client Protocol use `@homebase/transport-acp` instead of hand-rolling JSON-RPC:
+
+- `AcpTransport` owns stdio process lifecycle, ACP v1 `initialize`/capability negotiation, request correlation with
+  bounded control timeouts, notifications, cancellation, a bounded stderr tail, and process-death semantics.
+- The Host may call `detect()` and `getCapabilities()` concurrently (`Promise.all`), so adapter connection state must
+  be race-safe: single-flight connection/recycle attempts, identity-gated process-exit handling, and coherent
+  capability results even while a signed-out process is being recycled.
+- Adapters register only the client callbacks they genuinely support. Homebase advertises **no** `fs/*` or
+  `terminal/*` client capabilities.
+- `session/prompt` is always run as a background turn: `send()` starts it, the transport resolves later, and
+  normalized events carry progress and the terminal turn outcome.
+- `packages/adapter-grok` is the reference ACP adapter and runs the full compliance suite against the deterministic
+  fake ACP agent in `packages/transport-acp/test/fixtures/fake-agent.mjs`.
+
 ## Mock adapter
 
 `MockAdapter` (`@homebase/adapter-sdk/testing`) is a deterministic in-memory provider used by Host tests,
@@ -169,7 +185,8 @@ HOMEBASE_TEST_GROK=1
 
 These must never run by default, must not require a provider to be installed for the normal test suite,
 and must not fail CI for contributors without the provider. Prefer replaying captured fixtures for
-regressions.
+regressions. `HOMEBASE_TEST_GROK=1` performs only no-model-cost checks (version, ACP startup, initialize,
+capabilities, auth availability); it never sends a prompt.
 
 ## Delivery semantics reference
 

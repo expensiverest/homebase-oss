@@ -1,9 +1,15 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { z } from "zod";
 
 import { isLoopbackHost } from "../paths.js";
+import {
+  atomicWriteJson,
+  fileExists,
+  isMissingFileError,
+  readJsonObjectFile,
+  resolveConfigTargetPaths,
+} from "./store.js";
 
 export const providerConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -50,9 +56,21 @@ export interface LoadConfigOptions {
   configPath?: string;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  /** Override the Homebase state directory (tests). */
+  stateDir?: string;
+  /** Receives migration and compatibility notices for the operator. */
+  onNotice?: (message: string) => void;
+  /** Set to false to disable legacy cwd-config migration (tests). */
+  migrateLegacy?: boolean;
 }
 
-const DEFAULT_CONFIG_FILE = "homebase.config.json";
+export interface LoadedConfig {
+  config: HostConfig;
+  /** File that was loaded, or null when Homebase used built-in defaults. */
+  configPath: string | null;
+  /** Legacy file that was copied into the user-scoped location, if any. */
+  migratedFrom: string | null;
+}
 
 function describeIssues(error: z.ZodError): string[] {
   return error.issues.map((issue) => {
@@ -118,38 +136,90 @@ export function assertSecurityInvariants(config: HostConfig): void {
   }
 }
 
-/** Loads, merges, validates, and security-checks configuration. */
-export async function loadConfig(options: LoadConfigOptions = {}): Promise<HostConfig> {
-  const env = options.env ?? process.env;
-  const cwd = options.cwd ?? process.cwd();
-  const explicitPath = options.configPath ?? env.HOMEBASE_CONFIG ?? undefined;
-  const configPath = explicitPath ?? path.join(cwd, DEFAULT_CONFIG_FILE);
-
-  let raw: Record<string, unknown> = {};
-  try {
-    const text = await readFile(configPath, "utf8");
-    const parsed: unknown = JSON.parse(text);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error("Configuration file must contain a JSON object.");
-    }
-    raw = parsed as Record<string, unknown>;
-  } catch (error) {
-    const isMissing =
-      typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "ENOENT";
-    if (!isMissing || explicitPath !== undefined) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new ConfigError(`Failed to load Homebase configuration from ${configPath}.`, [message]);
-    }
-    // No config file and none was requested: use defaults plus env overrides.
-  }
-
-  const merged = applyEnvOverrides(raw, env);
-  const result = hostConfigSchema.safeParse(merged);
+/**
+ * Validates a raw configuration object with the full schema and security
+ * invariants. Used by load, migration, and local config mutation paths so a
+ * file is never persisted or started from in a state the Host would reject.
+ */
+export function validateHostConfigRaw(raw: Record<string, unknown>, label = "Homebase configuration"): HostConfig {
+  const result = hostConfigSchema.safeParse(raw);
   if (!result.success) {
-    throw new ConfigError("Invalid Homebase configuration.", describeIssues(result.error));
+    throw new ConfigError(`Invalid ${label}.`, describeIssues(result.error));
   }
   assertSecurityInvariants(result.data);
   return result.data;
+}
+
+/**
+ * Loads, merges, validates, and security-checks configuration.
+ *
+ * Precedence: explicit `--config` → `HOMEBASE_CONFIG` → user-scoped
+ * `${HOMEBASE_STATE_DIR:-~/.homebase}/config.json` (with one-time migration of
+ * a legacy `./homebase.config.json`) → built-in defaults plus env overrides.
+ */
+export async function loadConfigDetailed(options: LoadConfigOptions = {}): Promise<LoadedConfig> {
+  const env = options.env ?? process.env;
+  const cwd = options.cwd ?? process.cwd();
+  const target = resolveConfigTargetPaths({
+    ...(options.configPath !== undefined ? { configPath: options.configPath } : {}),
+    env,
+    cwd,
+    ...(options.stateDir !== undefined ? { stateDir: options.stateDir } : {}),
+  });
+
+  let migratedFrom: string | null = null;
+  const configPath = target.explicit ? target.configPath : target.userConfigPath;
+
+  if (!target.explicit && !(await fileExists(configPath))) {
+    if ((options.migrateLegacy ?? true) && (await fileExists(target.legacyPath))) {
+      let legacyRaw: Record<string, unknown>;
+      try {
+        legacyRaw = await readJsonObjectFile(target.legacyPath);
+        validateHostConfigRaw(legacyRaw, `legacy configuration at ${target.legacyPath}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new ConfigError(
+          `Homebase found a legacy configuration at ${target.legacyPath} but could not migrate it.`,
+          [message],
+        );
+      }
+      // Copy the validated legacy file into the private user-scoped location.
+      // The legacy file is intentionally left in place for the user to remove.
+      await atomicWriteJson(configPath, legacyRaw);
+      migratedFrom = target.legacyPath;
+      options.onNotice?.(
+        `Homebase migrated ${target.legacyPath} to ${configPath}. The original file was left in place; ` +
+          `future commands use the user-scoped configuration from any directory.`,
+      );
+    }
+  }
+
+  let raw: Record<string, unknown> = {};
+  let loadedFromFile = false;
+  try {
+    raw = await readJsonObjectFile(configPath);
+    loadedFromFile = true;
+  } catch (error) {
+    if (isMissingFileError(error) && !target.explicit) {
+      // No config file and none was requested: use defaults plus env overrides.
+    } else {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new ConfigError(`Failed to load Homebase configuration from ${configPath}.`, [message]);
+    }
+  }
+
+  const merged = applyEnvOverrides(raw, env);
+  const config = validateHostConfigRaw(merged);
+  return {
+    config,
+    configPath: loadedFromFile || migratedFrom !== null ? configPath : null,
+    migratedFrom,
+  };
+}
+
+/** Convenience wrapper returning only the validated configuration. */
+export async function loadConfig(options: LoadConfigOptions = {}): Promise<HostConfig> {
+  return (await loadConfigDetailed(options)).config;
 }
 
 /** Safe configuration summary for startup logs. Never contains secrets. */

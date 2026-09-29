@@ -4,8 +4,32 @@ export {
   ConfigError,
   hostConfigSchema,
   loadConfig,
+  loadConfigDetailed,
   providerConfigSchema,
+  validateHostConfigRaw,
   type HostConfig,
   type LoadConfigOptions,
+  type LoadedConfig,
   type ProviderConfig,
 } from "./config.js";
+export {
+  addProjectRoot,
+  canonicalizeProjectRoot,
+  listProjectRoots,
+  removeProjectRoot,
+  type ProjectRootChange,
+  type ProjectRootsInfo,
+} from "./project-roots.js";
+export {
+  atomicWriteJson,
+  ensurePrivateDirectory,
+  fileExists,
+  isMissingFileError,
+  LEGACY_CONFIG_FILENAME,
+  readJsonObjectFile,
+  resolveConfigTargetPaths,
+  resolveStateDir,
+  USER_CONFIG_FILENAME,
+  type ConfigTargetPaths,
+  type ResolveConfigTargetOptions,
+} from "./store.js";

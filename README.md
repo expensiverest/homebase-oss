@@ -6,8 +6,9 @@ Your development machine stays the execution environment. Your phone becomes the
 Claude Code, OpenCode, Grok Build, Gemini CLI, Codex CLI, GitHub Copilot CLI, and future agent adapters one coherent
 mobile experience for projects, sessions, streaming output, approvals, questions, diffs, models, and usage.
 
-> **Status: pre-alpha (0.0.x).** The provider-neutral protocol, adapter SDK, Host core, OpenCode and Claude Code
-> adapters, and the Phase 5 device-paired mobile web client (installable PWA) are being built in the open. No public release exists
+> **Status: pre-alpha (0.0.x).** The provider-neutral protocol, adapter SDK, Host core, OpenCode, Claude Code, and
+> Grok Build adapters, the generic ACP v1 transport, and the Phase 5 device-paired mobile web client (installable
+> PWA) are being built in the open. No public release exists
 > yet. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the authoritative plan and
 > [docs/web-client.md](docs/web-client.md) for the client architecture.
 
@@ -23,14 +24,14 @@ mobile experience for projects, sessions, streaming output, approvals, questions
 
 ## Supported providers
 
-| Provider           | Integration                                     | Status                                          |
-| ------------------ | ----------------------------------------------- | ----------------------------------------------- |
-| OpenCode           | Native server HTTP + SSE adapter                | **Available (beta)** — verified against 2.0.18  |
-| Claude Code        | Structured CLI subprocess + MCP approval broker | **Available (beta)** — verified against 2.1.268 |
-| Grok Build         | Generic ACP transport                           | Planned                                         |
-| Gemini CLI         | Generic ACP transport                           | Planned                                         |
-| Codex CLI          | Application-server protocol                     | Later                                           |
-| GitHub Copilot CLI | Official SDK / structured interface             | Later                                           |
+| Provider           | Integration                                         | Status                                                |
+| ------------------ | --------------------------------------------------- | ----------------------------------------------------- |
+| OpenCode           | Native server HTTP + SSE adapter (Homebase-managed) | **Available (beta)** — verified against 2.0.18        |
+| Claude Code        | Structured CLI subprocess + MCP approval broker     | **Available (beta)** — verified against 2.1.268       |
+| Grok Build         | Generic ACP v1 transport (`packages/transport-acp`) | **Available (beta)** — ACP v1 verified against 1.0.41 |
+| Gemini CLI         | Generic ACP transport                               | Planned (Phase 7)                                     |
+| Codex CLI          | Application-server protocol                         | Later                                                 |
+| GitHub Copilot CLI | Official SDK / structured interface                 | Later                                                 |
 
 The Host ships with a deterministic **mock provider** so the protocol, event bus, and client can be developed and
 tested without any paid provider runs.
@@ -59,13 +60,36 @@ Homebase; the provider CLIs authenticate themselves, on your machine, exactly as
 Homebase is not packaged for end users yet. To work on it:
 
 ```bash
+git clone https://github.com/expensiverest/homebase-oss.git
+cd homebase-oss
 npm install
 npm run build
-npm test
-npm run dev:host
+npm run link:cli     # links the `homebase` command (npm run unlink:cli removes it)
+
+homebase projects add D:\Development   # or run it inside a folder; defaults to the current directory
+homebase                                # starts the Host and serves the PWA
+
+# private remote access (optional)
+tailscale serve --bg 8787
+homebase pair
 ```
 
-The Host prints its local URL when it starts. For unauthenticated development, explicitly set `HOMEBASE_AUTH_MODE=none` while keeping the Host loopback-bound. Health check:
+`homebase --help`, `homebase devices`, `homebase revoke <id>`, and `homebase projects ...` all work from any
+directory. Configuration lives at `${HOMEBASE_STATE_DIR:-~/.homebase}/config.json`; a legacy
+`./homebase.config.json` is migrated once and left in place. `--config <path>` and `HOMEBASE_CONFIG` still win.
+
+Direct Node invocation stays available as a development fallback:
+
+```bash
+node apps/host/dist/index.js pair
+```
+
+If the OpenCode CLI is installed, the Host normally starts its own private loopback OpenCode server; no second
+terminal is required. Set `providers.opencode.config.serverMode` to `"external"` to keep pointing at a server you
+manage yourself. Grok Build is detected when `grok` is installed and signed in; Homebase never stores xAI
+credentials.
+
+For unauthenticated development, explicitly set `HOMEBASE_AUTH_MODE=none` while keeping the Host loopback-bound. Health check:
 
 ```bash
 curl http://127.0.0.1:8787/api/v1/health

@@ -7,6 +7,8 @@ import {
   type AdapterLogger,
   type AgentAdapter,
   type ResolvedAttachment,
+  type RunExecutable,
+  type SpawnExecutable,
 } from "@homebase/adapter-sdk";
 import {
   defineCapabilities,
@@ -33,10 +35,10 @@ import {
   type SetModeInput,
 } from "@homebase/protocol";
 
-import { OpenCodeClient, OpenCodeHttpError } from "./client.js";
 import { parseOpenCodeConfig, type OpenCodeConfig } from "./config.js";
 import { toAdapterError, versionCompatibility } from "./errors.js";
 import { SessionEventTracker } from "./events.js";
+import { OpenCodeSupervisor, OpenCodeConnectionClient } from "./supervisor.js";
 import {
   OPENCODE_PROVIDER_ID,
   approvalOptionToDecision,
@@ -58,7 +60,6 @@ import type {
   NativeModel,
   NativePermissionRequest,
   NativeSession,
-  NativeServerInfo,
 } from "./native.js";
 
 export interface OpenCodeAdapterOptions {
@@ -70,6 +71,12 @@ export interface OpenCodeAdapterOptions {
   startEventStream?: boolean;
   /** Test hook: base reconnect backoff. */
   reconnectBaseMs?: number;
+  /** Test hook: injectable process spawner for managed-server tests. */
+  spawnFn?: SpawnExecutable;
+  /** Test hook: injectable bounded command runner for CLI detection tests. */
+  runFn?: RunExecutable;
+  /** Test hook: injectable sleep for fast startup timers. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 const DEFAULT_SESSION_PAGE_SIZE = 50;
@@ -94,7 +101,8 @@ export class OpenCodeAdapter implements AgentAdapter {
   readonly displayName = "OpenCode";
 
   readonly #config: OpenCodeConfig;
-  readonly #client: OpenCodeClient;
+  readonly #supervisor: OpenCodeSupervisor;
+  readonly #client: OpenCodeConnectionClient;
   readonly #startEventStream: boolean;
   readonly #reconnectBaseMs: number;
 
@@ -112,17 +120,29 @@ export class OpenCodeAdapter implements AgentAdapter {
 
   constructor(options: OpenCodeAdapterOptions = {}) {
     this.#config = parseOpenCodeConfig(options.config ?? {});
-    this.#client = new OpenCodeClient({
-      baseUrl: this.#config.baseUrl,
-      username: this.#config.username,
-      ...(this.#config.password !== undefined ? { password: this.#config.password } : {}),
+    this.#fallbackLogger = createConsoleLogger("provider:opencode", { level: "warn" });
+    const delegate: AdapterLogger = {
+      debug: (message, fields) => this.#logger.debug(message, fields),
+      info: (message, fields) => this.#logger.info(message, fields),
+      warn: (message, fields) => this.#logger.warn(message, fields),
+      error: (message, fields) => this.#logger.error(message, fields),
+    };
+    this.#supervisor = new OpenCodeSupervisor({
+      config: this.#config,
+      logger: delegate,
+      ...(options.fetchFn !== undefined ? { fetchFn: options.fetchFn } : {}),
+      ...(options.spawnFn !== undefined ? { spawnFn: options.spawnFn } : {}),
+      ...(options.runFn !== undefined ? { runFn: options.runFn } : {}),
+      ...(options.sleep !== undefined ? { sleep: options.sleep } : {}),
+    });
+    this.#client = new OpenCodeConnectionClient({
+      supervisor: this.#supervisor,
       requestTimeoutMs: this.#config.requestTimeoutMs,
       ...(options.fetchFn !== undefined ? { fetchFn: options.fetchFn } : {}),
     });
     this.#startEventStream = options.startEventStream ?? true;
     this.#reconnectBaseMs = options.reconnectBaseMs ?? 1_000;
     this.#eventDelayMs = this.#reconnectBaseMs;
-    this.#fallbackLogger = createConsoleLogger("provider:opencode", { level: "warn" });
   }
 
   init(context: AdapterContext): void {
@@ -144,35 +164,61 @@ export class OpenCodeAdapter implements AgentAdapter {
     this.#disposed = true;
     this.#eventAbort?.abort();
     await this.#eventTask?.catch(() => undefined);
+    await this.#supervisor?.stop();
   }
 
+  /**
+   * Detection distinguishes CLI installation from server reachability:
+   * missing executable, missing CLI, managed-start failure, unreachable
+   * external server, auth rejection, incompatible versions, and (via the
+   * warning) newer-than-tested servers.
+   */
   async detect(): Promise<ProviderDetection> {
-    try {
-      const info = await this.#client.get<NativeServerInfo>("/api/info", { timeoutMs: 3_000 });
-      const version = typeof info.version === "string" ? info.version : null;
-      const compatibility = versionCompatibility(version);
-      return {
-        installed: true,
-        authenticated: true,
-        compatible: compatibility.compatible,
-        version,
-        warning: compatibility.warning ?? null,
-      };
-    } catch (error) {
-      if (error instanceof OpenCodeHttpError && (error.status === 401 || error.status === 403)) {
+    const detection = await this.#supervisor.detect();
+    switch (detection.status) {
+      case "ready": {
+        const compatibility = versionCompatibility(detection.version);
+        return {
+          installed: true,
+          authenticated: true,
+          compatible: compatibility.compatible,
+          version: detection.version,
+          warning: detection.warning ?? compatibility.warning ?? null,
+        };
+      }
+      case "auth_rejected":
         return {
           installed: true,
           authenticated: false,
           compatible: true,
           version: null,
-          warning:
-            this.#config.password !== undefined
-              ? "The OpenCode server rejected the configured credentials."
-              : "The OpenCode server requires authentication; set providers.opencode.config.password.",
+          warning: detection.warning,
         };
-      }
-      const message = error instanceof OpenCodeHttpError ? error.message : "The OpenCode server is unreachable.";
-      return { installed: false, authenticated: null, compatible: false, version: null, warning: message };
+      case "managed_start_failed":
+        return {
+          installed: true,
+          authenticated: null,
+          compatible: false,
+          version: null,
+          warning: detection.warning,
+        };
+      case "incompatible_cli":
+        return {
+          installed: true,
+          authenticated: null,
+          compatible: false,
+          version: detection.cliVersion,
+          warning: detection.warning,
+        };
+      case "external_unreachable":
+      case "cli_missing":
+        return {
+          installed: false,
+          authenticated: null,
+          compatible: false,
+          version: null,
+          warning: detection.warning,
+        };
     }
   }
 

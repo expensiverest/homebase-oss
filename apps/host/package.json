@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@homebase/adapter-claude": "0.0.1",
+    "@homebase/adapter-grok": "0.0.1",
     "@homebase/adapter-opencode": "0.0.1",
     "@homebase/adapter-sdk": "0.0.1",
     "@homebase/protocol": "0.0.1",

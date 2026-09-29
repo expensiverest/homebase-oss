@@ -10,10 +10,15 @@
 | Mock (built-in)    | In-memory adapter                    | 0.0.1-mock | 0.0.1-mock    | Stable (development fixture) |
 | OpenCode           | Native server HTTP + SSE adapter     | 2.x        | **2.0.18**    | Beta                         |
 | Claude Code        | Structured CLI compatibility adapter | 2.1.x      | **2.1.268**   | Beta                         |
-| Grok Build         | ACP transport                        | TBD        | TBD           | Planned (Phase 6)            |
-| Gemini CLI         | ACP transport                        | TBD        | TBD           | Planned (Phase 6)            |
+| Grok Build         | ACP v1 stdio transport               | 1.0.x      | **1.0.41**    | Beta                         |
+| Gemini CLI         | ACP transport                        | TBD        | TBD           | Planned (Phase 7)            |
 | Codex CLI          | Application-server protocol          | TBD        | TBD           | Planned (Phase 10)           |
 | GitHub Copilot CLI | Official SDK / structured interface  | TBD        | TBD           | Planned (Phase 10)           |
+
+Verification labels used below:
+
+- **Live** — exercised against the real CLI on a real machine.
+- **Fixture** — exercised against the deterministic fake agent in the repo (no provider, no network, no quota).
 
 ## OpenCode
 
@@ -25,6 +30,47 @@
   **not** the same as the `opencode serve` documentation that targets a different major; the adapter
   was built from the installed server's own OpenAPI document plus live captures.
 
+### Server modes and lifecycle (Phase 5.5)
+
+Homebase no longer requires the user to keep `opencode serve` running in another terminal.
+
+| `serverMode`     | Behavior                                                                                                        |
+| ---------------- | --------------------------------------------------------------------------------------------------------------- |
+| `auto` (default) | Use a healthy configured server; otherwise detect the OpenCode CLI and start a Homebase-owned dedicated server. |
+| `external`       | Never spawn OpenCode; use the configured `baseUrl`/`username`/`password` exactly as before.                     |
+| `managed`        | Require the CLI and always start a Homebase-owned dedicated server.                                             |
+
+Managed server rules:
+
+- Command: `opencode serve --hostname 127.0.0.1 --port <managedPort>` with `managedPort: 0` by default. With
+  `--port 0` the current OpenCode 2.x server binds an OS-assigned ephemeral port and prints
+  `server listening on http://127.0.0.1:<port>`; Homebase learns the port from that line (source-verified, labeled
+  **fixture + source**, not live).
+- Authentication: Homebase generates a random 256-bit, in-memory-only password and passes it through
+  `OPENCODE_PASSWORD` (with `OPENCODE_SERVER_PASSWORD` for compatibility). It is never logged, persisted, returned
+  to a client, or exposed through Tailscale.
+- Readiness: Homebase polls `/api/info` with the generated credentials until 200, treating 503 as "starting"; a
+  bounded startup timeout and early-exit diagnostics (including port-in-use) produce a clear warning instead of a
+  generic failure.
+- Shutdown: only the child Homebase spawned is stopped (stdin EOF → SIGTERM → SIGKILL on POSIX; on Windows the
+  owned process tree is terminated with `taskkill /PID <pid> /T` and `/T /F` escalation, so a `cmd.exe`/`.cmd`
+  wrapper cannot orphan the real server). Homebase never reads, edits, restarts, or kills the user's shared OpenCode
+  service and never touches service files, daemon passwords, CORS, or ports.
+- Recovery: a failed managed start is cached so reconnect loops cannot cause restart storms; an explicit provider
+  refresh (or `POST /api/v1/providers/refresh`) makes one bounded new attempt.
+
+### Detection states
+
+| State                               | `installed` | `authenticated` | `compatible` | Warning                                     |
+| ----------------------------------- | ----------- | --------------- | ------------ | ------------------------------------------- |
+| Server reachable + compatible       | true        | true            | true         | —                                           |
+| Server reachable, newer than tested | true        | true            | true         | "newer than the tested …"                   |
+| Server reachable, auth rejected     | true        | false           | true         | credentials rejected / password missing     |
+| External server unreachable         | false       | null            | false        | names the configured `baseUrl`              |
+| CLI missing                         | false       | null            | false        | CLI not on PATH + baseUrl hint              |
+| CLI v1 (API mismatch)               | true        | null            | false        | "predates the supported 2.x server API"     |
+| CLI installed, managed start failed | true        | null            | false        | reason (port in use, exited early, timeout) |
+
 ### Configuration
 
 ```json
@@ -33,9 +79,14 @@
     "opencode": {
       "enabled": true,
       "config": {
+        "serverMode": "auto",
         "baseUrl": "http://127.0.0.1:4096",
         "username": "opencode",
         "password": "…",
+        "executable": "opencode",
+        "managedPort": 0,
+        "startupTimeoutMs": 20000,
+        "shutdownTimeoutMs": 4000,
         "requestTimeoutMs": 15000
       }
     }
@@ -43,10 +94,18 @@
 }
 ```
 
-- `baseUrl` — OpenCode server endpoint; default `http://127.0.0.1:4096`.
+- `serverMode` — `auto` (default), `external`, or `managed` (see above).
+- `baseUrl` — OpenCode server endpoint for `external` mode; default `http://127.0.0.1:4096`.
 - `password` — optional HTTP Basic auth (`OPENCODE_SERVER_PASSWORD` on the server side). The adapter
-  sends no `Authorization` header when unset, so local servers without auth work unchanged.
-- The password stays in Host configuration; it is never logged and never returned by `detect()`.
+  sends no `Authorization` header when unset, so local servers without auth work unchanged. Managed mode generates
+  its own password instead.
+- `executable` / `managedPort` / `startupTimeoutMs` / `shutdownTimeoutMs` — managed-server controls. `managedPort: 0`
+  asks OpenCode for an OS-assigned port; a fixed port reports a clear conflict warning instead of killing anything.
+- The password stays in Host configuration (or memory in managed mode); it is never logged and never returned by `detect()`.
+
+**Migration note:** existing explicit `baseUrl`/`username`/`password` configurations keep working. With the new
+default `serverMode: "auto"`, an unreachable configured server now falls back to a Homebase-managed server when the
+CLI is installed. Set `serverMode: "external"` to preserve the old never-spawn behavior exactly.
 
 ### Authentication behavior
 
@@ -128,6 +187,135 @@ turns, history reload, resume, interrupt, and diff retrieval after a write. Appr
 queue/steer, and attachment flows are covered by unit/fixture tests and reconciliation paths; the
 test machine's permission configuration auto-approves tools, so live approval prompts are not
 triggered by default (do not weaken a user's permission settings to create them).
+
+## Grok Build
+
+### Transport decision: generic ACP v1 stdio, not a Grok-specific stack
+
+Homebase drives the user's installed `grok` CLI through Agent Client Protocol v1 over stdio using the official
+`@agentclientprotocol/sdk` (stable v1 entry point, 1.5.1, Apache-2.0) wrapped by `packages/transport-acp`:
+
+```text
+Homebase Host → packages/adapter-grok → packages/transport-acp → grok --no-auto-update agent stdio
+```
+
+The transport knows nothing about Grok; the adapter owns ACP→Homebase normalization. `grok` authentication stays
+with Grok: Homebase stores no xAI API key, OAuth token, refresh token, account email, or browser session, and never
+starts an interactive login from the phone.
+
+### Tested against
+
+- **Grok 1.0.41** (`grok 1.0.41 (4220f3b224a6) [alpha]`), **verified live** on Windows 11 on 2026-09-28 for version
+  detection, ACP v1 `initialize`, advertised capabilities, and authentication availability — with no prompt sent and
+  no subscription usage consumed.
+- Session list/load, prompt streaming, reasoning, tools, plans, permissions, cancellation, crash recovery, and
+  model/effort switching are **fixture-verified** against the deterministic fake ACP agent in the repo. They have
+  not been exercised against the live Grok model yet.
+
+### Command and authentication
+
+```text
+grok --no-auto-update agent stdio
+```
+
+- `--no-auto-update` is a top-level flag and must precede `agent`. Homebase also sets `GROK_DISABLE_AUTOUPDATER=1`
+  in the child environment.
+- Homebase never passes `--always-approve`, `--yolo`, `--dangerously-skip-permissions`, or `--permission-mode`
+  bypass values. Permission prompts must reach the user.
+- Non-interactive auth is preferred: if Grok advertises `cached_token` (a prior `grok login`) or `xai.api_key`
+  (an inherited `XAI_API_KEY`), Homebase calls `authenticate` for that method. Interactive `grok.com`/OIDC methods
+  are never started from Homebase.
+- If no non-interactive method exists, detection returns `installed: true, authenticated: false` with
+  "Run `grok login` on the Host."
+
+### Configuration
+
+```json
+{
+  "providers": {
+    "grok": {
+      "enabled": true,
+      "config": {
+        "executable": "grok",
+        "startupTimeoutMs": 20000,
+        "controlTimeoutMs": 10000,
+        "shutdownTimeoutMs": 3000,
+        "stderrLimitBytes": 65536
+      }
+    }
+  }
+}
+```
+
+The schema is strict: unknown fields (including anything credential-shaped) are rejected. Homebase inherits the
+normal process environment, so a user-managed `XAI_API_KEY` reaches Grok directly without Homebase storing it.
+
+### Capability matrix (as declared by the adapter)
+
+| Capability              | Supported | Notes                                                                                            |
+| ----------------------- | --------- | ------------------------------------------------------------------------------------------------ |
+| streaming               | ✅        | `session/update` text and thought chunks become normalized message/reasoning events              |
+| interrupt               | ✅        | `session/cancel`; the prompt settles with `cancelled` and pending permissions are cancelled      |
+| steer                   | ❌        | ACP exposes no documented structured steer                                                       |
+| queue                   | ❌        | No local queue is faked                                                                          |
+| resume                  | ✅        | `session/load` replays history; `session/resume` when advertised                                 |
+| deleteSession           | ✅/❌     | Only when the agent advertises `sessionCapabilities.delete` (Grok 1.0.41 does **not**)           |
+| models / modelSwitching | ✅        | From `initialize` `_meta.modelState.availableModels`; switching uses `session/set_config_option` |
+| thinkingLevels          | ✅        | `_meta.reasoningEfforts` become per-model levels; the effort option is applied per session       |
+| modes                   | ✅/❌     | Only when a mode catalog is advertised (`_meta.modes`); otherwise the picker is hidden           |
+| attachments             | ❌        | No documented non-image attachment path                                                          |
+| imageInput              | ✅/❌     | Only when `promptCapabilities.image` is advertised (Grok 1.0.41 reports `false`)                 |
+| tools                   | ✅        | `tool_call`/`tool_call_update` map to started/updated/completed/failed with safe input/output    |
+| approvals               | ✅        | `session/request_permission` becomes an approval card; all four option kinds are preserved       |
+| questions               | ❌        | No standard ACP question mechanism is surfaced in Phase 5.5                                      |
+| plans                   | ✅        | Standard ACP `plan` entries map to `AgentPlan`                                                   |
+| diffs                   | ❌        | No provider-native diff primitive                                                                |
+| usage                   | ❌        | No documented subscription-window primitive; nothing is scraped from the TUI                     |
+| slashCommands           | ❌        | Deferred with the other providers                                                                |
+
+### Known quirks and assumptions
+
+- **Homebase records the submitted user prompt itself.** Real Grok persists the user message but does not live-echo
+  it over ACP without the `x.ai/userMessageEcho` extension, and Homebase deliberately does not depend on that
+  extension. Every accepted `send()` is added to authoritative in-memory history before the model turn starts, so
+  `listMessages()` contains the user prompt and the assistant answer even when no `user_message_chunk` is received
+  live. If a provider _does_ live-echo the prompt, the echo is associated with the locally recorded message instead
+  of producing a duplicate; identical repeated prompts remain separate messages.
+- **After a Host restart, `session/load` replay is authoritative.** Replay reconstructs persisted user and assistant
+  history and never injects or duplicates locally recorded messages; replay is also never emitted as a live turn.
+- **Provider refresh recovers after `grok login`.** When the last detection was `authenticated: false`, an explicit
+  provider refresh (or `POST /api/v1/providers/refresh`) recycles only the ACP process state — endpoint, initialize
+  result, auth state, catalogs — and re-initializes so Grok can reload cached credentials, without restarting
+  Homebase and without discarding session history. An active model turn is never interrupted, and a healthy
+  authenticated transport is never restarted by refresh. This is concurrency-safe: the Host probes
+  `detect()`/`getCapabilities()` in parallel, and the adapter single-flights both connection attempts and recycles.
+  Exit callbacks are transport-identity aware, so a recycled process exiting late can never clear, fail, or replace
+  the connection that succeeded it.
+- **`unknown` state for cold sessions.** Sessions discovered through `session/list` are not claimed to be `idle`;
+  they stay `unknown` until Homebase's own turn lifecycle moves them to `working`/`waiting`/`idle`, or the provider
+  reports failure.
+- **Live-verified shapes:** `initialize` returns `protocolVersion: 1`, auth methods
+  (`cached_token`, `grok.com`, plus `defaultAuthMethodId` in `_meta`), `loadSession: true`,
+  `sessionCapabilities: { list, resume, close }` (no `delete`), and `_meta.modelState.availableModels` with
+  per-model `_meta.reasoningEfforts` and `totalContextTokens`.
+- **Model metadata is an extension surface.** The catalog parser is defensive: unrecognized shapes yield an empty
+  catalog and capabilities stay false rather than inventing entries.
+- **`session/list` is requested with the project's canonical `cwd`** and results are re-checked through
+  `findProjectByPath`, so Grok sessions outside configured project roots are never exposed to the browser.
+- **History is replayed, not double-emitted.** Updates received while `session/load` is in flight build history
+  only; they are not emitted as live deltas or a new turn.
+- **Unknown ACP update kinds and unknown agent extension requests are ignored/rejected safely** and cannot crash
+  the transport.
+
+### Live tests
+
+```bash
+HOMEBASE_TEST_GROK=1 npm test -w @homebase/adapter-grok
+```
+
+The live suite performs **no model prompts**: it checks `grok --version`, ACP process startup, `initialize`,
+advertised capabilities, and authentication availability only. A real prompt test would be a separate, explicitly
+opt-in step.
 
 ## Claude Code
 
