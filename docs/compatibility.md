@@ -287,7 +287,10 @@ normal process environment, so a user-managed `XAI_API_KEY` reaches Grok directl
   provider refresh (or `POST /api/v1/providers/refresh`) recycles only the ACP process state — endpoint, initialize
   result, auth state, catalogs — and re-initializes so Grok can reload cached credentials, without restarting
   Homebase and without discarding session history. An active model turn is never interrupted, and a healthy
-  authenticated transport is never restarted by refresh.
+  authenticated transport is never restarted by refresh. This is concurrency-safe: the Host probes
+  `detect()`/`getCapabilities()` in parallel, and the adapter single-flights both connection attempts and recycles.
+  Exit callbacks are transport-identity aware, so a recycled process exiting late can never clear, fail, or replace
+  the connection that succeeded it.
 - **`unknown` state for cold sessions.** Sessions discovered through `session/list` are not claimed to be `idle`;
   they stay `unknown` until Homebase's own turn lifecycle moves them to `working`/`waiting`/`idle`, or the provider
   reports failure.

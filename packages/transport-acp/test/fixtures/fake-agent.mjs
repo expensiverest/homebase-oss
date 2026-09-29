@@ -41,6 +41,12 @@ if (suppressInit) {
   setInterval(() => undefined, 1_000);
 }
 
+if (env.FAKE_ACP_HOLD_ALIVE === "1") {
+  // Keeps the process alive across stdin EOF so tests can exercise shutdown
+  // timing races deterministically.
+  setInterval(() => undefined, 1_000);
+}
+
 const authMethods = [];
 if (authMode === "cached") {
   authMethods.push({ id: "cached_token", name: "Cached login", description: "Use the cached local login" });

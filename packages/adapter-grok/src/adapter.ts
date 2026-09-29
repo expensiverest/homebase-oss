@@ -101,6 +101,27 @@ export class GrokAdapter implements AgentAdapter {
   #disposed = false;
   readonly #activeTurns = new Map<string, ActiveTurn>();
 
+  /**
+   * Connection lifecycle invariants (also relied on by concurrent Host probing,
+   * which calls `detect()` and `getCapabilities()` through `Promise.all`):
+   *
+   * 1. At most one current transport is owned; process-specific state
+   *    (`#transport`, `#initializeResult`, auth state, catalogs) always belongs
+   *    to it.
+   * 2. At most one connection attempt is in flight (`#connecting` is the
+   *    single-flight join point).
+   * 3. At most one signed-out recycle is in flight (`#authRefresh`); it only
+   *    tears down the old process and never establishes a connection itself,
+   *    so waiting on it cannot deadlock.
+   * 4. Exit callbacks are transport-identity aware: a transport that is no
+   *    longer current can never clear replacement state or fail replacement
+   *    turns/permissions.
+   * 5. A connect that finishes after dispose, or whose process died during
+   *    startup, is never installed; it is stopped instead.
+   * 6. A provider refresh never recycles while a turn is active, and never
+   *    restarts a healthy authenticated transport.
+   */
+
   constructor(options: GrokAdapterOptions = {}) {
     this.#options = options;
     this.#config = parseGrokConfig(options.config ?? {});
@@ -129,9 +150,18 @@ export class GrokAdapter implements AgentAdapter {
     }
     this.#activeTurns.clear();
     this.#permissions?.cancelAll();
-    await this.#transport?.stop();
+    const transport = this.#transport;
     this.#transport = null;
     this.#initializeResult = null;
+    this.#authenticated = null;
+    this.#authWarning = null;
+    this.#modelCatalog = [];
+    this.#modeCatalog = [];
+    await transport?.stop();
+    // Let an in-flight recycle finish tearing down its process, and let an
+    // in-flight connect observe `#disposed` and stop the process it started.
+    await this.#authRefresh?.catch(() => undefined);
+    await this.#connecting?.catch(() => undefined);
   }
 
   async detect(): Promise<ProviderDetection> {
@@ -186,6 +216,11 @@ export class GrokAdapter implements AgentAdapter {
   }
 
   async getCapabilities(): Promise<AgentCapabilities> {
+    // A concurrent provider refresh may be recycling a signed-out process;
+    // wait for it so capabilities are computed from the resulting connection
+    // instead of a transiently cleared initialize result.
+    const refresh = this.#authRefresh;
+    if (refresh) await refresh.catch(() => undefined);
     if (!this.#initializeResult) {
       try {
         await this.#ensureTransport();
@@ -402,13 +437,22 @@ export class GrokAdapter implements AgentAdapter {
   }
 
   async #ensureTransport(): Promise<AcpTransport> {
+    // Join any in-flight signed-out recycle first so a replacement is only
+    // established after the old process has been torn down. The recycle only
+    // stops the old transport (it never calls back into this method), so this
+    // wait cannot deadlock.
+    const refresh = this.#authRefresh;
+    if (refresh) await refresh.catch(() => undefined);
+    if (this.#disposed) throw new AdapterError("internal", "The Grok adapter was disposed.");
+
     if (this.#transport?.initialized && this.#transport.alive) return this.#transport;
     if (this.#connecting) return await this.#connecting;
-    this.#connecting = this.#connect();
+    const attempt = this.#connect();
+    this.#connecting = attempt;
     try {
-      return await this.#connecting;
+      return await attempt;
     } finally {
-      this.#connecting = null;
+      if (this.#connecting === attempt) this.#connecting = null;
     }
   }
 
@@ -439,6 +483,9 @@ export class GrokAdapter implements AgentAdapter {
    * Drops only ACP-process state (endpoint, initialize result, auth state,
    * catalogs) so the next connect re-initializes and re-authenticates. Session
    * history stays authoritative and is never discarded for an auth refresh.
+   *
+   * `#transport` is detached before stopping, so the old process's exit
+   * callback is identity-gated as stale and cannot touch the replacement.
    */
   async #resetAndStopTransport(): Promise<void> {
     const transport = this.#transport;
@@ -485,13 +532,34 @@ export class GrokAdapter implements AgentAdapter {
       throw this.#connectionError(error, cliVersion);
     }
 
+    // Authenticate before installing so a transport that dies during startup is
+    // never adopted as the current one. Connection-dependent fields are only
+    // installed after every await has completed.
+    await this.#authenticate(transport, init);
+    if (this.#disposed || !transport.initialized || !transport.alive) {
+      await transport.stop().catch(() => undefined);
+      throw new AdapterError(
+        "provider_unavailable",
+        "The Grok ACP process exited during startup before it could be used.",
+      );
+    }
+
+    this.#applyInitializeCatalog(init);
     this.#transport = transport;
     this.#initializeResult = init;
     this.#cliVersion = cliVersion;
-    transport.onExit(() => this.#handleTransportExit());
-    this.#applyInitializeCatalog(init);
+    // Identity-aware exit: a replaced transport must never mutate state that
+    // belongs to its replacement. Registration can fire immediately when the
+    // process has already exited, so re-check liveness afterwards.
+    transport.onExit(() => this.#handleTransportExit(transport));
+    if (this.#disposed || !transport.alive) {
+      await transport.stop().catch(() => undefined);
+      throw new AdapterError(
+        "provider_unavailable",
+        "The Grok ACP process exited during startup before it could be used.",
+      );
+    }
     this.#logger.info("Grok ACP connected.", { version: cliVersion ?? "unknown" });
-    await this.#authenticate(transport, init);
     return transport;
   }
 
@@ -661,9 +729,20 @@ export class GrokAdapter implements AgentAdapter {
     return blocks;
   }
 
-  #handleTransportExit(): void {
+  /**
+   * Exit handling is transport-identity aware. An exit callback from a
+   * transport that has already been replaced (for example the signed-out
+   * process recycled by a refresh) must never clear or fail state that belongs
+   * to the current replacement transport.
+   */
+  #handleTransportExit(exitedTransport: AcpTransport): void {
+    if (this.#transport !== exitedTransport) return;
     this.#transport = null;
     this.#initializeResult = null;
+    this.#authenticated = null;
+    this.#authWarning = null;
+    this.#modelCatalog = [];
+    this.#modeCatalog = [];
     for (const [nativeId] of this.#activeTurns) {
       this.#tracker?.finishTurn(nativeId, { kind: "failed", message: "The Grok ACP process exited." });
     }

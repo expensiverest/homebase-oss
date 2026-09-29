@@ -102,6 +102,39 @@ function waitForExit(child: ChildProcess): Promise<void> {
   return new Promise((resolve) => child.once("close", () => resolve()));
 }
 
+interface MutableGrokFixture {
+  auth: string;
+  mode: string;
+  suppressInit: boolean;
+  children: ChildProcess[];
+  spawn: SpawnExecutable;
+}
+
+/** Mutable fake-auth fixture so a test can simulate `grok login` in place. */
+function grokFixture(options: { auth?: string; mode?: string; holdFirst?: boolean } = {}): MutableGrokFixture {
+  let holdNext = options.holdFirst ?? false;
+  const fixture: MutableGrokFixture = {
+    auth: options.auth ?? "interactive",
+    mode: options.mode ?? "normal",
+    suppressInit: false,
+    children: [],
+    spawn: (_command, args, spawnOptions) => {
+      const env: NodeJS.ProcessEnv = {
+        ...(spawnOptions?.env ?? {}),
+        FAKE_ACP_MODE: fixture.mode,
+        FAKE_ACP_AUTH: fixture.auth,
+      };
+      if (holdNext) env.FAKE_ACP_HOLD_ALIVE = "1";
+      if (fixture.suppressInit) env.FAKE_ACP_SUPPRESS_INIT = "1";
+      holdNext = false;
+      const child = spawnExecutable(process.execPath, [FIXTURE, ...args], { ...spawnOptions, env });
+      fixture.children.push(child);
+      return child;
+    },
+  };
+  return fixture;
+}
+
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   while (cleanups.length > 0) {
@@ -598,58 +631,173 @@ describe("Grok session state", () => {
 });
 
 describe("Grok authentication refresh", () => {
-  it("recovers after `grok login` through one bounded provider-refresh recycle", async () => {
-    const authState = { value: "interactive" };
-    const spawned: ChildProcess[] = [];
-    const spawnFn: SpawnExecutable = (_command, args, spawnOptions) => {
-      const env = {
-        ...(spawnOptions?.env ?? {}),
-        FAKE_ACP_MODE: "normal",
-        FAKE_ACP_AUTH: authState.value,
-      };
-      const child = spawnExecutable(process.execPath, [FIXTURE, ...args], { ...spawnOptions, env });
-      spawned.push(child);
-      return child;
-    };
-    const { adapter } = await harness({ spawnFn });
+  async function signOut(adapter: GrokAdapter) {
+    const signedOut = await adapter.detect();
+    expect(signedOut).toMatchObject({ installed: true, authenticated: false });
+    return signedOut;
+  }
+
+  it("recovers sequentially after `grok login` through one bounded recycle", async () => {
+    const fixture = grokFixture();
+    const { adapter } = await harness({ spawnFn: fixture.spawn });
     try {
-      const signedOut = await adapter.detect();
-      expect(signedOut).toMatchObject({ installed: true, authenticated: false });
-      expect(spawned).toHaveLength(1);
+      await signOut(adapter);
+      expect(fixture.children).toHaveLength(1);
 
       // The user runs `grok login` on the Host; the next explicit refresh must
       // recycle the unauthenticated ACP process and re-initialize.
-      authState.value = "cached";
+      fixture.auth = "cached";
       const recovered = await adapter.detect();
       expect(recovered).toMatchObject({ installed: true, authenticated: true });
-      expect(spawned).toHaveLength(2);
-      await waitForExit(spawned[0]!);
+      expect(fixture.children).toHaveLength(2);
+      await waitForExit(fixture.children[0]!);
 
       // A healthy authenticated transport is not restarted by further refreshes.
       const stable = await adapter.detect();
       expect(stable.authenticated).toBe(true);
-      expect(spawned).toHaveLength(2);
+      expect(fixture.children).toHaveLength(2);
     } finally {
       await adapter.dispose();
-      for (const child of spawned) await waitForExit(child);
-      expect(spawned.every((child) => child.exitCode !== null || child.signalCode !== null)).toBe(true);
+      for (const child of fixture.children) await waitForExit(child);
+      expect(fixture.children.every((child) => child.exitCode !== null || child.signalCode !== null)).toBe(true);
     }
   });
 
+  it("Host-style concurrent detect/getCapabilities starts exactly one replacement", async () => {
+    const fixture = grokFixture({ holdFirst: true });
+    const { adapter } = await harness({ spawnFn: fixture.spawn });
+    try {
+      await signOut(adapter);
+      expect(fixture.children).toHaveLength(1);
+
+      fixture.auth = "cached";
+      // Exactly what ProviderRegistry.#probeProvider does.
+      const [detection, capabilities] = await Promise.all([adapter.detect(), adapter.getCapabilities()]);
+
+      expect(detection).toMatchObject({ installed: true, authenticated: true, compatible: true });
+      expect(capabilities).toMatchObject({
+        streaming: true,
+        interrupt: true,
+        tools: true,
+        approvals: true,
+        models: true,
+        modes: true,
+      });
+      expect(fixture.children).toHaveLength(2);
+    } finally {
+      await adapter.dispose();
+      for (const child of fixture.children) await waitForExit(child);
+      expect(fixture.children.every((child) => child.exitCode !== null || child.signalCode !== null)).toBe(true);
+    }
+  });
+
+  it("a stale exit from the recycled process cannot clear the replacement", async () => {
+    const fixture = grokFixture({ holdFirst: true });
+    const { adapter, project } = await harness({ spawnFn: fixture.spawn });
+    try {
+      await signOut(adapter);
+      fixture.auth = "cached";
+      await Promise.all([adapter.detect(), adapter.getCapabilities()]);
+      expect(fixture.children).toHaveLength(2);
+
+      // Let the recycled process finish exiting, then verify the replacement
+      // still owns the adapter's process-specific state.
+      const oldProcess = fixture.children[0]!;
+      await waitForExit(oldProcess);
+      expect(oldProcess.exitCode !== null || oldProcess.signalCode !== null).toBe(true);
+
+      const capabilities = await adapter.getCapabilities();
+      expect(capabilities).toMatchObject({ streaming: true, models: true, modes: true });
+      expect((await adapter.listModels(project)).map((model) => model.id)).toEqual(["grok-4", "grok-4-mini"]);
+      expect((await adapter.listModes(project)).map((mode) => mode.id)).toEqual(["default", "plan"]);
+
+      // A safe ACP control call still succeeds through the replacement and does
+      // not force another reconnect.
+      const session = await adapter.createSession({ provider: "grok", projectId: project.id }, project);
+      expect(session.provider).toBe("grok");
+      expect((await adapter.getSession(session.id)).state).toBe("idle");
+      expect(fixture.children).toHaveLength(2);
+
+      const stable = await adapter.detect();
+      expect(stable).toMatchObject({ installed: true, authenticated: true });
+      expect(fixture.children).toHaveLength(2);
+    } finally {
+      await adapter.dispose();
+      for (const child of fixture.children) await waitForExit(child);
+      expect(fixture.children.every((child) => child.exitCode !== null || child.signalCode !== null)).toBe(true);
+    }
+  });
+
+  it("concurrent detect calls share one replacement process", async () => {
+    const fixture = grokFixture();
+    const { adapter } = await harness({ spawnFn: fixture.spawn });
+    try {
+      await signOut(adapter);
+      fixture.auth = "cached";
+      const [first, second] = await Promise.all([adapter.detect(), adapter.detect()]);
+      expect(first.authenticated).toBe(true);
+      expect(second.authenticated).toBe(true);
+      expect(fixture.children).toHaveLength(2);
+
+      const third = await adapter.detect();
+      expect(third.authenticated).toBe(true);
+      expect(fixture.children).toHaveLength(2);
+    } finally {
+      await adapter.dispose();
+      for (const child of fixture.children) await waitForExit(child);
+      expect(fixture.children.every((child) => child.exitCode !== null || child.signalCode !== null)).toBe(true);
+    }
+  });
+
+  it("keeps a coherent state when the replacement connection fails, and can retry later", async () => {
+    const fixture = grokFixture();
+    const { adapter } = await harness({ spawnFn: fixture.spawn, config: { startupTimeoutMs: 1_200 } });
+    try {
+      await signOut(adapter);
+      expect(fixture.children).toHaveLength(1);
+
+      fixture.auth = "cached";
+      fixture.suppressInit = true;
+      const failed = await adapter.detect();
+      expect(failed).toMatchObject({ installed: true, authenticated: null, compatible: false });
+      expect(failed.warning).toBeTruthy();
+      expect(fixture.children).toHaveLength(2);
+
+      // No zombie single-flight/refresh promises: a later explicit refresh may
+      // establish a fresh connection.
+      fixture.suppressInit = false;
+      const recovered = await adapter.detect();
+      expect(recovered).toMatchObject({ installed: true, authenticated: true, compatible: true });
+      expect(fixture.children).toHaveLength(3);
+    } finally {
+      await adapter.dispose();
+      for (const child of fixture.children) await waitForExit(child);
+      expect(fixture.children.every((child) => child.exitCode !== null || child.signalCode !== null)).toBe(true);
+    }
+  });
+
+  it("dispose during an in-flight connection leaves no process", async () => {
+    const fixture = grokFixture();
+    fixture.suppressInit = true;
+    const { adapter } = await harness({ spawnFn: fixture.spawn, config: { startupTimeoutMs: 1_200 } });
+
+    // Start a connection that cannot complete, then dispose while it is busy.
+    const inFlight = adapter.detect();
+    const spawnDeadline = Date.now() + 5_000;
+    while (fixture.children.length === 0 && Date.now() < spawnDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(fixture.children).toHaveLength(1);
+
+    await adapter.dispose();
+    await expect(inFlight).resolves.toMatchObject({ compatible: false });
+    for (const child of fixture.children) await waitForExit(child);
+    expect(fixture.children.every((child) => child.exitCode !== null || child.signalCode !== null)).toBe(true);
+  });
+
   it("never recycles the transport while a model turn is active", async () => {
-    const authState = { value: "interactive" };
-    const spawned: ChildProcess[] = [];
-    const spawnFn: SpawnExecutable = (_command, args, spawnOptions) => {
-      const env = {
-        ...(spawnOptions?.env ?? {}),
-        FAKE_ACP_MODE: "long",
-        FAKE_ACP_AUTH: authState.value,
-      };
-      const child = spawnExecutable(process.execPath, [FIXTURE, ...args], { ...spawnOptions, env });
-      spawned.push(child);
-      return child;
-    };
-    const { adapter, context, project } = await harness({ spawnFn });
+    const fixture = grokFixture({ mode: "long" });
+    const { adapter, context, project } = await harness({ spawnFn: fixture.spawn });
     try {
       const signedOut = await adapter.detect();
       expect(signedOut.authenticated).toBe(false);
@@ -660,13 +808,13 @@ describe("Grok authentication refresh", () => {
 
       const duringTurn = await adapter.detect();
       expect(duringTurn.authenticated).toBe(false);
-      expect(spawned).toHaveLength(1);
+      expect(fixture.children).toHaveLength(1);
 
       await adapter.interrupt(session.id);
       await context.waitForEvent("turn.interrupted", (event) => event.sessionId === session.id, 8_000);
     } finally {
       await adapter.dispose();
-      for (const child of spawned) await waitForExit(child);
+      for (const child of fixture.children) await waitForExit(child);
     }
   });
 });

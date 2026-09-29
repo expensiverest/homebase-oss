@@ -152,6 +152,9 @@ Providers that speak the Agent Client Protocol use `@homebase/transport-acp` ins
 
 - `AcpTransport` owns stdio process lifecycle, ACP v1 `initialize`/capability negotiation, request correlation with
   bounded control timeouts, notifications, cancellation, a bounded stderr tail, and process-death semantics.
+- The Host may call `detect()` and `getCapabilities()` concurrently (`Promise.all`), so adapter connection state must
+  be race-safe: single-flight connection/recycle attempts, identity-gated process-exit handling, and coherent
+  capability results even while a signed-out process is being recycled.
 - Adapters register only the client callbacks they genuinely support. Homebase advertises **no** `fs/*` or
   `terminal/*` client capabilities.
 - `session/prompt` is always run as a background turn: `send()` starts it, the transport resolves later, and
