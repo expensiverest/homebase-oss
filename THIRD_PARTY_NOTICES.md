@@ -96,3 +96,11 @@ SOFTWARE.
 # QR pairing
 
 The Host CLI uses `qrcode-terminal` 0.12.0 by Gord Tanner and contributors (Apache-2.0) to render QR codes locally. Its license is included with the installed package. Pairing URLs are never sent to a QR service.
+
+# Agent protocol and provider CLIs
+
+- **`@agentclientprotocol/sdk` 1.5.1** (Apache-2.0, Zed Industries) is an ordinary runtime dependency of
+  `packages/transport-acp`. It provides the stable ACP v1 JSON-RPC framing, schemas, and client/server builders;
+  its license ships in the installed package. ACP v2 (`/experimental/v2`) is not imported.
+- Provider CLIs (`opencode`, `claude`, `grok`, later Gemini/Codex/Copilot) are **not bundled or redistributed** by
+  Homebase. Homebase invokes the user's own installed tools; each tool's license and terms apply to that tool.

@@ -100,9 +100,15 @@ function createAdapter(routes: FakeRoute[] = baseRoutes()) {
   const { fetchFn, calls } = createFakeFetch(routes);
   const context = createTestAdapterContext({ projectPath: PROJECT_PATH, projectId: PROJECT_ID });
   const adapter = new OpenCodeAdapter({
-    config: { baseUrl: "http://127.0.0.1:4096", requestTimeoutMs: 2_000 },
+    config: { baseUrl: "http://127.0.0.1:4096", requestTimeoutMs: 2_000, serverMode: "external" },
     fetchFn,
     startEventStream: false,
+    spawnFn: () => {
+      throw new Error("external-mode test adapter must never spawn OpenCode");
+    },
+    runFn: () => {
+      throw new Error("external-mode test adapter must never run OpenCode");
+    },
   });
   adapter.init(context);
   const project = { id: PROJECT_ID, name: "demo", path: PROJECT_PATH, providersAvailable: ["opencode"] };
@@ -275,7 +281,7 @@ describe("prompt semantics", () => {
       ]),
     });
     const adapter = new OpenCodeAdapter({
-      config: { baseUrl: "http://127.0.0.1:4096", requestTimeoutMs: 2_000 },
+      config: { baseUrl: "http://127.0.0.1:4096", requestTimeoutMs: 2_000, serverMode: "external" },
       fetchFn,
       startEventStream: false,
     });

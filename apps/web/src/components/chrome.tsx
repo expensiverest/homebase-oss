@@ -102,7 +102,7 @@ export function ProviderHealth({
     ready.length === 0 ? null : (
       <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-callout text-muted">
         <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-ok" />
-        {ready.length <= 2 ? (
+        {ready.length <= 3 ? (
           ready.map((provider, index) => (
             <span key={provider.id} className="inline-flex items-center gap-1.5">
               <span className="text-text/80">{provider.name}</span>

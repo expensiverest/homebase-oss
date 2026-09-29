@@ -1,8 +1,8 @@
 # Homebase architecture
 
-> **Status:** Phases 0-5 implemented on the Phase 5 review branch: protocol, adapter SDK, Host core, OpenCode and Claude Code adapters,
-> mobile web client, and device pairing. This document describes what exists in the repository today and the
-> intended end-state from [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md).
+> **Status:** Phases 0-5.5 implemented: protocol, adapter SDK, ACP transport, Host core, OpenCode, Claude Code and
+> Grok Build adapters, mobile web client, and device pairing. This document describes what exists in the repository
+> today and the intended end-state from [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md).
 
 ## Overview
 
@@ -29,7 +29,7 @@ provider process directly.
    adapter-*  adapter-*  adapter-*   (implement AgentAdapter)
        │          │          │
        ▼          ▼          ▼
-   OpenCode    Claude      ACP / JSON-RPC / HTTP
+   OpenCode    Claude      Grok (ACP v1)
 ```
 
 The dependency direction is always:
@@ -48,13 +48,15 @@ apps/
   web/         @homebase/web         React/Vite PWA (Phase 4)
 packages/
   protocol/    @homebase/protocol    provider-neutral entities, events, capabilities, errors
-  adapter-sdk/ @homebase/adapter-sdk adapter contract, compliance suite, identity helpers, test utilities
+  adapter-sdk/ @homebase/adapter-sdk adapter contract, compliance suite, identity helpers, exec safety, test utilities
+  transport-acp/                     provider-neutral ACP v1 stdio transport (official ACP SDK)
   adapter-opencode/                  OpenCode reference adapter (native HTTP + SSE)
   adapter-claude/                    Claude Code adapter (structured CLI subprocess)
+  adapter-grok/                      Grok Build adapter (ACP v1 over transport-acp)
 docs/
 ```
 
-The web client speaks only to the Host. Grok/Gemini (ACP) and later providers are added in their phases.
+The web client speaks only to the Host. Gemini is added in Phase 7 over the same ACP transport.
 
 ## Packages
 
@@ -94,19 +96,22 @@ Rules:
 
 | Module                                | Responsibility                                                                                                 |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `src/config/config.ts`                | JSON file + env loading, Zod validation, security invariants, secret-free summaries                            |
+| `src/cli/`                            | `homebase` command surface: parse/dispatch, pair/devices/revoke admin client, project-root management          |
+| `src/config/config.ts`                | User-scoped config resolution + env overrides, Zod validation, security invariants, secret-free summaries      |
+| `src/config/store.ts`                 | State-dir paths, private atomic JSON writes, legacy-config migration                                           |
+| `src/config/project-roots.ts`         | Canonical, de-duplicated project-root add/remove/list with schema-validated atomic persistence                 |
 | `src/paths.ts`                        | `PathAllowlist`: realpath canonicalization, containment checks, loopback detection                             |
 | `src/projects/project-registry.ts`    | Filesystem discovery of git repositories under configured roots, stable project ids, canonical path resolution |
 | `src/providers/provider-registry.ts`  | Adapter registration, initialization, detection, capabilities, availability, capability assertions             |
 | `src/events/event-bus.ts`             | Global monotonic sequence numbers, bounded replay buffer, fanout                                               |
 | `src/sessions/session-service.ts`     | Session routing to adapters, in-memory index, pending approval/question routing                                |
-| `src/auth/auth.ts`                    | Dev-token authentication with constant-time comparison and failure throttling                                  |
+| `src/auth/auth.ts`                    | Device authentication, pairing, throttling                                                                     |
 | `src/attachments/attachment-store.ts` | Ephemeral Host-owned attachment bytes (upload, TTL/LRU, MIME and magic-byte checks)                            |
 | `src/api/app.ts`                      | REST API, stable errors, auth middleware, body limits, no-store, catalogs, attachments                         |
 | `src/api/sse.ts`                      | `GET /api/v1/events`: replay via `Last-Event-ID`/`?since=`, `ready`/`resync` control events                    |
 | `src/api/app.ts` (actions/refresh)    | `GET /api/v1/sessions/:id/actions` pending read model; `POST /api/v1/providers/refresh` re-detects providers   |
 | `src/static.ts`                       | Serves the built web client with SPA fallback, cache policy, and traversal protection                          |
-| `src/server.ts`                       | Runtime wiring; `createDefaultRegistrations()` provides the mock and OpenCode providers                        |
+| `src/server.ts`                       | Runtime wiring; `createDefaultRegistrations()` provides mock, OpenCode, Claude, and Grok providers             |
 
 ### Request and event flow
 
@@ -197,7 +202,8 @@ scenarios, and PWA caching policy.
 | 2 — OpenCode reference adapter                 | Complete (protocol/SDK corrections, Host attachments/catalogs/history, adapter + live checks)  |
 | 3 — Claude adapter and multi-provider identity | Complete (provider-scoped ids, deterministic routing, Claude adapter + fake CLI/live suites)   |
 | 4 — PWA (mobile web client)                    | Complete (Projects/Sessions/Chat, global event client, capabilities, mock E2E, static serving) |
-| 5 — Security and pairing                       | Planned (auth placeholder exists)                                                              |
+| 5 — Security and pairing                       | Complete (merge `d2199d8`; real iPhone + Tailscale smoke test passed)                          |
+| 5.5 — Dogfood CLI, ACP transport, Grok         | Complete (linked `homebase` CLI, project roots, managed OpenCode, transport-acp, adapter-grok) |
 
 # Phase 5 authentication boundary
 

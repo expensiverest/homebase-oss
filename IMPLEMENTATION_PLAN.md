@@ -709,6 +709,12 @@ Do not expose unsafe bypass-permission modes through normal product UI.
 
 Build a generic ACP client package before implementing multiple ACP providers.
 
+**Phase 5.5 status:** implemented as `packages/transport-acp` against the stable
+`@agentclientprotocol/sdk` v1 entry point. It owns stdio process lifecycle, initialize/capability negotiation,
+request correlation with bounded timeouts, notifications, session lifecycle helpers, cancellation, permission
+request bridging, error normalization, a bounded stderr tail, and process-death rejection semantics. It advertises
+no filesystem or terminal client capabilities. No provider branding exists in the package.
+
 Responsibilities:
 
 - process lifecycle for stdio ACP agents
@@ -728,6 +734,12 @@ The generic transport should not contain Grok or Gemini branding.
 ## 12.4 Grok Build adapter
 
 Implement Grok on top of the ACP transport where possible.
+
+**Phase 5.5 status:** implemented as `packages/adapter-grok`. Detects the CLI (`grok --version`), negotiates ACP v1,
+treats Grok as the owner of its authentication (non-interactive `cached_token`/`xai.api_key` methods are preferred,
+interactive browser login is never started), and maps session list/create/load, prompt streaming, reasoning, tool
+calls, plans, permission requests, interrupt, and model/effort config options onto the normalized protocol. Gemini
+is deliberately Phase 7.
 
 Provider package responsibilities should mostly be:
 
@@ -1055,6 +1067,11 @@ Initial options may include:
 ---
 
 # 19. Installation and setup
+
+**Phase 5.5 provides the linked CLI and local project-root management; the wizard itself stays Phase 6.**
+The current dogfood flow is `npm install && npm run build && npm run link:cli`, then
+`homebase projects add <folder>`, `homebase`, and `homebase pair` (see the README). A direct
+`node apps/host/dist/index.js` invocation remains available as a development fallback.
 
 Long-term target:
 
@@ -1389,7 +1406,13 @@ From a phone-sized browser, a user can select a project, open/create a session, 
 
 ## Phase 5 — Security and device pairing
 
-**Status:** implemented on the Phase 5 review branch; pending PR/CI review before merge.
+**Status:** COMPLETE / MERGED.
+
+- Merge commit: `d2199d8af9228fb67322bfe0358bb2c2e409caf6` (PR #3, "Phase 5: secure device pairing and private remote access").
+- Real-device smoke test passed on 2026-09-28: real iPhone + real Tailscale Serve verified private HTTPS, QR pairing,
+  URL-fragment removal, persistent HttpOnly device cookie, Safari → Add to Home Screen cookie handoff, the installed
+  PWA staying paired across force-close/reopen, authenticated device rename, CLI device listing and revocation, live
+  SSE revocation, open PWA leaving private state without a refresh, and a revoked device staying denied.
 
 ### Tasks
 
@@ -1410,27 +1433,70 @@ From a phone-sized browser, a user can select a project, open/create a session, 
 No manual permanent token copy is required for normal setup, and all remote control requires an explicitly paired device.
 Browser auth is cookie-based to support WebKit's iOS/iPadOS 17.2+ Home Screen cookie handoff. Earlier iOS versions may require pairing again inside the installed app.
 
-## Phase 6 — Generic ACP transport + Grok + Gemini
+## Phase 5.5 — Dogfood Setup Ergonomics + ACP Foundation + Grok
+
+Real dogfooding after Phase 5 showed that setup ergonomics, project-root management, and provider lifecycle need to land
+before expanding the provider matrix further. This phase is not the installer.
 
 ### Tasks
 
-- build `packages/transport-acp`
-- implement process lifecycle
-- implement JSON-RPC correlation
-- implement ACP notifications/events
-- implement cancellation
-- implement permission/question handling
-- implement reconnect/process-failure semantics
-- add Grok adapter
-- add Gemini adapter
-- run compliance suite on both
-- verify the shared protocol survives a third integration family
+- package the existing Host binary as the normal `homebase` command (`npm run link:cli` / `unlink:cli`)
+- durable user-scoped configuration (`${HOMEBASE_STATE_DIR:-~/.homebase}/config.json`) with atomic private writes and
+  one-time migration of a legacy `./homebase.config.json`
+- `homebase projects list|add|remove` Host-side project-root management (never reachable from the browser)
+- OpenCode executable detection separate from server reachability, with a Homebase-managed dedicated
+  `opencode serve` process in `auto`/`managed` modes and unchanged `external` mode
+- `packages/transport-acp`: provider-neutral ACP v1 stdio transport built on `@agentclientprotocol/sdk`
+- `packages/adapter-grok`: Grok Build adapter (session list/create/resume, prompt streaming, tools, plans, approvals,
+  interrupt) over the shared transport
+- Host registration and generic web-client support for Grok (no Grok-specific screens)
+- tests and docs for all of the above
 
 ### Exit criteria
 
-At least one ACP provider is usable end-to-end in the same PWA without provider-specific shared UI architecture.
+A developer can clone, build, `npm run link:cli`, add a project folder, run `homebase`, pair a phone, and drive
+OpenCode, Claude Code, and Grok Build from the same PWA. Grok runs through the generic ACP transport, OpenCode no
+longer needs a manually maintained server, and no Phase 5 security property regresses.
 
-## Phase 7 — Attention + Activity
+## Phase 6 — Installer and background service
+
+Move the old installer/background-service work here.
+
+### Tasks
+
+- interactive `homebase setup` (provider detection, project-root wizard, Tailscale detection)
+- background service installation (Windows service/startup, launchd, systemd)
+- startup at login
+- Tailscale setup assistance
+- pairing as part of first-run setup
+- diagnostics / `homebase doctor`
+- upgrade and uninstall flows
+- polished distribution/package installation
+
+### Exit criteria
+
+A technically competent user can install Homebase from README instructions without manually wiring multiple services
+or editing a large environment file.
+
+## Phase 7 — Gemini + ACP hardening
+
+Gemini moves here so a second ACP provider proves the transport is provider-neutral.
+
+### Tasks
+
+- add `packages/adapter-gemini` over `packages/transport-acp`
+- verify Grok-specific assumptions did not leak into the transport
+- refine generic ACP compatibility only where Gemini proves it necessary
+- run the adapter compliance suite against Gemini
+
+### Exit criteria
+
+Two independent ACP providers work through the same transport and the same shared UI with no transport changes made
+solely for one of them.
+
+## Phase 8 — Attention + Activity
+
+Move the existing Attention/Activity work here.
 
 ### Tasks
 
@@ -1445,24 +1511,6 @@ At least one ACP provider is usable end-to-end in the same PWA without provider-
 ### Exit criteria
 
 A user can see all agent work requiring attention without opening each provider/project individually.
-
-## Phase 8 — Installer and background service
-
-### Tasks
-
-- interactive setup command
-- provider detection
-- project-root wizard
-- Tailscale detection
-- background service installation
-- pairing QR
-- diagnostics command
-- upgrade command
-- uninstall instructions
-
-### Exit criteria
-
-A technically competent user can install Homebase from README instructions without manually wiring multiple services or editing a large environment file.
 
 ## Phase 9 — Public alpha hardening
 
@@ -1604,6 +1652,42 @@ That is the product Homebase is being built to deliver.
 
 Changes to this plan are recorded here with the reason. Implementation and plan must not silently
 diverge (rule 17).
+
+- **2026-09-28 — Phase 5.5 (Dogfood Setup Ergonomics + ACP Foundation + Grok).** Real-device dogfooding after Phase 5
+  showed setup friction, not protocol gaps, was the next bottleneck, so this phase landed before any further provider
+  expansion and the roadmap was reordered.
+  - **CLI packaging:** the Host binary is normally invoked as `homebase` after one explicit `npm run link:cli`
+    (standard npm workspace linking; `npm run unlink:cli` removes it). No PATH mutation, no postinstall, no global
+    install on `npm install`.
+  - **Configuration:** the default configuration is the durable, user-scoped
+    `${HOMEBASE_STATE_DIR:-~/.homebase}/config.json`. Precedence is `--config` → `HOMEBASE_CONFIG` → user config.
+    A legacy `./homebase.config.json` is validated, atomically copied into the user config once, and left in place.
+    Writes are temp-file + fsync + rename with private permissions; project-root commands edit the same file the
+    Host loads.
+  - **Project roots:** `homebase projects [list]`, `homebase projects add [path]`, and
+    `homebase projects remove <path>` are the only way to change the allowlist. The browser still cannot submit
+    paths. Changes take effect on the next Host start (Phase 6 will manage restarts).
+  - **OpenCode lifecycle:** `providers.opencode.config.serverMode` is `auto` (default), `external`, or `managed`.
+    `auto` uses a healthy configured server and otherwise starts a Homebase-owned dedicated
+    `opencode serve --hostname 127.0.0.1 --port 0` child with a random in-memory password. Homebase never reads,
+    edits, restarts, or kills the user's shared OpenCode service. Detection now distinguishes CLI-missing,
+    managed-start failure, unreachable external server, auth rejection, incompatible versions, and newer-than-tested
+    warnings.
+  - **ACP v1 transport:** `packages/transport-acp` wraps the official `@agentclientprotocol/sdk` stable v1 entry point
+    (1.5.1, Apache-2.0) for process lifecycle, capability negotiation, request correlation/timeouts, bounded stderr,
+    cancellation, and crash semantics. It advertises no fs/terminal client capabilities and contains no
+    provider-specific logic.
+  - **Grok:** `packages/adapter-grok` runs `grok --no-auto-update agent stdio`, owns no xAI credentials, maps
+    streaming text, reasoning, tools, plans, model/effort config options, and ACP permission requests onto the
+    existing normalized protocol, and runs prompts as background turns. Queue/steer/questions/usage/diffs stay false.
+  - **Roadmap:** the old "Phase 6 — ACP transport + Grok + Gemini" split into Phase 5.5 (ACP transport + Grok),
+    Phase 7 (Gemini + ACP hardening), and the installer moved from Phase 8 to Phase 6. Attention/Activity moved to
+    Phase 8; public alpha and Codex/Copilot remain later.
+  - **Deviations found during implementation:** the live Grok 1.0.41 build advertises `session/list`, `session/resume`,
+    and `session/close` but not `session/delete`; model catalogs arrive in `initialize` `_meta.modelState`
+    (`availableModels` with `_meta.reasoningEfforts`); npm-installed OpenCode on Windows is a `.cmd` shim, so the
+    adapter SDK gained a dependency-free, shell-free resolver that invokes `cmd.exe /d /s /c` only for `.cmd`/`.bat`
+    launchers while passing all argv as an array.
 
 - **2026-09-28 — Phase 5 architecture:** Default authentication changed to `device`, including on loopback because Serve can proxy loopback. The permanent browser credential moved from the planned JS bearer injection to a Secure HttpOnly cookie. Pair invitations use a URL fragment and POST redemption; the CLI uses a separate machine-local admin key. Device records use versioned atomic JSON with only SHA-256 digests. Serve, not Funnel, is the recommended private HTTPS path. Browser/PWA seamless cookie handoff begins with iOS/iPadOS 17.2. Phase 4.3 viewport containment remains, but user zoom has been restored.
 

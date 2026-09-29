@@ -9,6 +9,10 @@ export default defineConfig({
         replacement: fileURLToPath(new URL("../../packages/adapter-claude/src/index.ts", import.meta.url)),
       },
       {
+        find: "@homebase/adapter-grok",
+        replacement: fileURLToPath(new URL("../../packages/adapter-grok/src/index.ts", import.meta.url)),
+      },
+      {
         find: "@homebase/adapter-opencode",
         replacement: fileURLToPath(new URL("../../packages/adapter-opencode/src/index.ts", import.meta.url)),
       },

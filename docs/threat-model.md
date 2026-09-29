@@ -1,6 +1,6 @@
 # Threat model (draft)
 
-> Status: Phase 5 reassessment. Revisit before public alpha (IMPLEMENTATION_PLAN §25).
+> Status: Phase 5 reassessment with a Phase 5.5 addendum. Revisit before public alpha (IMPLEMENTATION_PLAN §25).
 > This model describes assets, trust boundaries, and mitigations for the current implementation plus
 > planned work. The original table below is retained as the earlier baseline; the Phase 5 reassessment supersedes its older status labels.
 
@@ -81,6 +81,25 @@ Assets worth protecting, in order:
 - **T9:** Device auth covers approvals and questions; same-origin mutation checks and single-use provider action handling prevent ordinary cross-site submission and replay. Tailscale Serve is a trusted local proxy hop for external-origin reconstruction only when the actual socket peer is loopback; forwarded headers from other peers are ignored. A compromised paired browser still has full single-user control.
 - **T15:** API responses are no-store and the service worker ignores `/api/*`. Auth loss stops the stream, clears the in-memory query cache and live overlays, and removes private screens. Browser memory and OS-level snapshots remain outside app control.
 - **T17:** Loopback requests now require a device credential, materially reducing access from unrelated local processes. The local admin credential is stored in the private user state directory, and admin endpoints reject reverse-proxied traffic even if it arrives over loopback. Device cookies have a one-year sliding browser lifetime but remain revocable immediately on the Host. A malicious process running as the **same OS user** can generally read that user's Homebase state and is outside the meaningful protection boundary. Windows ACLs depend on the selected profile/state directory.
+
+## 5.1 Phase 5.5 addendum
+
+- **T1/T2 (local process and file boundaries):** the durable configuration is user-scoped and written atomically with
+  private POSIX permissions; project roots are only mutable through the local `homebase projects` CLI and are
+  canonicalized, validated, and persisted through the same schema/security invariants the Host enforces at startup.
+  No browser route accepts a path, so the project allowlist boundary is unchanged.
+- **T4 (provider process execution):** a Homebase-managed OpenCode server binds `127.0.0.1` only and authenticates
+  with a random in-memory password; it is never exposed through Tailscale and Homebase never modifies, restarts, or
+  kills the user's shared OpenCode service. ACP agents are value-configured (no credential fields accepted) and
+  spawned with `shell: false` and argv arrays. On Windows an npm `.cmd`/`.bat` shim is launched through
+  `cmd.exe /d /s /c` with a fixed, Homebase-controlled argv (no user content, no credentials on the command line);
+  the helper is centrally implemented and unit-tested. ACP stdout is protocol-only, stderr is a bounded local tail,
+  and the client advertises no fs/terminal capabilities, so a malicious provider cannot use Homebase as a shell.
+- **T14 (stuck sessions):** ACP transport exit rejects outstanding requests, cancels pending permission bridges, and
+  fails active turns; provider refresh can reconnect. A failed managed OpenCode start is cached to prevent restart
+  storms, and only an explicit refresh may retry it.
+- **Grok credentials:** Homebase stores and transmits no xAI API key, OAuth/refresh token, account email, or browser
+  session. Non-interactive auth methods only; interactive login is never started from the remote client.
 
 ## 6. Open items before public alpha
 

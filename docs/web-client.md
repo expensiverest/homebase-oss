@@ -1,7 +1,7 @@
 # Homebase web client
 
 `apps/web` is the Phase 4 public mobile web client: an installable PWA that consumes only the provider-neutral
-Homebase API and normalized event vocabulary. It never imports an adapter and never sees OpenCode or Claude payloads.
+Homebase API and normalized event vocabulary. It never imports an adapter and never sees provider-native payloads.
 
 ## Stack
 
@@ -100,7 +100,7 @@ every text color, including status on its tinted `*-soft` background, is checked
   nothing essential is below 13px.
 - **Surfaces.** Inset-grouped lists on one `.surface`: a hairline border plus light from above (an inner top highlight
   in dark, a soft ambient shadow in light). Drop shadows are reserved for sheets.
-- **Status.** Healthy is quiet (a muted "OpenCode · Claude Code ready" line); problems explain themselves (provider,
+- **Status.** Healthy is quiet (a muted "OpenCode · Claude Code · Grok ready" line); problems explain themselves (provider,
   what's wrong, Retry). Pills are reserved for Working / Needs you style status and branch chips.
 - **Screens.** Projects is project-first with serif identity and deterministic monogram marks. A project's screen is
   its workspace: the session launcher (provider, mode, model, thinking, **New session**) is part of the screen, with

@@ -22,12 +22,32 @@ const httpUrl = z
   );
 
 export const opencodeConfigSchema = z.object({
-  /** OpenCode server endpoint, for example http://127.0.0.1:4096. */
+  /**
+   * How the OpenCode server endpoint is obtained.
+   *
+   * - `auto` (default): use a healthy configured server, otherwise start a
+   *   Homebase-managed dedicated `opencode serve` child when the CLI is found.
+   * - `external`: never spawn OpenCode; use `baseUrl`/`username`/`password`.
+   * - `managed`: require the CLI and always run a Homebase-owned server.
+   */
+  serverMode: z.enum(["auto", "external", "managed"]).default("auto"),
+  /** OpenCode server endpoint for external mode, for example http://127.0.0.1:4096. */
   baseUrl: httpUrl.default("http://127.0.0.1:4096"),
   /** Basic-auth username; OpenCode defaults to "opencode". */
   username: z.string().min(1).max(200).default("opencode"),
   /** Basic-auth password (OPENCODE_SERVER_PASSWORD). Optional for local servers. */
   password: z.string().min(1).max(4_096).optional(),
+  /** Executable used for managed mode and CLI detection. */
+  executable: z.string().min(1).max(500).default("opencode"),
+  /**
+   * Port for the managed server. `0` lets OpenCode choose an OS-assigned
+   * ephemeral port, which Homebase learns from the server's own startup line.
+   */
+  managedPort: z.number().int().min(0).max(65_535).default(0),
+  /** How long to wait for a managed server to become reachable. */
+  startupTimeoutMs: z.number().int().min(1_000).max(120_000).default(20_000),
+  /** Grace period before force-killing the managed server on shutdown. */
+  shutdownTimeoutMs: z.number().int().min(250).max(30_000).default(4_000),
   /** Per-request timeout for catalog/session calls. */
   requestTimeoutMs: z.number().int().min(250).max(120_000).default(15_000),
 });

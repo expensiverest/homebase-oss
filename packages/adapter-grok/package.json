@@ -1,0 +1,35 @@
+{
+  "name": "@homebase/adapter-grok",
+  "version": "0.0.1",
+  "description": "Homebase adapter for Grok Build over the ACP v1 transport",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.5.1",
+    "@homebase/adapter-sdk": "0.0.1",
+    "@homebase/protocol": "0.0.1",
+    "@homebase/transport-acp": "0.0.1",
+    "zod": "^4.6.5"
+  }
+}

@@ -102,7 +102,7 @@ export function defineAdapterComplianceSuite(options: AdapterComplianceOptions):
     beforeAll(async () => {
       adapter = await options.createAdapter();
       project = options.createProject ? await options.createProject() : undefined;
-      context = createTestAdapterContext({ projectPath: project?.path });
+      context = createTestAdapterContext({ projectPath: project?.path, projectId: project?.id });
       await adapter.init?.(context);
       capabilities = await adapter.getCapabilities();
     });

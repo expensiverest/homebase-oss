@@ -534,11 +534,12 @@ describe("session pagination", () => {
 });
 
 describe("default registrations", () => {
-  it("includes the OpenCode and Claude reference providers", () => {
+  it("includes the OpenCode, Claude, and Grok reference providers", () => {
     const ids = createDefaultRegistrations().map((registration) => registration.id);
     expect(ids).toContain("mock");
     expect(ids).toContain("opencode");
     expect(ids).toContain("claude");
+    expect(ids).toContain("grok");
   });
 
   it("starts and reports a useful status when OpenCode is unreachable", async () => {
@@ -549,7 +550,9 @@ describe("default registrations", () => {
           displayName: "OpenCode",
           create: (config) =>
             new OpenCodeAdapter({
-              config: { ...config, baseUrl: "http://127.0.0.1:9", requestTimeoutMs: 500 },
+              // External mode keeps this deterministic: no CLI detection or
+              // managed-server spawn depends on the contributor's machine.
+              config: { ...config, serverMode: "external", baseUrl: "http://127.0.0.1:9", requestTimeoutMs: 500 },
               startEventStream: false,
             }),
         },
@@ -564,6 +567,6 @@ describe("default registrations", () => {
     ).providers;
     const opencode = providers.find((provider) => provider.id === "opencode");
     expect(opencode?.installed).toBe(false);
-    expect(opencode?.warning).toBeTruthy();
+    expect(opencode?.warning).toContain("http://127.0.0.1:9");
   });
 });

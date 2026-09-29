@@ -89,7 +89,7 @@ const PROJECTS: AgentProject[] = [
     gitRoot: "/home/example/projects/aurora-api",
     gitRemote: "https://example.com/example/aurora-api.git",
     branch: "main",
-    providersAvailable: ["opencode", "claude"],
+    providersAvailable: ["opencode", "claude", "grok"],
   },
   {
     id: "prj_beacon",
@@ -150,6 +150,11 @@ const CLAUDE_MODES: AgentMode[] = [
   { id: "auto", name: "Auto", description: "Classifier approves most actions" },
 ];
 
+const GROK_MODES: AgentMode[] = [
+  { id: "default", name: "Build", description: "Act on the task" },
+  { id: "plan", name: "Plan", description: "Explore and propose; make no changes" },
+];
+
 function models(provider: string, scenario: Scenario): AgentModel[] {
   if (provider === "claude") {
     return [
@@ -179,6 +184,35 @@ function models(provider: string, scenario: Scenario): AgentModel[] {
         name: "Claude Fable",
         thinkingLevels: ["low", "medium", "high"].map((id) => ({ id, name: id })),
         inputCapabilities: { text: true, image: true, file: false },
+      },
+    ];
+  }
+  if (provider === "grok") {
+    return [
+      {
+        id: "grok-4.7",
+        provider: "grok",
+        name: "Grok 4.7",
+        description: "Frontier model",
+        contextWindow: 256_000,
+        thinkingLevels: [
+          { id: "high", name: "High" },
+          { id: "low", name: "Low" },
+        ],
+        defaultThinkingLevel: "high",
+        inputCapabilities: { text: true, image: false, file: false },
+      },
+      {
+        id: "grok-4.6",
+        provider: "grok",
+        name: "Grok 4.6",
+        contextWindow: 500_000,
+        thinkingLevels: [
+          { id: "high", name: "High" },
+          { id: "low", name: "Low" },
+        ],
+        defaultThinkingLevel: "high",
+        inputCapabilities: { text: true, image: false, file: false },
       },
     ];
   }
@@ -234,6 +268,8 @@ function makeSession(
   modelId?: string,
 ): AgentSession {
   const timestamp = new Date(Date.now() - minutesAgo * 60_000).toISOString();
+  const defaultModel =
+    provider === "claude" ? "sonnet" : provider === "grok" ? "grok-4.7" : "example-provider/aurora-1";
   return {
     id,
     provider,
@@ -242,9 +278,9 @@ function makeSession(
     createdAt: timestamp,
     updatedAt: timestamp,
     state,
-    model: { provider, modelId: modelId ?? (provider === "claude" ? "sonnet" : "example-provider/aurora-1") },
-    mode: provider === "claude" ? "default" : "default",
-    thinkingLevel: provider === "claude" ? "high" : "medium",
+    model: { provider, modelId: modelId ?? defaultModel },
+    mode: "default",
+    thinkingLevel: provider === "claude" || provider === "grok" ? "high" : "medium",
   };
 }
 
@@ -377,6 +413,27 @@ function buildState(scenario: Scenario): MockState {
       warning:
         scenario === "signed-out" ? "Claude Code is not signed in; run `claude` on this machine to sign in." : null,
     },
+    {
+      id: "grok",
+      name: "Grok",
+      version: "1.0.41",
+      installed: true,
+      authenticated: true,
+      compatible: true,
+      capabilities: defineCapabilities({
+        resume: true,
+        streaming: true,
+        interrupt: true,
+        models: true,
+        modelSwitching: true,
+        thinkingLevels: true,
+        modes: true,
+        tools: true,
+        approvals: true,
+        plans: true,
+      }),
+      warning: null,
+    },
   ];
 
   const projects = scenario === "empty" ? [] : PROJECTS;
@@ -393,6 +450,7 @@ function buildState(scenario: Scenario): MockState {
       makeSession("opencode", "prj_beacon", "ses_beacon_ui", "Polish the onboarding empty state", "idle", 42),
       makeSession("claude", "prj_beacon", "ses_beacon_api", "Add cursor pagination to the audit log", "completed", 500),
       makeSession("opencode", "prj_cedar", "ses_cedar_release", "Prepare the 0.4 release notes", "failed", 90),
+      makeSession("grok", "prj_aurora", "ses_aurora_grok", "Draft the migration plan", "idle", 30),
       makeSession(
         "claude",
         "prj_northwind",
@@ -647,6 +705,37 @@ function buildState(scenario: Scenario): MockState {
     textMessage("ses_cedar_release", "user", "Prepare the 0.4 release notes.", "msg_rel_u1", 95),
     textMessage("ses_cedar_release", "assistant", "Collecting merged PRs...", "msg_rel_a1", 94),
   ]);
+  messages.set("ses_aurora_grok", [
+    textMessage(
+      "ses_aurora_grok",
+      "user",
+      "Draft a migration plan for moving sessions to the new store.",
+      "msg_grok_u1",
+      35,
+    ),
+    textMessage(
+      "ses_aurora_grok",
+      "assistant",
+      "The current store keeps one JSON index per project. I would move to append-only logs first, then migrate readers.",
+      "msg_grok_a1",
+      34,
+    ),
+    toolMessage(
+      "ses_aurora_grok",
+      {
+        id: "tool_grok_1",
+        name: "read",
+        status: "completed",
+        title: "Read session store",
+        input: { path: "src/lib/session.ts" },
+        output: { type: "text", text: "export interface SessionStore {}" },
+        startedAt: new Date(Date.now() - 34 * 60000).toISOString(),
+      },
+      "completed",
+      34,
+    ),
+    textMessage("ses_aurora_grok", "assistant", "Plan drafted in three steps.", "msg_grok_a2", 33),
+  ]);
 
   if (scenario === "approval") {
     approvals.set("ses_aurora_fix", [
@@ -663,6 +752,23 @@ function buildState(scenario: Scenario): MockState {
           { id: "allow_once", label: "Allow once", kind: "allow_once" },
           { id: "allow_always", label: "Always allow (this session)", kind: "allow_always" },
           { id: "deny", label: "Deny", kind: "deny" },
+        ],
+      },
+    ]);
+    approvals.set("ses_aurora_grok", [
+      {
+        id: "hb1~grok~YXBwcl9ncm9r",
+        sessionId: "ses_aurora_grok",
+        provider: "grok",
+        createdAt: new Date(Date.now() - 45_000).toISOString(),
+        kind: "command",
+        title: "Run the test suite",
+        detail: "npm test",
+        toolCallId: "tool_grok_perm",
+        options: [
+          { id: "allow-once", label: "Allow once", kind: "allow_once" },
+          { id: "allow-always", label: "Allow always", kind: "allow_always" },
+          { id: "reject-once", label: "Reject once", kind: "deny" },
         ],
       },
     ]);
@@ -796,7 +902,8 @@ function streamReply(session: AgentSession, prompt: string): void {
     { provider: session.provider, projectId: session.projectId, sessionId: session.id },
   );
 
-  const withReasoning = state.scenario === "reasoning" && session.provider === "opencode";
+  const withReasoning =
+    state.scenario === "reasoning" && (session.provider === "opencode" || session.provider === "grok");
   if (withReasoning) {
     const reasoningId = `${messageId}:reasoning:0`;
     emit(
@@ -1018,7 +1125,7 @@ async function handleRequest(input: string, init?: RequestInit): Promise<Respons
   const modesMatch = /^\/api\/v1\/projects\/([^/]+)\/providers\/([^/]+)\/modes$/.exec(path);
   if (modesMatch) {
     const providerId = decodeURIComponent(modesMatch[2] ?? "");
-    return json({ modes: providerId === "claude" ? CLAUDE_MODES : MODES });
+    return json({ modes: providerId === "claude" ? CLAUDE_MODES : providerId === "grok" ? GROK_MODES : MODES });
   }
 
   if (path === "/api/v1/sessions" && method === "POST") {
@@ -1036,7 +1143,7 @@ async function handleRequest(input: string, init?: RequestInit): Promise<Respons
       0,
       String(
         (body?.model as { modelId?: string } | undefined)?.modelId ??
-          (providerId === "claude" ? "sonnet" : "example-provider/aurora-1"),
+          (providerId === "claude" ? "sonnet" : providerId === "grok" ? "grok-4.7" : "example-provider/aurora-1"),
       ),
     );
     state.sessions.unshift(session);

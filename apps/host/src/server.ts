@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { createConsoleLogger, type AdapterLogger, type AdapterRegistration } from "@homebase/adapter-sdk";
 import { claudeRegistration } from "@homebase/adapter-claude";
+import { grokRegistration } from "@homebase/adapter-grok";
 import { opencodeRegistration } from "@homebase/adapter-opencode";
 import { MockAdapter } from "@homebase/adapter-sdk/testing";
 import { existsSync } from "node:fs";
@@ -64,6 +65,7 @@ export function createDefaultRegistrations(): AdapterRegistration[] {
     },
     opencodeRegistration,
     claudeRegistration,
+    grokRegistration,
   ];
 }
 

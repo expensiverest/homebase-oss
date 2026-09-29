@@ -1,4 +1,4 @@
-import { Asterisk, Bot, Braces, type LucideIcon } from "lucide-react";
+import { Asterisk, Bot, Braces, Sparkles, type LucideIcon } from "lucide-react";
 
 import type { AgentProvider } from "@homebase/protocol";
 
@@ -69,6 +69,7 @@ export function ProjectMark({ name, working = false, size = 44 }: { name: string
 const PROVIDER_GLYPHS: Record<string, LucideIcon> = {
   opencode: Braces,
   claude: Asterisk,
+  grok: Sparkles,
 };
 
 export function providerGlyph(providerId: string): LucideIcon {
