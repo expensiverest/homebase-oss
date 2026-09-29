@@ -209,12 +209,12 @@ focus, and controls meet the 44px touch target. Contrast is enforced by a token 
 
 ## Browser support
 
-Modern evergreen browsers and iOS/iPadOS Safari 16.4+ (uses `dvh`, `visualViewport`, and safe-area insets). Desktop
+Modern evergreen browsers and iOS/iPadOS Safari 16.4+ (uses `dvh`, `visualViewport`, and safe-area insets). Seamless Safari-to-Home-Screen pairing requires iOS/iPadOS **17.2+**, when WebKit copies cookies during installation; earlier supported versions may require pairing again from the installed app. Desktop
 is a centered, naturally expanded version of the same product.
 
 ## Known Phase 4 limitations
 
-- No pairing, device credentials, or shared-token login UI (Phase 5). The transport accepts credentials already.
+- Device pairing, a cookie-backed auth gate, and Devices management are implemented in Phase 5. Dev-token injection remains for explicit testing.
 - Attention and Activity screens are later phases; the connection pill and provider warnings are the only global
   status surfaces.
 - Usage (`capabilities.usage`) is fetched by the API client but not yet rendered.

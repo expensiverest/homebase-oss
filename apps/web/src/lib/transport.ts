@@ -10,7 +10,13 @@ export interface Transport {
 }
 
 const browserTransport: Transport = {
-  fetch: (input, init) => globalThis.fetch(input, init),
+  fetch: async (input, init) => {
+    const response = await globalThis.fetch(input, { credentials: "same-origin", ...init });
+    if (response.status === 401 && !input.endsWith("/api/v1/auth/status")) {
+      window.dispatchEvent(new Event("homebase:auth-lost"));
+    }
+    return response;
+  },
 };
 
 let transport: Transport = browserTransport;
@@ -24,7 +30,7 @@ export function getTransport(): Transport {
   return transport;
 }
 
-/** Phase 5 pairing will supply the device credential here. */
+/** Bearer token remains for explicit dev-token testing only. */
 export function setBearerToken(token: string | null): void {
   bearerToken = token;
 }

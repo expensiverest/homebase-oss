@@ -1,7 +1,7 @@
 # Homebase architecture
 
-> **Status:** Phases 0-4 implemented: protocol, adapter SDK, Host core, OpenCode and Claude Code adapters,
-> and the Phase 4 mobile web client. This document describes what exists in the repository today and the
+> **Status:** Phases 0-5 implemented on the Phase 5 review branch: protocol, adapter SDK, Host core, OpenCode and Claude Code adapters,
+> mobile web client, and device pairing. This document describes what exists in the repository today and the
 > intended end-state from [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md).
 
 ## Overview
@@ -140,8 +140,7 @@ unsupported path is exercised in tests.
 - **Caching**: all `/api/*` responses are `cache-control: no-store`.
 - **Limits**: request bodies are capped (1 MiB at the API layer); prompt text and attachment counts have
   schema limits.
-- **Auth**: Phase 1 offers `none` (loopback-only deployments) and `dev-token`; Phase 5 adds pairing with
-  revocable per-device credentials as required by the plan.
+- **Auth**: Phase 5 defaults to revocable per-device cookie credentials, including on loopback. `none` and `dev-token` remain explicit development modes.
 
 See [security.md](security.md) and [threat-model.md](threat-model.md).
 
@@ -199,3 +198,7 @@ scenarios, and PWA caching policy.
 | 3 — Claude adapter and multi-provider identity | Complete (provider-scoped ids, deterministic routing, Claude adapter + fake CLI/live suites)   |
 | 4 — PWA (mobile web client)                    | Complete (Projects/Sessions/Chat, global event client, capabilities, mock E2E, static serving) |
 | 5 — Security and pairing                       | Planned (auth placeholder exists)                                                              |
+
+# Phase 5 authentication boundary
+
+Normal Host startup uses `auth.mode: "device"` while binding to `127.0.0.1`. Tailscale Serve proxies this loopback service over a private HTTPS tailnet hostname. Serve is transport protection; Homebase pairing is the application authorization boundary. Every private REST route, provider-scoped child session, attachment, and global SSE stream is authorized by the same Secure HttpOnly device cookie. A Host-local admin key controls invitation creation and recovery through loopback management endpoints. See [security.md](security.md) and [remote-access.md](remote-access.md).

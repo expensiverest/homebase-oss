@@ -904,16 +904,15 @@ test.describe("agent work presentation", () => {
     });
   });
 
-  test("the app cannot be zoomed by pinching or double-tapping", async ({ page }) => {
+  test("user zoom remains available while the app shell contains one-finger page drag", async ({ page }) => {
     await page.goto("/?mock=long-conversation");
     await openProject(page, "aurora-api");
     await openSession(page, "Document the gateway endpoints");
     await expect(page.getByText("Handled request 30.", { exact: true })).toBeVisible();
     const viewport = await page.locator('meta[name="viewport"]').getAttribute("content");
-    expect(viewport).toContain("user-scalable=no");
-    expect(viewport).toContain("maximum-scale=1");
-    expect(await page.evaluate(() => getComputedStyle(document.documentElement).touchAction)).toBe("pan-x pan-y");
-    // A two-finger touchmove (a pinch) is cancelled even over a scroll area, so it can never zoom the page.
+    expect(viewport).not.toContain("user-scalable=no");
+    expect(viewport).not.toContain("maximum-scale=1");
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).touchAction)).toBe("auto");
     const pinchPrevented = await page.locator("[data-chat-scroll]").evaluate((element) => {
       const a = new Touch({ identifier: 1, target: element, clientX: 150, clientY: 400 });
       const b = new Touch({ identifier: 2, target: element, clientX: 250, clientY: 400 });
@@ -926,14 +925,13 @@ test.describe("agent work presentation", () => {
       element.dispatchEvent(event);
       return event.defaultPrevented;
     });
-    expect(pinchPrevented).toBe(true);
-    // iOS also raises WebKit-only gesture events for a pinch; they are stopped too.
+    expect(pinchPrevented).toBe(false);
     const gesturePrevented = await page.evaluate(() => {
       const event = new Event("gesturestart", { bubbles: true, cancelable: true });
       document.body.dispatchEvent(event);
       return event.defaultPrevented;
     });
-    expect(gesturePrevented).toBe(true);
+    expect(gesturePrevented).toBe(false);
   });
 
   test("the top bar stays put while the thread scrolls, so Back is always reachable", async ({ page }) => {

@@ -34,8 +34,7 @@
   html {
     min-height: 200vh;
     overflow: hidden;
-    /* The app is an app, not a page: no pinch or double-tap zoom (text size follows the OS setting). */
-    touch-action: pan-x pan-y;
+    touch-action: auto;
   }
 
   body {

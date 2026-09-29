@@ -21,7 +21,7 @@ describe("configuration loading", () => {
     const config = await loadConfig({ cwd: dir, env: {} });
     expect(config.host.port).toBe(8787);
     expect(config.host.bindAddress).toBe("127.0.0.1");
-    expect(config.auth.mode).toBe("none");
+    expect(config.auth.mode).toBe("device");
     expect(config.projectRoots).toEqual([]);
   });
 
@@ -81,10 +81,12 @@ describe("configuration loading", () => {
 
 describe("security invariants", () => {
   it("refuses a non-loopback bind without authentication", async () => {
-    await expect(loadConfig({ env: { HOMEBASE_BIND_ADDRESS: "0.0.0.0" } })).rejects.toBeInstanceOf(ConfigError);
+    await expect(
+      loadConfig({ env: { HOMEBASE_BIND_ADDRESS: "0.0.0.0", HOMEBASE_AUTH_MODE: "none" } }),
+    ).rejects.toBeInstanceOf(ConfigError);
 
     try {
-      await loadConfig({ env: { HOMEBASE_BIND_ADDRESS: "0.0.0.0" } });
+      await loadConfig({ env: { HOMEBASE_BIND_ADDRESS: "0.0.0.0", HOMEBASE_AUTH_MODE: "none" } });
     } catch (error) {
       expect((error as ConfigError).issues.join(" ")).toContain("authentication");
     }

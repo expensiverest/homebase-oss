@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <title>Homebase</title>
     <meta name="description" content="Local-first control plane for AI coding agents running on your own computer." />
@@ -17,20 +17,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <script>
-      // Pre-paint theme so the first frame matches the stored preference.
-      (function () {
-        try {
-          var stored = localStorage.getItem("hb.theme") || "system";
-          var dark =
-            stored === "dark" || (stored === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-          document.documentElement.dataset.theme = dark ? "dark" : "light";
-          document.documentElement.style.colorScheme = dark ? "dark" : "light";
-        } catch (error) {
-          /* default light */
-        }
-      })();
-    </script>
+    <script src="/theme-bootstrap.js"></script>
   </head>
   <body>
     <div id="root"></div>

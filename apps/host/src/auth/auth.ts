@@ -1,9 +1,11 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import type { HostConfig } from "../config/index.js";
+import type { DeviceState, PublicDevice } from "./device-state.js";
 
 export interface AuthDecision {
   ok: boolean;
+  principal?: { kind: "none" | "dev-token" } | { kind: "device"; deviceId: string };
   status?: 401 | 429;
   code?: "invalid_request" | "rate_limited";
   message?: string;
@@ -16,21 +18,25 @@ interface FailureRecord {
 }
 
 export interface AuthenticatorOptions {
-  mode: "none" | "dev-token";
+  mode: "none" | "dev-token" | "device";
   devToken?: string;
+  devices?: DeviceState;
   /** Failed attempts before the client key is temporarily locked out. */
   maxFailures?: number;
   lockoutMs?: number;
 }
 
 /**
- * Phase 1 authentication: a local development token. Pairing and per-device
- * credentials replace this in Phase 5, but the shape of the check — constant
- * time comparison, failure throttling, and no secrets in query strings — is
- * already the shape the product needs.
+ * Device-cookie authentication for normal operation, with explicit none and
+ * dev-token modes for local development and API tests.
  */
 export class Authenticator {
-  readonly mode: "none" | "dev-token";
+  readonly mode: "none" | "dev-token" | "device";
+  readonly devices?: DeviceState;
+  #invitation: { token: string; expiresAt: number } | null = null;
+  #consumedInvitation: string | null = null;
+  readonly #pairFailures = new Map<string, FailureRecord>();
+  #globalPairWindow = { count: 0, resetAt: Date.now() + 60_000 };
   readonly #expectedDigest: Buffer | null;
   readonly #maxFailures: number;
   readonly #lockoutMs: number;
@@ -38,16 +44,24 @@ export class Authenticator {
 
   constructor(options: AuthenticatorOptions) {
     this.mode = options.mode;
+    this.devices = options.devices;
     this.#expectedDigest = options.devToken ? digest(options.devToken) : null;
     this.#maxFailures = options.maxFailures ?? 10;
     this.#lockoutMs = options.lockoutMs ?? 60_000;
   }
 
-  authenticate(authorizationHeader: string | undefined, clientKey: string): AuthDecision {
+  authenticate(authorizationHeader: string | undefined, clientKey: string, cookie?: string): AuthDecision {
     if (this.mode === "none") {
-      return { ok: true };
+      return { ok: true, principal: { kind: "none" } };
     }
 
+    const provided = this.mode === "device" ? extractCookie(cookie) : extractBearerToken(authorizationHeader);
+    const device = this.mode === "device" && provided ? this.devices?.verify(provided) : null;
+    if (provided && (device || (this.mode === "dev-token" && this.#matches(provided)))) {
+      return { ok: true, principal: device ? { kind: "device", deviceId: device.id } : { kind: "dev-token" } };
+    }
+    // A bad request must never lock a valid paired device out through the
+    // shared loopback address used by Tailscale Serve.
     const now = Date.now();
     const record = this.#failures.get(clientKey);
     if (record && record.blockedUntil > now) {
@@ -58,12 +72,6 @@ export class Authenticator {
         message: "Too many failed authentication attempts. Try again later.",
         retryAfterSeconds: Math.ceil((record.blockedUntil - now) / 1_000),
       };
-    }
-
-    const provided = extractBearerToken(authorizationHeader);
-    if (provided && this.#matches(provided)) {
-      this.#failures.delete(clientKey);
-      return { ok: true };
     }
 
     const count = (record?.count ?? 0) + 1;
@@ -81,6 +89,70 @@ export class Authenticator {
     return { ok: false, status: 401, code: "invalid_request", message: "Missing or invalid credentials." };
   }
 
+  createInvitation(): { token: string; expiresAt: string } {
+    const token = `hbpair1.${randomBytes(32).toString("base64url")}`;
+    const expiresAt = Date.now() + 5 * 60_000;
+    this.#invitation = { token, expiresAt };
+    this.#consumedInvitation = null;
+    return { token, expiresAt: new Date(expiresAt).toISOString() };
+  }
+
+  async redeem(
+    token: string,
+    name: string,
+    clientKey: string,
+  ): Promise<
+    | { status: "ok"; device: PublicDevice; credential: string }
+    | { status: "invalid" | "expired" | "used" | "rate_limited"; retryAfterSeconds?: number }
+  > {
+    const now = Date.now();
+    const invitation = this.#invitation;
+    const validFormat = /^hbpair1\.[A-Za-z0-9_-]{43}$/.test(token);
+    const matches =
+      validFormat &&
+      invitation &&
+      timingSafeEqual(Buffer.from(shaToken(token), "hex"), Buffer.from(shaToken(invitation.token), "hex"));
+    if (matches && invitation.expiresAt > now) {
+      // Consume synchronously before the first await; concurrent redemptions have one winner.
+      this.#invitation = null;
+      this.#consumedInvitation = shaToken(token);
+      this.#pairFailures.delete(clientKey);
+      const created = await this.devices!.add(name);
+      return { status: "ok", ...created };
+    }
+    const failure = this.#pairFailures.get(clientKey);
+    if (failure && failure.blockedUntil > now)
+      return { status: "rate_limited", retryAfterSeconds: Math.ceil((failure.blockedUntil - now) / 1000) };
+    if (matches && invitation && invitation.expiresAt <= now) {
+      this.#invitation = null;
+      return this.#failedPair(clientKey, "expired");
+    }
+    return this.#failedPair(
+      clientKey,
+      validFormat && !invitation && this.#consumedInvitation === shaToken(token) ? "used" : "invalid",
+    );
+  }
+
+  #failedPair(
+    clientKey: string,
+    status: "invalid" | "expired" | "used",
+  ): { status: "invalid" | "expired" | "used" | "rate_limited"; retryAfterSeconds?: number } {
+    const now = Date.now();
+    if (now >= this.#globalPairWindow.resetAt) this.#globalPairWindow = { count: 0, resetAt: now + 60_000 };
+    this.#globalPairWindow.count++;
+    if (this.#globalPairWindow.count > 1_000) {
+      return { status: "rate_limited", retryAfterSeconds: Math.ceil((this.#globalPairWindow.resetAt - now) / 1_000) };
+    }
+    const previous = this.#pairFailures.get(clientKey);
+    const count = (previous?.count ?? 0) + 1;
+    if (count >= 10) {
+      this.#pairFailures.set(clientKey, { count: 0, blockedUntil: Date.now() + 60_000 });
+      return { status: "rate_limited", retryAfterSeconds: 60 };
+    }
+    this.#pairFailures.set(clientKey, { count, blockedUntil: 0 });
+    return { status };
+  }
+
   #matches(provided: string): boolean {
     if (!this.#expectedDigest) return false;
     const providedDigest = digest(provided);
@@ -88,6 +160,10 @@ export class Authenticator {
       providedDigest.length === this.#expectedDigest.length && timingSafeEqual(providedDigest, this.#expectedDigest)
     );
   }
+}
+
+function shaToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 function digest(value: string): Buffer {
@@ -100,9 +176,19 @@ function extractBearerToken(header: string | undefined): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
-export function createAuthenticator(config: HostConfig): Authenticator {
+function extractCookie(header: string | undefined): string | null {
+  const part = header
+    ?.split(";")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith("__Host-homebase-device="));
+  const value = part?.slice("__Host-homebase-device=".length);
+  return value && /^[A-Za-z0-9._-]{1,128}$/.test(value) ? value : null;
+}
+
+export function createAuthenticator(config: HostConfig, devices?: DeviceState): Authenticator {
   return new Authenticator({
     mode: config.auth.mode,
+    ...(devices ? { devices } : {}),
     ...(config.auth.devToken !== undefined ? { devToken: config.auth.devToken } : {}),
   });
 }

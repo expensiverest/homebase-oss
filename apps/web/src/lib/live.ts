@@ -369,6 +369,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 function handleMessage(message: SseMessage): void {
+  if (message.event === "auth.revoked") {
+    window.dispatchEvent(new Event("homebase:auth-lost"));
+    return;
+  }
   if (message.event === "ready") {
     useLive.getState().setConnection("connected");
     return;

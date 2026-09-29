@@ -20,15 +20,17 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.1",
     "@homebase/adapter-claude": "0.0.1",
     "@homebase/adapter-opencode": "0.0.1",
     "@homebase/adapter-sdk": "0.0.1",
     "@homebase/protocol": "0.0.1",
+    "@hono/node-server": "^2.1.1",
     "hono": "^4.13.9",
+    "qrcode-terminal": "^0.12.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/qrcode-terminal": "^0.12.2",
     "tsx": "^4.23.15"
   }
 }

@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 
@@ -67,6 +68,17 @@ function ProjectRow({ project, onOpen }: { project: AgentProject; onOpen: () => 
 }
 
 export function ProjectsScreen() {
+  const [installHint, setInstallHint] = useState(() => {
+    try {
+      return (
+        sessionStorage.getItem("hb.justPaired") === "1" &&
+        localStorage.getItem("hb.installHintDismissed") !== "1" &&
+        !window.matchMedia("(display-mode: standalone)").matches
+      );
+    } catch {
+      return false;
+    }
+  });
   const navigate = useNavigate();
   const client = useQueryClient();
   const providers = useProviders();
@@ -89,10 +101,39 @@ export function ProjectsScreen() {
                 <ConnectionPill />
               </span>
             }
-            trailing={<ThemeToggle />}
+            trailing={
+              <span className="flex items-center gap-2">
+                <button
+                  className="min-h-11 px-2 text-callout text-muted"
+                  onClick={() => void navigate({ to: "/devices" })}
+                >
+                  Devices
+                </button>
+                <ThemeToggle />
+              </span>
+            }
           />
           <h1 className="mt-4 font-serif text-display text-text">Projects</h1>
           <p className="mt-2 text-row text-muted">Your coding agents, on your computer.</p>
+          {installHint && (
+            <div className="mt-4 rounded-xl bg-surface px-4 py-3 text-callout text-muted">
+              <p>For quick access on iPhone or iPad, use Share → Add to Home Screen.</p>
+              <button
+                className="mt-2 min-h-11 text-accent"
+                onClick={() => {
+                  setInstallHint(false);
+                  try {
+                    localStorage.setItem("hb.installHintDismissed", "1");
+                    sessionStorage.removeItem("hb.justPaired");
+                  } catch {
+                    /* optional hint */
+                  }
+                }}
+              >
+                Got it
+              </button>
+            </div>
+          )}
           <div className="mt-4">
             <ProviderHealth
               providers={providers.data ?? []}

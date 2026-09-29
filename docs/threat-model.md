@@ -1,8 +1,8 @@
 # Threat model (draft)
 
-> Status: Phase 0 draft. Revisit at each phase gate and before public alpha (IMPLEMENTATION_PLAN §25).
+> Status: Phase 5 reassessment. Revisit before public alpha (IMPLEMENTATION_PLAN §25).
 > This model describes assets, trust boundaries, and mitigations for the current implementation plus
-> planned work. "Status" reflects what exists in this repository today.
+> planned work. The original table below is retained as the earlier baseline; the Phase 5 reassessment supersedes its older status labels.
 
 ## 1. System and assets
 
@@ -42,7 +42,7 @@ Assets worth protecting, in order:
 - The local network and public internet are hostile; loopback-only defaults plus a private overlay is
   the expected transport.
 
-## 3. Threat table
+## 3. Threat table (pre-Phase 5 baseline)
 
 | #   | Threat                                                                                               | Impact                                            | Mitigation                                                                                                                                                                                          | Status                                        |
 | --- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
@@ -72,14 +72,19 @@ Assets worth protecting, in order:
 - Compromised developer machine (an attacker with local code execution can read all local state).
 - Multi-user or multi-tenant isolation; Homebase is a single-user control plane in early releases.
 
-## 5. Open items before public alpha
+## 5. Phase 5 reassessment
 
-1. Device pairing, revocation, and scoping exactly as designed in IMPLEMENTATION_PLAN §16.5.
-2. CSP and PWA hardening (no inline agent content, no third-party scripts).
-3. Attachment pipeline threat review (upload limits, MIME sniffing, storage, cleanup).
-4. Local unprivileged process access to loopback API (T17): decide on per-device credentials even for
-   loopback, and document the OS threat model.
-5. Provider output sanitization test suite (hostile Markdown, ANSI/terminal escapes, extremely large
-   tool output) once the PWA renders real provider data.
-6. Rate limiting beyond auth failures (pairing attempts, expensive endpoints).
-7. Fixture/privacy audit and secret scanning across docs and test data.
+- **T3:** Device auth is now the default even on loopback. Tailscale Serve can expose a loopback service, so the non-loopback invariant alone was insufficient. Recommended transport stays private HTTPS Serve with device auth; `none` remains an explicit development mode.
+- **T5:** Each device has 256 bits of random secret, only a SHA-256 digest is persisted, and comparison is constant-time. Failed auth and pairing attempts are throttled. The shared Serve loopback address cannot lock out valid credentials.
+- **T7:** All project, parent/child session, transcript, attachment, action, provider refresh, and SSE routes pass the same auth middleware. Public provider-scoped IDs are routing metadata, not authorization.
+- **T8:** Raw Markdown HTML is disabled, link schemes are filtered, and tool output is text. The permanent cookie is HttpOnly, reducing credential theft if a future rendering bug occurs. CSP blocks inline/eval scripts and external origins. Continued hostile-output testing is needed before public alpha.
+- **T9:** Device auth covers approvals and questions; same-origin mutation checks and single-use provider action handling prevent ordinary cross-site submission and replay. A compromised paired browser still has full single-user control.
+- **T15:** API responses are no-store and the service worker ignores `/api/*`. Auth loss stops the stream, clears the in-memory query cache and live overlays, and removes private screens. Browser memory and OS-level snapshots remain outside app control.
+- **T17:** Loopback requests now require a device credential, materially reducing access from unrelated local processes. The local admin credential is stored in the private user state directory. A malicious process running as the **same OS user** can generally read that user's Homebase state and is outside the meaningful protection boundary. Windows ACLs depend on the selected profile/state directory.
+
+## 6. Open items before public alpha
+
+1. Additional hostile-output and provider fixture privacy audit.
+2. Per-device, burst-friendly limits for expensive agent operations.
+3. Windows ACL verification on shared-account deployments.
+4. Secret scanning and dependency review in CI before public alpha.

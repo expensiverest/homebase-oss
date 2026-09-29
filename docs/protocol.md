@@ -249,3 +249,7 @@ Two Host additions serve the web client without new concepts:
   events (`provider.connected`/`provider.updated`/`provider.disconnected`), and returns the refreshed provider
   list. Clients use it on explicit Retry after a provider was signed out or a server was started; it is not a
   polling endpoint.
+
+# Phase 5 security endpoints
+
+`GET /api/v1/auth/status` returns only mode and authenticated state when unpaired. `POST /api/v1/pairing/redeem` accepts a short-lived invitation and friendly device name, then sets an HttpOnly cookie and returns safe device metadata. `GET/PATCH/DELETE /api/v1/devices` require authentication and never return credential material. The local admin surface uses a separate machine-local key; it is not part of the browser protocol. Public provider-scoped IDs and `parentSessionId`/`childSessionId` remain routing metadata, not authorization. SSE replay keeps its `since` sequence and uses the same cookie as REST.

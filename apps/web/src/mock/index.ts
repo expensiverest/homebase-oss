@@ -51,6 +51,7 @@ export const SCENARIOS = [
   "confirm",
   "agents",
   "long-stream",
+  "auth-unpaired",
 ] as const;
 
 export type Scenario = (typeof SCENARIOS)[number];
@@ -931,6 +932,49 @@ async function handleRequest(input: string, init?: RequestInit): Promise<Respons
   const path = url.pathname;
   const method = (init?.method ?? "GET").toUpperCase();
   const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
+  if (state.scenario === "auth-unpaired") {
+    const paired = sessionStorage.getItem("hb.mockPaired") === "1";
+    const current = {
+      id: "00000000-0000-4000-8000-000000000001",
+      name: sessionStorage.getItem("hb.mockDeviceName") ?? "Phone",
+      createdAt: "2026-09-28T00:00:00.000Z",
+      lastSeenAt: null,
+      revokedAt: null,
+      current: true,
+    };
+    const other = { ...current, id: "00000000-0000-4000-8000-000000000002", name: "Work iPad", current: false };
+    if (path === "/api/v1/auth/status")
+      return json({ mode: "device", authenticated: paired, ...(paired ? { device: current } : {}) });
+    if (path === "/api/v1/pairing/redeem") {
+      const token = String(body?.credential ?? "");
+      const status = token.endsWith("B".repeat(43))
+        ? "expired"
+        : token.endsWith("C".repeat(43)) || sessionStorage.getItem("hb.mockInviteUsed") === "1"
+          ? "used"
+          : token.endsWith("A".repeat(43))
+            ? "ok"
+            : "invalid";
+      if (status !== "ok") return errorResponse(400, `pairing_${status}`, "Invitation unavailable");
+      sessionStorage.setItem("hb.mockInviteUsed", "1");
+      sessionStorage.setItem("hb.mockPaired", "1");
+      sessionStorage.setItem("hb.mockDeviceName", String(body?.name ?? "Phone"));
+      return json({ device: { ...current, name: String(body?.name ?? "Phone") } }, 201);
+    }
+    if (!paired) return errorResponse(401, "invalid_request", "Device pairing required");
+    if (path === "/api/v1/devices" && method === "GET") return json({ devices: [current, other] });
+    const deviceMatch = /^\/api\/v1\/devices\/([^/]+)$/.exec(path);
+    if (deviceMatch && method === "PATCH") {
+      const name = String(body?.name ?? "");
+      if (deviceMatch[1] === current.id) sessionStorage.setItem("hb.mockDeviceName", name);
+      return json({ device: { ...(deviceMatch[1] === current.id ? current : other), name } });
+    }
+    if (deviceMatch && method === "DELETE") {
+      if (deviceMatch[1] === current.id) sessionStorage.removeItem("hb.mockPaired");
+      return json({
+        device: { ...(deviceMatch[1] === current.id ? current : other), revokedAt: new Date().toISOString() },
+      });
+    }
+  }
 
   // Simulates a Host that is up but failing every request (for error states).
   if (state.scenario === "host-error") {
@@ -938,6 +982,7 @@ async function handleRequest(input: string, init?: RequestInit): Promise<Respons
   }
 
   if (path === "/api/v1/health") return json({ status: "ok", version: "0.0.1-mock", latestSequence: state.sequence });
+  if (path === "/api/v1/auth/status") return json({ mode: "none", authenticated: true });
   if (path === "/api/v1/providers") return json({ providers: state.providers });
   if (path === "/api/v1/providers/refresh") return json({ providers: state.providers });
   if (path === "/api/v1/projects") return json({ projects: state.projects });
@@ -1226,6 +1271,7 @@ export function createMockEventSource(since: number): { stream: ReadableStream<U
   const encoder = new TextEncoder();
   let closed = false;
   let unsubscribe: (() => void) | null = null;
+  let unsubscribeRevocation: (() => void) | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -1257,6 +1303,17 @@ export function createMockEventSource(since: number): { stream: ReadableStream<U
       }
 
       send("ready", { latestSequence: state.sequence, protocolVersion: 1 });
+      if (state.scenario === "auth-unpaired") {
+        const revoke = () => {
+          sessionStorage.removeItem("hb.mockPaired");
+          send("auth.revoked", { reason: "device_revoked" });
+          closed = true;
+          unsubscribe?.();
+          controller.close();
+        };
+        window.addEventListener("homebase:mock-remote-revoke", revoke, { once: true });
+        unsubscribeRevocation = () => window.removeEventListener("homebase:mock-remote-revoke", revoke);
+      }
 
       const replayFrom = since;
       if (state.scenario === "resync") {
@@ -1273,6 +1330,7 @@ export function createMockEventSource(since: number): { stream: ReadableStream<U
     cancel() {
       closed = true;
       unsubscribe?.();
+      unsubscribeRevocation?.();
     },
   });
 
@@ -1281,6 +1339,7 @@ export function createMockEventSource(since: number): { stream: ReadableStream<U
     close: () => {
       closed = true;
       unsubscribe?.();
+      unsubscribeRevocation?.();
     },
   };
 }
@@ -1290,6 +1349,8 @@ function mockTransport(): Transport {
     fetch: async (input, init) => {
       const url = new URL(input, window.location.origin);
       if (url.pathname === "/api/v1/events") {
+        if (state.scenario === "auth-unpaired" && sessionStorage.getItem("hb.mockPaired") !== "1")
+          return errorResponse(401, "invalid_request", "Device pairing required");
         const source = createMockEventSource(Number.parseInt(url.searchParams.get("since") ?? "0", 10) || 0);
         return new Response(source.stream, { status: 200, headers: { "content-type": "text/event-stream" } });
       }
