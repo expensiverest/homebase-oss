@@ -598,7 +598,7 @@ Projects belong to Homebase, not to any single provider.
 The Host owns configured project roots, for example:
 
 ```text
-C:\Users\Daniel\Projects
+C:\Users\me\Projects
 D:\Work
 ~/Developer
 ```
@@ -946,6 +946,7 @@ Remote exposure must require an explicit configuration step.
 ## 16.2 Initial remote-network recommendation
 
 Tailscale is the recommended remote access path for early releases.
+Phase 5 uses Tailscale Serve to proxy the loopback Host through a private tailnet HTTPS hostname. Funnel is public and is not recommended. Homebase device auth remains required on top of the tailnet; Tailscale identity headers are not used as application credentials.
 
 Do not instruct users to expose Homebase directly to the public internet with router port forwarding.
 
@@ -985,6 +986,8 @@ Track:
 
 Do not use one permanent shared token copied manually between devices as the final public UX.
 
+**Phase 5 implementation:** `auth.mode: "device"` is the normal default. The Host creates a private, machine-local admin key in `~/.homebase` (or `HOMEBASE_STATE_DIR`). `homebase pair` authenticates to a loopback management endpoint, receives a five-minute, in-memory, 256-bit invitation, and prints a local QR for a private HTTPS Serve URL. The one-time secret is in the URL fragment and is removed from browser history before a POST. Redemption consumes it atomically, generates a versioned 256-bit per-device credential, persists only its SHA-256 digest, and sets a Secure, HttpOnly, SameSite=Strict `__Host-` cookie. Device revoke invalidates REST and closes active SSE. Local `homebase devices` and `homebase revoke` recover access after loss. `none` and `dev-token` remain explicit development modes.
+
 ## 16.6 Web security requirements
 
 At minimum:
@@ -1014,6 +1017,7 @@ Provider sessions/transcripts should remain provider-owned whenever possible.
 Homebase persistence should initially be limited to data Homebase itself owns, such as:
 
 - paired devices
+- a local admin key and versioned security state (atomic private JSON; no raw device secret)
 - project registry
 - provider settings
 - host settings
@@ -1022,6 +1026,7 @@ Homebase persistence should initially be limited to data Homebase itself owns, s
 - lightweight normalized metadata cache if needed
 
 Do not duplicate complete provider conversation histories into Homebase storage unless there is a clear requirement.
+For the small Phase 5 security record set, atomic JSON is sufficient; SQLite remains appropriate if future durable state grows. Corrupt or future-version security state fails startup closed.
 
 ---
 
@@ -1384,6 +1389,8 @@ From a phone-sized browser, a user can select a project, open/create a session, 
 
 ## Phase 5 — Security and device pairing
 
+**Status:** implemented on the Phase 5 review branch; pending PR/CI review before merge.
+
 ### Tasks
 
 - localhost-only default bind
@@ -1401,6 +1408,7 @@ From a phone-sized browser, a user can select a project, open/create a session, 
 ### Exit criteria
 
 No manual permanent token copy is required for normal setup, and all remote control requires an explicitly paired device.
+Browser auth is cookie-based to support WebKit's iOS/iPadOS 17.2+ Home Screen cookie handoff. Earlier iOS versions may require pairing again inside the installed app.
 
 ## Phase 6 — Generic ACP transport + Grok + Gemini
 
@@ -1596,6 +1604,8 @@ That is the product Homebase is being built to deliver.
 
 Changes to this plan are recorded here with the reason. Implementation and plan must not silently
 diverge (rule 17).
+
+- **2026-09-28 — Phase 5 architecture:** Default authentication changed to `device`, including on loopback because Serve can proxy loopback. The permanent browser credential moved from the planned JS bearer injection to a Secure HttpOnly cookie. Pair invitations use a URL fragment and POST redemption; the CLI uses a separate machine-local admin key. Device records use versioned atomic JSON with only SHA-256 digests. Serve, not Funnel, is the recommended private HTTPS path. Browser/PWA seamless cookie handoff begins with iOS/iPadOS 17.2. Phase 4.3 viewport containment remains, but user zoom has been restored.
 
 - **2026-09-27 — Phase 0/1 implementation refinements.**
   - **§7.1:** added `unknown` to `AgentSession.state`. Transcript-backed providers cannot always report

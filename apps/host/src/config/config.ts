@@ -26,11 +26,11 @@ export const hostConfigSchema = z.object({
   projectScanDepth: z.number().int().min(1).max(8).default(3),
   auth: z
     .object({
-      mode: z.enum(["none", "dev-token"]).default("none"),
-      /** Required for `dev-token`; at least 32 characters. Replace in Phase 5 by pairing. */
+      mode: z.enum(["none", "dev-token", "device"]).default("device"),
+      /** Required only for explicit `dev-token` mode; at least 32 characters. */
       devToken: z.string().min(32).max(4_096).optional(),
     })
-    .default(() => ({ mode: "none" as const })),
+    .default(() => ({ mode: "device" as const })),
   providers: z.record(z.string(), providerConfigSchema).default({}),
 });
 export type HostConfig = z.infer<typeof hostConfigSchema>;
@@ -79,6 +79,7 @@ function applyEnvOverrides(raw: Record<string, unknown>, env: NodeJS.ProcessEnv)
     auth.devToken = env.HOMEBASE_DEV_TOKEN;
     auth.mode = "dev-token";
   }
+  if (env.HOMEBASE_AUTH_MODE) auth.mode = env.HOMEBASE_AUTH_MODE;
   if (env.HOMEBASE_PROJECT_ROOTS) {
     result.projectRoots = env.HOMEBASE_PROJECT_ROOTS.split(path.delimiter).filter((entry) => entry.trim().length > 0);
   }

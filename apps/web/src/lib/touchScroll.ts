@@ -15,26 +15,15 @@ export function canScrollInside(element: Element | null, boundary: Element | nul
 }
 
 /**
- * Blocks page-level touch panning and page zoom; returns a cleanup. Scrollers keep working.
- *
- * iOS (Safari and standalone PWAs) can still pinch-zoom a page that says `user-scalable=no`, so
- * multi-finger touches are cancelled outright and the WebKit-only `gesture*` events are stopped.
+ * Blocks one-finger page panning; multi-finger gestures remain available for accessibility zoom.
  */
 export function lockPagePanning(target: Document = document): () => void {
   const onTouchMove = (event: TouchEvent) => {
-    if (event.touches.length > 1) {
-      event.preventDefault(); // a pinch: never zoom the page
-      return;
-    }
+    if (event.touches.length > 1) return;
     if (!canScrollInside(event.target instanceof Element ? event.target : null)) event.preventDefault();
   };
-  const stop = (event: Event) => event.preventDefault();
   target.addEventListener("touchmove", onTouchMove, { passive: false });
-  for (const name of ["gesturestart", "gesturechange", "gestureend"]) {
-    target.addEventListener(name, stop, { passive: false });
-  }
   return () => {
     target.removeEventListener("touchmove", onTouchMove);
-    for (const name of ["gesturestart", "gesturechange", "gestureend"]) target.removeEventListener(name, stop);
   };
 }

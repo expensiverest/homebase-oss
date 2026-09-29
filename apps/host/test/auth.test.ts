@@ -28,8 +28,8 @@ describe("Authenticator", () => {
     expect(auth.authenticate("Bearer wrong", "client").status).toBe(401);
     expect(auth.authenticate("Bearer wrong", "client").status).toBe(401);
     expect(auth.authenticate("Bearer wrong", "client").status).toBe(429);
-    // Even the correct token is refused while the client key is locked out.
-    expect(auth.authenticate(`Bearer ${TOKEN}`, "client").status).toBe(429);
+    // A bad actor sharing the Serve loopback address cannot lock out a valid credential.
+    expect(auth.authenticate(`Bearer ${TOKEN}`, "client").ok).toBe(true);
 
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(auth.authenticate(`Bearer ${TOKEN}`, "client").ok).toBe(true);

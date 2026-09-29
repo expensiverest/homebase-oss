@@ -33,6 +33,7 @@ export interface TestHostOptions {
   eventBufferSize?: number;
   /** Absolute path to a built web client, or null to disable static serving. */
   webDistPath?: string | null;
+  stateDir?: string;
 }
 
 export interface TestHost {
@@ -70,6 +71,7 @@ export async function createTestHost(options: TestHostOptions = {}): Promise<Tes
   const config = hostConfigSchema.parse({
     host: { port: 0, bindAddress: "127.0.0.1", logLevel: "error" },
     projectRoots: [rootDir],
+    auth: { mode: "none" },
     ...options.config,
   });
 
@@ -79,6 +81,7 @@ export async function createTestHost(options: TestHostOptions = {}): Promise<Tes
     git: fakeGitReader,
     eventBufferSize: options.eventBufferSize ?? 200,
     webDistPath: options.webDistPath ?? null,
+    ...(options.stateDir ? { stateDir: options.stateDir } : {}),
     logger: createConsoleLogger("host-test", { level: "error", sink: silentSink }),
   });
 

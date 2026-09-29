@@ -6,26 +6,29 @@
 Homebase remotely controls software that can read files, modify repositories, and run shell commands.
 Security is architecture, not polish; unsafe defaults are bugs.
 
-## Current guarantees (Phase 0/1)
+## Current guarantees (Phase 5)
 
 ### Network exposure
 
 - The Host binds to `127.0.0.1` by default.
-- Configuration validation **refuses to start** when `host.bindAddress` is not loopback and
-  `auth.mode` is `"none"`. A non-loopback bind requires an explicit `dev-token` today and device
-  authentication after Phase 5.
+- Device auth is the default even on loopback. `auth.mode: "none"` is an explicit development choice; non-loopback with `none` refuses startup. A loopback Host can still be exposed by a proxy, so the recommended Serve path must retain device auth.
 - All `/api/*` responses are `cache-control: no-store`.
 - Health is reachable without authentication but contains only status, version, uptime, and the latest
   event sequence — no project names, provider credentials, or configuration.
 
-### Authentication (Phase 1 placeholder)
+### Authentication and pairing
 
-- `auth.mode: "none"` is only safe because of the loopback invariant above.
+- `auth.mode: "device"` is the default. `none` and `dev-token` remain explicit development modes.
 - `auth.mode: "dev-token"` requires a token of at least 32 characters, compared in constant time over
   SHA-256 digests. Tokens are sent in the `Authorization: Bearer` header only, never in query strings.
 - Repeated failures per client key are throttled with `429` and `retry-after`.
-- Phase 5 replaces the shared token with `homebase pair`: a short-lived single-use pairing credential
-  exchanged for a revocable per-device credential (device id, name, created/last-seen, revoked).
+- `homebase pair` uses a private machine-local 256-bit admin key to request an invitation through a loopback-only management endpoint. Admin endpoints also reject `Origin` and reverse-proxy forwarding headers, even when a proxy connects from loopback. The admin key is never sent to a browser or printed.
+- Invitations are 256-bit random, last five minutes, live only in Host memory, and are consumed before asynchronous device creation. Creating another invitation invalidates the previous one. Invalid attempts have per-client throttling. The QR URL puts the one-time secret in a fragment; the browser removes it from history and POSTs it in a small, strict JSON body.
+- Permanent credentials have the form `hbdev1.<public UUID>.<256-bit secret>`. The state file stores only a SHA-256 digest and metadata. Verification uses constant-time comparison. The browser receives the secret only as `__Host-homebase-device`, with `Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000` and no Domain. A successful auth-status bootstrap refreshes this one-year browser lifetime; server-side revocation remains authoritative. Browsers or users may remove cookies earlier. JS never reads it.
+- `GET /api/v1/auth/status` reveals only mode, paired state, and current-device metadata. The private devices API lists safe metadata, renames, and revokes. A current-device revoke clears the cookie. Any revoke terminates that device's SSE stream and blocks subsequent REST, attachment, session, action, and child-session calls.
+- `HOMEBASE_STATE_DIR` overrides `~/.homebase`. State is schema-versioned JSON written through a private temporary file and atomic rename; corrupt or future-version state fails startup closed. POSIX files use mode 0600 and the directory 0700. Windows file ACLs are inherited from the account's profile/selected directory; operators should choose a private directory on shared Windows machines.
+- The Host throttles failed authentication and pairing (10 failures per client and a high global invalid-pairing ceiling). Valid credentials are checked before per-client lockout so a bad request through Serve's shared loopback address cannot lock out a paired device. Expensive agent-command throttling remains a later hardening item.
+- Cookie mutations check `Origin` when present against the browser-visible origin, reject cross-site Fetch Metadata, and require `X-Homebase-Client: 1`. To support local Tailscale Serve, `X-Forwarded-Proto` and `X-Forwarded-Host` reconstruct that origin only when the actual socket peer is loopback; malformed or incomplete trusted forwarding headers fail closed. Direct non-loopback clients cannot redefine their origin with forwarded headers. No permissive CORS is enabled. Local admin requests use a separate header and reject browser Origin and proxy forwarding headers.
 
 ### Project paths
 
@@ -83,18 +86,14 @@ This is the most important boundary in the product:
   logged server-side only.
 - No third-party scripts, analytics, or CDNs anywhere in the stack.
 
-## Planned (Phases 4–5, release-blocking)
+## Remaining hardening
 
-- Pairing with QR flow, one-time credentials, and device revocation.
-- Strict CSP for the PWA; Markdown sanitization that never renders raw agent HTML; tool output escaping.
-- Rate limiting for pairing, auth failures, and expensive actions.
-- Security headers on the served PWA.
-- Fixture privacy audit and secret scan in CI.
+- Generic per-device limits for costly agent operations and further hostile-content regression coverage.
+- A fixture privacy audit and automated secret scan remain CI responsibilities.
 
 ## Remote access guidance
 
-- Use a private network such as **Tailscale**. Do not port-forward Homebase to the public internet and
-  do not enable a public relay.
+- Use private **Tailscale Serve** over HTTPS. Do not use Funnel, port forwarding, or a public relay. See [remote-access.md](remote-access.md).
 - Tailscale (or an equivalent private overlay) is transport privacy, not a substitute for authentication:
   device pairing is still required before remote control is allowed.
 
@@ -103,9 +102,9 @@ This is the most important boundary in the product:
 - The browser receives provider-neutral data only: no provider credentials, no native payloads, no
   provider-owned error strings. Model output is rendered as Markdown without raw HTML; Shiki highlights code
   from escaped source text, and remote images inside model output are not fetched.
-- Credentials, when Phase 5 adds them, flow through one transport injection point shared by REST and SSE. The
-  client never places tokens in URLs or query strings; native `EventSource` is deliberately unused because it
-  cannot send an `Authorization` header.
+- Paired credentials live only in HttpOnly cookies and flow automatically to same-origin REST and fetch-based SSE. The old bearer injection point is limited to explicit dev-token compatibility. No permanent token enters browser storage or URL.
+- WebKit copies website cookies, but not arbitrary local storage, when a Home Screen app is created on iOS/iPadOS 17.2 and later. This supports Safari → PWA pairing handoff; earlier versions may require pairing inside the installed app.
+- Production responses set a strict CSP with `script-src 'self'` and no inline or eval scripts, plus nosniff, no-referrer, frame denial, Permissions Policy, COOP, CORP, and HSTS. `style-src 'unsafe-inline'` remains for current React inline styles and dynamic layout values. The pre-paint theme script is a same-origin file.
 - Attachment bytes are fetched with the same credentials and exposed through object URLs that are revoked on
   unmount. Attachment text is never persisted locally, and the query cache is memory-only.
 - The service worker caches app-shell assets only. `/api/*`, the event stream, transcripts, approvals,

@@ -12,6 +12,9 @@ export const agentErrorCodeSchema = z.enum([
   "not_found",
   "conflict",
   "rate_limited",
+  "pairing_invalid",
+  "pairing_expired",
+  "pairing_used",
 
   "project_not_found",
   "project_not_allowed",

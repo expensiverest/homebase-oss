@@ -15,6 +15,7 @@ const HEARTBEAT_MS = 15_000;
  *   client to refetch instead of pretending it can catch up.
  */
 export function sseEventsHandler(c: Context, deps: ApiDependencies): Response {
+  const principal = c.get("principal") as { kind: string; deviceId?: string };
   const rawSince = c.req.header("last-event-id") ?? c.req.query("since");
   const parsedSince = rawSince !== undefined && rawSince !== "" ? Number.parseInt(rawSince, 10) : Number.NaN;
   const since = Number.isFinite(parsedSince) ? Math.max(0, parsedSince) : undefined;
@@ -25,6 +26,21 @@ export function sseEventsHandler(c: Context, deps: ApiDependencies): Response {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
+      let unsubscribeRevocation: (() => void) | undefined;
+      let unsubscribe = () => {};
+
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        clearInterval(heartbeat);
+        unsubscribe();
+        unsubscribeRevocation?.();
+        try {
+          controller.close();
+        } catch {
+          /* client already closed */
+        }
+      };
 
       const write = (chunk: string) => {
         if (closed) return;
@@ -46,25 +62,28 @@ export function sseEventsHandler(c: Context, deps: ApiDependencies): Response {
         send("resync", { droppedBefore: bus.droppedBefore, latestSequence: bus.latestSequence });
       }
 
-      const unsubscribe = bus.subscribe(
+      unsubscribe = bus.subscribe(
         (event) => send(event.type, event, event.sequence),
         since !== undefined ? { since } : {},
       );
       send("ready", { latestSequence: bus.latestSequence, protocolVersion: HOMEBASE_PROTOCOL_VERSION });
 
-      const heartbeat = setInterval(() => write(": heartbeat\n\n"), HEARTBEAT_MS);
-
-      const close = () => {
-        if (closed) return;
-        closed = true;
-        clearInterval(heartbeat);
-        unsubscribe();
-        try {
-          controller.close();
-        } catch {
-          // The stream was already closed by the client.
+      if (principal.kind === "device" && principal.deviceId) {
+        const id = principal.deviceId;
+        unsubscribeRevocation = deps.devices?.onRevoke((revokedId) => {
+          if (revokedId === id) {
+            send("auth.revoked", { reason: "device_revoked" });
+            close();
+          }
+        });
+      }
+      const heartbeat = setInterval(() => {
+        if (principal.kind === "device" && principal.deviceId && deps.devices?.get(principal.deviceId)?.revokedAt) {
+          close();
+          return;
         }
-      };
+        write(": heartbeat\n\n");
+      }, HEARTBEAT_MS);
 
       c.req.raw.signal.addEventListener("abort", close, { once: true });
     },

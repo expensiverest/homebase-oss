@@ -7,7 +7,7 @@ Claude Code, OpenCode, Grok Build, Gemini CLI, Codex CLI, GitHub Copilot CLI, an
 mobile experience for projects, sessions, streaming output, approvals, questions, diffs, models, and usage.
 
 > **Status: pre-alpha (0.0.x).** The provider-neutral protocol, adapter SDK, Host core, OpenCode and Claude Code
-> adapters, and the Phase 4 mobile web client (installable PWA) are being built in the open. No public release exists
+> adapters, and the Phase 5 device-paired mobile web client (installable PWA) are being built in the open. No public release exists
 > yet. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the authoritative plan and
 > [docs/web-client.md](docs/web-client.md) for the client architecture.
 
@@ -48,7 +48,8 @@ Homebase; the provider CLIs authenticate themselves, on your machine, exactly as
 ## Security posture
 
 - The Host binds to `127.0.0.1` by default. Public-internet exposure is never the default and is not recommended.
-- For remote access, use a private network such as **Tailscale**. Do not port-forward Homebase to the public internet.
+- Device authentication is the default, including on loopback. Run `homebase pair` on the Host to pair a browser; the permanent credential is an HttpOnly cookie and each device can be revoked.
+- For remote access, use **Tailscale Serve** over the private tailnet: `tailscale serve --bg 8787`, then `homebase pair`. See [remote-access.md](docs/remote-access.md). Never use Funnel or port forwarding.
 - Projects are resolved from a Host-owned registry. The browser cannot submit an arbitrary filesystem path to start
   an agent.
 - See [SECURITY.md](SECURITY.md) and `docs/security.md` for details.
@@ -64,7 +65,7 @@ npm test
 npm run dev:host
 ```
 
-The Host prints its local URL when it starts. Health check:
+The Host prints its local URL when it starts. For unauthenticated development, explicitly set `HOMEBASE_AUTH_MODE=none` while keeping the Host loopback-bound. Health check:
 
 ```bash
 curl http://127.0.0.1:8787/api/v1/health
@@ -78,6 +79,7 @@ curl http://127.0.0.1:8787/api/v1/health
 - [docs/adapters.md](docs/adapters.md) — adapter SDK and compliance suite
 - [docs/private-homebase-reuse-map.md](docs/private-homebase-reuse-map.md) — audit of the private reference implementation
 - [docs/security.md](docs/security.md) — security model
+- [docs/remote-access.md](docs/remote-access.md) — Tailscale Serve and pairing
 - [docs/threat-model.md](docs/threat-model.md) — threat model draft
 
 ## License

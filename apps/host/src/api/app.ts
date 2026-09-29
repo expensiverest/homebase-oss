@@ -1,7 +1,7 @@
 import { bodyLimit } from "hono/body-limit";
 import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import type { z, ZodType } from "zod";
+import { z, type ZodType } from "zod";
 
 import type { AdapterLogger } from "@homebase/adapter-sdk";
 import {
@@ -20,6 +20,12 @@ import {
 import { getConnInfo } from "@hono/node-server/conninfo";
 
 import type { Authenticator } from "../auth/index.js";
+import {
+  deviceCredentialFromCookie,
+  serializeDeviceCookie,
+  serializeExpiredDeviceCookie,
+  type DeviceState,
+} from "../auth/index.js";
 import { ATTACHMENT_MAX_FILES_PER_UPLOAD, type AttachmentStore } from "../attachments/index.js";
 import type { HostConfig } from "../config/index.js";
 import { errorBody, HostError, normalizeError } from "../errors.js";
@@ -29,6 +35,7 @@ import type { ProviderRegistry } from "../providers/index.js";
 import type { SessionService } from "../sessions/index.js";
 import { createStaticWebHandler } from "../static.js";
 import { sseEventsHandler } from "./sse.js";
+import { isLoopbackAddress, resolveRequestOrigin } from "./request-origin.js";
 
 export interface ApiDependencies {
   version: string;
@@ -40,6 +47,7 @@ export interface ApiDependencies {
   sessions: SessionService;
   attachments: AttachmentStore;
   auth: Authenticator;
+  devices?: DeviceState;
   logger: AdapterLogger;
   /** Absolute path to the built web client; enables static serving when set. */
   webDist?: string | null;
@@ -48,6 +56,7 @@ export interface ApiDependencies {
 export interface ApiEnv {
   Variables: {
     requestId: string;
+    principal: { kind: "none" | "dev-token" } | { kind: "device"; deviceId: string };
   };
 }
 
@@ -63,11 +72,53 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
 
+  app.use("*", async (c, next) => {
+    await next();
+    c.header(
+      "content-security-policy",
+      "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'; img-src 'self' blob: data:; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    );
+    c.header("x-content-type-options", "nosniff");
+    c.header("referrer-policy", "no-referrer");
+    c.header("x-frame-options", "DENY");
+    c.header("permissions-policy", "camera=(), microphone=(), geolocation=(), payment=()");
+    c.header("cross-origin-opener-policy", "same-origin");
+    c.header("cross-origin-resource-policy", "same-origin");
+    c.header("strict-transport-security", "max-age=31536000");
+  });
+
   app.use("/api/*", async (c, next) => {
     c.set("requestId", crypto.randomUUID());
     await next();
     c.header("cache-control", "no-store");
     c.header("x-content-type-options", "nosniff");
+  });
+
+  // Same-origin browser mutations only. A custom header adds a preflight barrier,
+  // while Origin and Fetch Metadata reject cross-site form and fetch requests.
+  app.use("/api/*", async (c, next) => {
+    if (deps.auth.mode !== "device" || ["GET", "HEAD", "OPTIONS"].includes(c.req.method)) return next();
+    const origin = c.req.header("origin");
+    const site = c.req.header("sec-fetch-site");
+    const expected = resolveRequestOrigin({
+      requestUrl: c.req.url,
+      peerIsLoopback: isLocalClient(c),
+      forwardedProto: c.req.raw.headers.get("x-forwarded-proto"),
+      forwardedHost: c.req.raw.headers.get("x-forwarded-host"),
+    });
+    if (!expected || (origin && origin !== expected) || (site && !["same-origin", "none"].includes(site))) {
+      return c.json(
+        errorBody(new HostError("invalid_request", "Cross-origin mutation rejected."), c.get("requestId")),
+        403,
+      );
+    }
+    if (!c.req.path.startsWith("/api/v1/admin/") && c.req.header("x-homebase-client") !== "1") {
+      return c.json(
+        errorBody(new HostError("invalid_request", "Homebase client header required."), c.get("requestId")),
+        403,
+      );
+    }
+    return next();
   });
 
   const jsonLimit = bodyLimit({
@@ -84,10 +135,15 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
   // Authentication. Health stays reachable for local diagnostics; it never
   // contains secrets or project data.
   app.use("/api/*", async (c, next) => {
-    if (deps.auth.mode === "none") return next();
-    if (c.req.path === "/api/v1/health") return next();
+    if (
+      c.req.path === "/api/v1/health" ||
+      c.req.path === "/api/v1/auth/status" ||
+      c.req.path === "/api/v1/pairing/redeem" ||
+      c.req.path.startsWith("/api/v1/admin/")
+    )
+      return next();
 
-    const decision = deps.auth.authenticate(c.req.header("authorization"), clientKey(c));
+    const decision = deps.auth.authenticate(c.req.header("authorization"), clientKey(c), c.req.header("cookie"));
     if (!decision.ok) {
       if (decision.retryAfterSeconds !== undefined) {
         c.header("retry-after", String(decision.retryAfterSeconds));
@@ -97,6 +153,7 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
       });
       return c.json(errorBody(error, c.get("requestId")), error.status as ContentfulStatusCode);
     }
+    c.set("principal", decision.principal!);
     return next();
   });
 
@@ -123,6 +180,115 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
       latestSequence: deps.bus.latestSequence,
     }),
   );
+
+  app.get("/api/v1/auth/status", (c) => {
+    if (deps.auth.mode === "device" && !c.req.header("cookie")) return c.json({ mode: "device", authenticated: false });
+    const result = deps.auth.authenticate(c.req.header("authorization"), clientKey(c), c.req.header("cookie"));
+    const device = result.principal?.kind === "device" ? deps.devices?.get(result.principal.deviceId) : undefined;
+    if (result.ok && result.principal?.kind === "device") {
+      const credential = deviceCredentialFromCookie(c.req.header("cookie"));
+      if (credential) c.header("set-cookie", serializeDeviceCookie(credential));
+    }
+    return c.json({ mode: deps.auth.mode, authenticated: result.ok, ...(device ? { device } : {}) });
+  });
+
+  const smallLimit = bodyLimit({
+    maxSize: 4096,
+    onError: (c) =>
+      c.json(errorBody(new HostError("invalid_request", "Request body is too large."), c.get("requestId")), 413),
+  });
+  const nameSchema = z
+    .object({
+      name: z
+        .string()
+        .trim()
+        .min(1)
+        .max(64)
+        .refine((name) =>
+          [...name].every((character) => character.charCodeAt(0) > 31 && character.charCodeAt(0) !== 127),
+        ),
+    })
+    .strict();
+  app.post("/api/v1/pairing/redeem", smallLimit, async (c) => {
+    if (deps.auth.mode !== "device") throw new HostError("not_found", "Pairing is not enabled.", { status: 404 });
+    const body = await parseBody(
+      c,
+      nameSchema.extend({ credential: z.string().regex(/^hbpair1\.[A-Za-z0-9_-]{43}$/) }),
+    );
+    const result = await deps.auth.redeem(body.credential, body.name, clientKey(c));
+    if (result.status !== "ok") {
+      if (result.retryAfterSeconds) c.header("retry-after", String(result.retryAfterSeconds));
+      return c.json(
+        {
+          error: {
+            code: result.status === "rate_limited" ? "rate_limited" : `pairing_${result.status}`,
+            message:
+              result.status === "rate_limited" ? "Try again later." : "Pairing invitation is invalid or expired.",
+            requestId: c.get("requestId"),
+          },
+        },
+        result.status === "rate_limited" ? 429 : 400,
+      );
+    }
+    c.header("set-cookie", serializeDeviceCookie(result.credential));
+    return c.json({ device: result.device }, 201);
+  });
+
+  app.use("/api/v1/admin/*", async (c, next) => {
+    if (
+      !deps.devices ||
+      c.req.header("origin") ||
+      ["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "forwarded"].some((header) =>
+        c.req.raw.headers.has(header),
+      ) ||
+      !isLocalClient(c) ||
+      !deps.devices.checkAdmin(c.req.header("x-homebase-admin"))
+    ) {
+      return c.json(
+        errorBody(
+          new HostError("invalid_request", "Local admin authorization required.", { status: 401 }),
+          c.get("requestId"),
+        ),
+        401,
+      );
+    }
+    return next();
+  });
+  app.post("/api/v1/admin/pair", smallLimit, (c) => c.json(deps.auth.createInvitation(), 201));
+  app.get("/api/v1/admin/devices", (c) => c.json({ devices: deps.devices!.list() }));
+  app.delete("/api/v1/admin/devices/:deviceId", async (c) => {
+    const device = await deps.devices!.revoke(c.req.param("deviceId"));
+    if (!device) throw new HostError("not_found", "Device not found.", { status: 404 });
+    return c.json({ device });
+  });
+
+  app.get("/api/v1/devices", (c) => {
+    const principal = c.get("principal");
+    return c.json({
+      devices:
+        deps.devices
+          ?.list()
+          .map((device) => ({ ...device, current: principal.kind === "device" && principal.deviceId === device.id })) ??
+        [],
+    });
+  });
+  app.patch("/api/v1/devices/:deviceId", smallLimit, async (c) => {
+    if (!deps.devices) throw new HostError("not_found", "Devices unavailable.", { status: 404 });
+    const body = await parseBody(c, nameSchema);
+    const device = await deps.devices.rename(c.req.param("deviceId"), body.name);
+    if (!device) throw new HostError("not_found", "Device not found.", { status: 404 });
+    return c.json({ device });
+  });
+  app.delete("/api/v1/devices/:deviceId", async (c) => {
+    if (!deps.devices) throw new HostError("not_found", "Devices unavailable.", { status: 404 });
+    const id = c.req.param("deviceId");
+    const device = await deps.devices.revoke(id);
+    if (!device) throw new HostError("not_found", "Device not found.", { status: 404 });
+    const principal = c.get("principal");
+    if (principal.kind === "device" && principal.deviceId === id)
+      c.header("set-cookie", serializeExpiredDeviceCookie());
+    return c.json({ device });
+  });
 
   app.get("/api/v1/providers", (c) => c.json({ providers: deps.providers.listProviders() }));
 
@@ -353,5 +519,14 @@ function clientKey(c: Context): string {
     return info.remote.address ?? "unknown";
   } catch {
     return "local";
+  }
+}
+
+function isLocalClient(c: Context): boolean {
+  try {
+    return isLoopbackAddress(getConnInfo(c).remote.address);
+  } catch {
+    // In-process requests have no transport peer and cannot claim proxy trust.
+    return false;
   }
 }

@@ -44,6 +44,12 @@ describe("static web serving", () => {
     expect(root.status).toBe(200);
     expect(root.headers.get("content-type")).toContain("text/html");
     expect(await root.text()).toContain("Homebase shell");
+    expect(root.headers.get("content-security-policy")).toContain("script-src 'self'");
+    expect(root.headers.get("content-security-policy")).not.toContain("unsafe-eval");
+    expect(root.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(root.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(root.headers.get("x-frame-options")).toBe("DENY");
+    expect(root.headers.get("permissions-policy")).toContain("camera=()");
 
     const deepLink = await host.runtime.app.request("/s/ses_whatever");
     expect(deepLink.status).toBe(200);

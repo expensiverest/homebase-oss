@@ -37,6 +37,7 @@ import {
 import { z } from "zod";
 
 import { authHeaders, getTransport } from "./transport.js";
+import type { Device } from "./auth.js";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -62,6 +63,7 @@ interface RequestOptions<T> {
 async function request<T>(path: string, options: RequestOptions<T> = {}): Promise<T> {
   const headers: Record<string, string> = { ...authHeaders() };
   const init: RequestInit = { method: options.method ?? "GET", headers, signal: options.signal };
+  if (init.method !== "GET") headers["x-homebase-client"] = "1";
   if (options.body !== undefined) {
     headers["content-type"] = "application/json";
     init.body = JSON.stringify(options.body);
@@ -136,6 +138,13 @@ export interface ListPage<T> {
 /** One typed, provider-neutral API client used by every screen. */
 export const api = {
   health: () => request<{ status: string; version: string; latestSequence: number }>("/api/v1/health"),
+  devices: () => request<{ devices: Device[] }>("/api/v1/devices"),
+  renameDevice: (id: string, name: string) =>
+    request<{ device: Device }>(`/api/v1/devices/${encodeURIComponent(id)}`, { method: "PATCH", body: { name } }),
+  revokeDevice: (id: string) =>
+    request<{ device: Device }>(`/api/v1/devices/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  redeemPair: (credential: string, name: string) =>
+    request<{ device: Device }>("/api/v1/pairing/redeem", { method: "POST", body: { credential, name } }),
 
   providers: () => request("/api/v1/providers", { schema: providersSchema }).then((body) => body.providers),
   refreshProviders: () =>
@@ -250,7 +259,7 @@ export const api = {
     const response = await getTransport().fetch("/api/v1/attachments", {
       method: "POST",
       body: form,
-      headers: { ...authHeaders() },
+      headers: { ...authHeaders(), "x-homebase-client": "1" },
     });
     const json = (await response.json().catch(() => null)) as unknown;
     const parsed = attachmentsSchema.safeParse(json);

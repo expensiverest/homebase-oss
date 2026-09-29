@@ -92,3 +92,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+# QR pairing
+
+The Host CLI uses `qrcode-terminal` 0.12.0 by Gord Tanner and contributors (Apache-2.0) to render QR codes locally. Its license is included with the installed package. Pairing URLs are never sent to a QR service.

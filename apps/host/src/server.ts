@@ -9,7 +9,7 @@ import path from "node:path";
 import type { Hono } from "hono";
 
 import { createApiApp, type ApiEnv } from "./api/index.js";
-import { createAuthenticator, type Authenticator } from "./auth/index.js";
+import { createAuthenticator, DeviceState, type Authenticator } from "./auth/index.js";
 import { AttachmentStore } from "./attachments/index.js";
 import type { HostConfig } from "./config/index.js";
 import { EventBus } from "./events/index.js";
@@ -30,6 +30,7 @@ export interface CreateHostRuntimeOptions {
   eventBufferSize?: number;
   /** Absolute path to a built web client; defaults to apps/web/dist when present. */
   webDistPath?: string | null;
+  stateDir?: string;
 }
 
 export interface HostRuntime {
@@ -40,6 +41,7 @@ export interface HostRuntime {
   readonly sessions: SessionService;
   readonly attachments: AttachmentStore;
   readonly auth: Authenticator;
+  readonly devices?: DeviceState;
   readonly app: Hono<ApiEnv>;
   start(): Promise<{ hostname: string; port: number }>;
   close(): Promise<void>;
@@ -109,7 +111,8 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
   await providers.initialize();
 
   const sessions = new SessionService({ providers, projects, bus, logger });
-  const auth = createAuthenticator(config);
+  const devices = config.auth.mode === "device" ? await DeviceState.open(options.stateDir) : undefined;
+  const auth = createAuthenticator(config, devices);
   const attachments = new AttachmentStore();
 
   const defaultWebDist = path.resolve(fileURLToPath(new URL("../../web/dist", import.meta.url)));
@@ -132,6 +135,7 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     sessions,
     attachments,
     auth,
+    devices,
     logger,
     webDist,
   });
@@ -146,6 +150,7 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     sessions,
     attachments,
     auth,
+    devices,
     app,
     async start() {
       if (server) {

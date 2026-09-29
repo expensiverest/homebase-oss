@@ -252,3 +252,24 @@ test("15 projects and project at 130% text", async ({ page }) => {
   await page.addStyleTag({ content: LARGE_TEXT });
   await shot(page, "15b-project-long-130", "light");
 });
+
+for (const theme of ["dark", "light"] as const) {
+  test(`17 pairing and devices (${theme})`, async ({ page }) => {
+    await page.addInitScript((value) => localStorage.setItem("hb.theme", value), theme);
+    await page.goto(`/pair?mock=auth-unpaired#hbpair1.${"A".repeat(43)}`);
+    await expect(page.getByRole("heading", { name: "Pair this device" })).toBeVisible();
+    await shot(page, "17-pairing", theme);
+    await page.getByLabel("Device name").fill("Test Phone");
+    await page.getByRole("button", { name: "Pair device" }).click();
+    await page.getByRole("button", { name: "Devices" }).click();
+    await expect(page.getByRole("heading", { name: "Devices" })).toBeVisible();
+    await shot(page, "18-devices", theme);
+  });
+}
+
+test("19 pairing at 130% text", async ({ page }) => {
+  await page.goto(`/pair?mock=auth-unpaired#hbpair1.${"A".repeat(43)}`);
+  await page.addStyleTag({ content: LARGE_TEXT });
+  await expect(page.getByRole("heading", { name: "Pair this device" })).toBeVisible();
+  await shot(page, "19-pairing-130", "light");
+});

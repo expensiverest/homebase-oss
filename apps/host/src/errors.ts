@@ -7,6 +7,9 @@ const STATUS_BY_CODE: Record<AgentErrorCode, number> = {
   not_found: 404,
   conflict: 409,
   rate_limited: 429,
+  pairing_invalid: 400,
+  pairing_expired: 400,
+  pairing_used: 400,
 
   project_not_found: 404,
   project_not_allowed: 403,
