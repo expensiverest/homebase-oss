@@ -598,7 +598,7 @@ Projects belong to Homebase, not to any single provider.
 The Host owns configured project roots, for example:
 
 ```text
-C:\Users\Daniel\Projects
+C:\Users\me\Projects
 D:\Work
 ~/Developer
 ```

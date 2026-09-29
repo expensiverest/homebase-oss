@@ -71,14 +71,16 @@ describe("device security", () => {
     const dir = await stateDir();
     const first = await host(dir);
     const app = first.runtime.app;
+    const firstAddress = await first.runtime.start();
+    const firstUrl = `http://127.0.0.1:${firstAddress.port}`;
     expect((await app.request("/api/v1/projects")).status).toBe(401);
     const status = await app.request("/api/v1/auth/status");
     expect(await status.json()).toEqual({ mode: "device", authenticated: false });
     expect((await app.request("/api/v1/sessions/claude:child-session")).status).toBe(401);
     expect((await app.request("/api/v1/events")).status).toBe(401);
-    expect((await app.request("/api/v1/admin/pair", { method: "POST" })).status).toBe(401);
+    expect((await fetch(`${firstUrl}/api/v1/admin/pair`, { method: "POST" })).status).toBe(401);
     const admin = first.runtime.devices!.adminKey;
-    const inviteResponse = await app.request("/api/v1/admin/pair", {
+    const inviteResponse = await fetch(`${firstUrl}/api/v1/admin/pair`, {
       method: "POST",
       headers: { "x-homebase-admin": admin },
     });
@@ -101,6 +103,8 @@ describe("device security", () => {
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("SameSite=Strict");
     expect(cookie).toContain("Path=/");
+    expect(cookie).toContain("Max-Age=31536000");
+    expect(cookie).not.toContain("Domain=");
     const credential = cookie.split(";")[0]!;
     const metadata = await redeem.text();
     expect(metadata).not.toContain("hbdev1.");
@@ -112,6 +116,9 @@ describe("device security", () => {
     });
     expect(((await duplicate.json()) as { error: { code: string } }).error.code).toBe("pairing_used");
     expect((await app.request("/api/v1/projects", { headers: { cookie: credential } })).status).toBe(200);
+    const refreshed = await app.request("/api/v1/auth/status", { headers: { cookie: credential } });
+    expect(refreshed.headers.get("set-cookie")).toBe(cookie);
+    expect(await refreshed.text()).not.toContain("hbdev1.");
     const missingClientHeader = await app.request("/api/v1/providers/refresh", {
       method: "POST",
       headers: { cookie: credential },
@@ -119,9 +126,14 @@ describe("device security", () => {
     expect(missingClientHeader.status).toBe(403);
     const wrongSecret = credential.slice(0, -1) + (credential.endsWith("A") ? "B" : "A");
     expect((await app.request("/api/v1/projects", { headers: { cookie: wrongSecret } })).status).toBe(401);
+    const invalidStatus = await app.request("/api/v1/auth/status", { headers: { cookie: wrongSecret } });
+    expect(invalidStatus.headers.get("set-cookie")).toBeNull();
+    expect(((await invalidStatus.json()) as { authenticated: boolean }).authenticated).toBe(false);
     await first.cleanup();
     hosts.splice(hosts.indexOf(first), 1);
     const second = await host(dir);
+    const secondAddress = await second.runtime.start();
+    const secondUrl = `http://127.0.0.1:${secondAddress.port}`;
     expect((await second.runtime.app.request("/api/v1/projects", { headers: { cookie: credential } })).status).toBe(
       200,
     );
@@ -141,7 +153,7 @@ describe("device security", () => {
       headers: { ...clientHeaders, cookie: credential },
     });
     expect(revoked.status).toBe(200);
-    expect(revoked.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(revoked.headers.get("set-cookie")).toMatch(/Secure; HttpOnly; SameSite=Strict; Path=\/; Max-Age=0/);
     let done = false;
     let received = "";
     for (let i = 0; i < 5 && !done; i++) {
@@ -154,7 +166,7 @@ describe("device security", () => {
     expect((await second.runtime.app.request("/api/v1/projects", { headers: { cookie: credential } })).status).toBe(
       401,
     );
-    const freshInvitation = await second.runtime.app.request("/api/v1/admin/pair", {
+    const freshInvitation = await fetch(`${secondUrl}/api/v1/admin/pair`, {
       method: "POST",
       headers: { "x-homebase-admin": second.runtime.devices!.adminKey },
     });

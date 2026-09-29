@@ -66,7 +66,7 @@ export function PairScreen() {
               required
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="Daniel's iPhone"
+              placeholder="My iPhone"
               className="min-h-12 rounded-xl border border-border bg-surface px-4 text-row text-text"
             />
             <button

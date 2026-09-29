@@ -20,7 +20,12 @@ import {
 import { getConnInfo } from "@hono/node-server/conninfo";
 
 import type { Authenticator } from "../auth/index.js";
-import { DEVICE_COOKIE, type DeviceState } from "../auth/index.js";
+import {
+  deviceCredentialFromCookie,
+  serializeDeviceCookie,
+  serializeExpiredDeviceCookie,
+  type DeviceState,
+} from "../auth/index.js";
 import { ATTACHMENT_MAX_FILES_PER_UPLOAD, type AttachmentStore } from "../attachments/index.js";
 import type { HostConfig } from "../config/index.js";
 import { errorBody, HostError, normalizeError } from "../errors.js";
@@ -30,6 +35,7 @@ import type { ProviderRegistry } from "../providers/index.js";
 import type { SessionService } from "../sessions/index.js";
 import { createStaticWebHandler } from "../static.js";
 import { sseEventsHandler } from "./sse.js";
+import { isLoopbackAddress, resolveRequestOrigin } from "./request-origin.js";
 
 export interface ApiDependencies {
   version: string;
@@ -94,8 +100,13 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
     if (deps.auth.mode !== "device" || ["GET", "HEAD", "OPTIONS"].includes(c.req.method)) return next();
     const origin = c.req.header("origin");
     const site = c.req.header("sec-fetch-site");
-    const expected = new URL(c.req.url).origin;
-    if ((origin && origin !== expected) || (site && !["same-origin", "none"].includes(site))) {
+    const expected = resolveRequestOrigin({
+      requestUrl: c.req.url,
+      peerIsLoopback: isLocalClient(c),
+      forwardedProto: c.req.raw.headers.get("x-forwarded-proto"),
+      forwardedHost: c.req.raw.headers.get("x-forwarded-host"),
+    });
+    if (!expected || (origin && origin !== expected) || (site && !["same-origin", "none"].includes(site))) {
       return c.json(
         errorBody(new HostError("invalid_request", "Cross-origin mutation rejected."), c.get("requestId")),
         403,
@@ -174,6 +185,10 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
     if (deps.auth.mode === "device" && !c.req.header("cookie")) return c.json({ mode: "device", authenticated: false });
     const result = deps.auth.authenticate(c.req.header("authorization"), clientKey(c), c.req.header("cookie"));
     const device = result.principal?.kind === "device" ? deps.devices?.get(result.principal.deviceId) : undefined;
+    if (result.ok && result.principal?.kind === "device") {
+      const credential = deviceCredentialFromCookie(c.req.header("cookie"));
+      if (credential) c.header("set-cookie", serializeDeviceCookie(credential));
+    }
     return c.json({ mode: deps.auth.mode, authenticated: result.ok, ...(device ? { device } : {}) });
   });
 
@@ -215,7 +230,7 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
         result.status === "rate_limited" ? 429 : 400,
       );
     }
-    c.header("set-cookie", `${DEVICE_COOKIE}=${result.credential}; Secure; HttpOnly; SameSite=Strict; Path=/`);
+    c.header("set-cookie", serializeDeviceCookie(result.credential));
     return c.json({ device: result.device }, 201);
   });
 
@@ -223,6 +238,9 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
     if (
       !deps.devices ||
       c.req.header("origin") ||
+      ["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "forwarded"].some((header) =>
+        c.req.raw.headers.has(header),
+      ) ||
       !isLocalClient(c) ||
       !deps.devices.checkAdmin(c.req.header("x-homebase-admin"))
     ) {
@@ -268,7 +286,7 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
     if (!device) throw new HostError("not_found", "Device not found.", { status: 404 });
     const principal = c.get("principal");
     if (principal.kind === "device" && principal.deviceId === id)
-      c.header("set-cookie", `${DEVICE_COOKIE}=; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
+      c.header("set-cookie", serializeExpiredDeviceCookie());
     return c.json({ device });
   });
 
@@ -506,10 +524,9 @@ function clientKey(c: Context): string {
 
 function isLocalClient(c: Context): boolean {
   try {
-    const address = getConnInfo(c).remote.address;
-    return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+    return isLoopbackAddress(getConnInfo(c).remote.address);
   } catch {
-    // Hono in-process integration tests have no socket; they still need the key.
-    return true;
+    // In-process requests have no transport peer and cannot claim proxy trust.
+    return false;
   }
 }

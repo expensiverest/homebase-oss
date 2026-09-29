@@ -259,7 +259,7 @@ for (const theme of ["dark", "light"] as const) {
     await page.goto(`/pair?mock=auth-unpaired#hbpair1.${"A".repeat(43)}`);
     await expect(page.getByRole("heading", { name: "Pair this device" })).toBeVisible();
     await shot(page, "17-pairing", theme);
-    await page.getByLabel("Device name").fill("Daniel's iPhone");
+    await page.getByLabel("Device name").fill("Test Phone");
     await page.getByRole("button", { name: "Pair device" }).click();
     await page.getByRole("button", { name: "Devices" }).click();
     await expect(page.getByRole("heading", { name: "Devices" })).toBeVisible();

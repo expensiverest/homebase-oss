@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import type { HostConfig } from "../config/index.js";
 import type { DeviceState, PublicDevice } from "./device-state.js";
+import { deviceCredentialFromCookie } from "./device-cookie.js";
 
 export interface AuthDecision {
   ok: boolean;
@@ -55,7 +56,8 @@ export class Authenticator {
       return { ok: true, principal: { kind: "none" } };
     }
 
-    const provided = this.mode === "device" ? extractCookie(cookie) : extractBearerToken(authorizationHeader);
+    const provided =
+      this.mode === "device" ? deviceCredentialFromCookie(cookie) : extractBearerToken(authorizationHeader);
     const device = this.mode === "device" && provided ? this.devices?.verify(provided) : null;
     if (provided && (device || (this.mode === "dev-token" && this.#matches(provided)))) {
       return { ok: true, principal: device ? { kind: "device", deviceId: device.id } : { kind: "dev-token" } };
@@ -174,15 +176,6 @@ function extractBearerToken(header: string | undefined): string | null {
   if (!header) return null;
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   return match?.[1]?.trim() ?? null;
-}
-
-function extractCookie(header: string | undefined): string | null {
-  const part = header
-    ?.split(";")
-    .map((value) => value.trim())
-    .find((value) => value.startsWith("__Host-homebase-device="));
-  const value = part?.slice("__Host-homebase-device=".length);
-  return value && /^[A-Za-z0-9._-]{1,128}$/.test(value) ? value : null;
 }
 
 export function createAuthenticator(config: HostConfig, devices?: DeviceState): Authenticator {

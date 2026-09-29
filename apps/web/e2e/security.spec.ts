@@ -10,14 +10,14 @@ test("unpaired browser pairs from a fragment, stays paired, manages devices, and
   await page.goto(`/pair?mock=auth-unpaired#${valid}`);
   await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
   await expect(page.getByRole("heading", { name: "Pair this device" })).toBeVisible();
-  await page.getByLabel("Device name").fill("Daniel's iPhone");
+  await page.getByLabel("Device name").fill("Test Phone");
   await page.getByRole("button", { name: "Pair device" }).click();
   await expect(page.getByRole("heading", { name: "Projects", level: 1 })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Projects", level: 1 })).toBeVisible();
   await page.getByRole("button", { name: "Devices" }).click();
   await expect(page.getByRole("heading", { name: "Devices" })).toBeVisible();
-  await expect(page.getByText("Daniel's iPhone")).toBeVisible();
+  await expect(page.getByText("Test Phone")).toBeVisible();
   await page.getByRole("button", { name: "Rename" }).first().click();
   await page.getByRole("dialog", { name: "Rename device" }).getByLabel("Device name").fill("My iPhone");
   await page.getByRole("button", { name: "Save name" }).click();
