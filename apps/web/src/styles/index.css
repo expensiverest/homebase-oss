@@ -24,6 +24,20 @@
     }
   }
 
+  /*
+   * iOS standalone PWAs open with a layout viewport 62px shorter than the screen (measured on
+   * device: innerHeight 812 on an 874pt screen), which left a dead strip of plain background at
+   * the bottom. iOS only grows the viewport to the full screen once the document itself is at
+   * least screen-tall; this app's document is empty (body overflow hidden, shell fixed), so give
+   * the root a generous minimum height. It cannot scroll (overflow is hidden), so nothing shifts.
+   */
+  html {
+    min-height: 200vh;
+    overflow: hidden;
+    /* The app is an app, not a page: no pinch or double-tap zoom (text size follows the OS setting). */
+    touch-action: pan-x pan-y;
+  }
+
   body {
     margin: 0;
     background: var(--bg);
@@ -31,6 +45,14 @@
     font-size: var(--text-body);
     line-height: 1.5;
     overscroll-behavior-y: none;
+    /* The app shell is fixed and scrolls internally; the page never scrolls. */
+    overflow: hidden;
+  }
+
+  /* A scroller that hits its end must not hand the drag to the page (it would pan the fixed app). */
+  .overflow-y-auto,
+  .overflow-x-auto {
+    overscroll-behavior: contain;
   }
 
   :focus-visible {
@@ -95,6 +117,10 @@
 @layer utilities {
   .pt-safe {
     padding-top: calc(var(--safe-top) + 10px);
+  }
+  /* Scrollable screens: room past the last row, plus the home-indicator area in a standalone PWA. */
+  .pb-safe-scroll {
+    padding-bottom: calc(var(--safe-bottom) + 3rem);
   }
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom, 0px);

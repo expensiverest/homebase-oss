@@ -354,7 +354,7 @@ export function DevUI() {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-safe pb-16 pt-safe">
+    <div className="min-h-0 flex-1 overflow-y-auto px-safe pb-safe-scroll pt-safe">
       <header className="mb-8 flex items-start justify-between">
         <div>
           <p className="eyebrow mb-3">Homebase</p>

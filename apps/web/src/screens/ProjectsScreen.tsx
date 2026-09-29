@@ -80,7 +80,7 @@ export function ProjectsScreen() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <main className="min-h-0 flex-1 overflow-y-auto px-safe pb-12">
+      <main className="min-h-0 flex-1 overflow-y-auto px-safe pb-safe-scroll">
         <header className="pt-safe">
           <TopBar
             leading={

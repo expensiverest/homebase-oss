@@ -1,5 +1,7 @@
+import { useNavigate } from "@tanstack/react-router";
 import {
   AlertTriangle,
+  ArrowUpRight,
   ChevronDown,
   FilePen,
   FilePlus2,
@@ -32,6 +34,7 @@ import { TaskRows, type TaskRowItem, type TaskStatus } from "./beautiful/TaskRow
 import { Thinking } from "./beautiful/Thinking.js";
 import { ToolChips, type ToolChipItem, type ToolChipStatus } from "./beautiful/ToolChips.js";
 import { Markdown } from "./Markdown.js";
+import { OpenThreadButton } from "./OpenThreadButton.js";
 
 /*
  * The conversation. Each run reads as one execution trace:
@@ -96,12 +99,29 @@ function commandOf(tool: AgentToolCall): string | null {
   return null;
 }
 
+/** A labelled link to a sub-agent's thread, for tool details (settled runs use chips, not rows). */
+function OpenThreadLink({ sessionId }: { sessionId: string }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      data-open-thread
+      onClick={() => void navigate({ to: "/s/$sessionId", params: { sessionId } })}
+      className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-fill px-3.5 text-callout font-semibold text-accent active:scale-[0.98]"
+    >
+      <ArrowUpRight size={16} strokeWidth={2.25} aria-hidden />
+      Open sub-agent thread
+    </button>
+  );
+}
+
 /** Tool input, output and error as untrusted text in code blocks (never HTML). */
 function ToolDetail({ tool }: { tool: AgentToolCall }) {
   const output = stringifyOutput(tool.output);
   const command = commandOf(tool);
   return (
     <>
+      {tool.childSessionId ? <OpenThreadLink sessionId={tool.childSessionId} /> : null}
       {command ? (
         <CodeBlock code={command} language="bash" title="command" compact lineNumbers={false} />
       ) : tool.input != null ? (
@@ -124,7 +144,7 @@ function ToolDetail({ tool }: { tool: AgentToolCall }) {
 }
 
 function hasToolDetail(tool: AgentToolCall): boolean {
-  return tool.input != null || tool.output != null || Boolean(tool.error);
+  return tool.input != null || tool.output != null || Boolean(tool.error) || Boolean(tool.childSessionId);
 }
 
 const CHIP_STATUS: Record<AgentToolCall["status"], ToolChipStatus> = {
@@ -154,6 +174,9 @@ export function toolTaskRow(tool: AgentToolCall): TaskRowItem {
     label: presentation.detail ? `${presentation.verb} ${presentation.detail}` : presentation.verb,
     meta: tool.completedAt ? took : null,
     status: CHIP_STATUS[tool.status] as TaskStatus,
+    action: tool.childSessionId ? (
+      <OpenThreadButton sessionId={tool.childSessionId} title={presentation.detail ?? presentation.verb} />
+    ) : null,
     details: hasToolDetail(tool) ? <ToolDetail tool={tool} /> : null,
   };
 }

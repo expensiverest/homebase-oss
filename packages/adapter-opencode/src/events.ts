@@ -27,6 +27,8 @@ interface AssistantAssembly {
 export interface SessionTrackerDeps {
   emit(event: AgentEvent): void;
   sessionSnapshot(sessionId: string): AgentSession | undefined;
+  /** Wraps a native session id (used for a sub-agent's child session link). */
+  toPublicId?(nativeId: string): string;
   /** Applies state/model/mode changes to the adapter's session cache. */
   patchSession(sessionId: string, patch: Partial<AgentSession>): void;
   logger: AdapterLogger;
@@ -287,6 +289,7 @@ export class SessionEventTracker {
         const toolCall: AgentToolCall = {
           ...(existing ?? { id: toolId, name: "tool", status: "running" }),
           input: (data.input as AgentToolCall["input"]) ?? null,
+          ...this.#childLink(data),
         };
         this.#upsertToolPart(assembly, toolCall);
         this.#emit(sessionId, "tool.updated", { toolCall });
@@ -298,7 +301,9 @@ export class SessionEventTracker {
         if (!toolId) return;
         const existing = this.#toolCall(assembly, toolId);
         if (!existing) return;
-        this.#emit(sessionId, "tool.updated", { toolCall: existing });
+        const toolCall: AgentToolCall = { ...existing, ...this.#childLink(data) };
+        if (toolCall.childSessionId !== existing.childSessionId) this.#upsertToolPart(assembly, toolCall);
+        this.#emit(sessionId, "tool.updated", { toolCall });
         return;
       }
       case "session.tool.success": {
@@ -311,6 +316,7 @@ export class SessionEventTracker {
           status: "completed",
           output: mapToolContent(data.content),
           completedAt: event.created !== undefined ? new Date(event.created).toISOString() : nowTimestamp(),
+          ...this.#childLink(data),
         };
         this.#upsertToolPart(assembly, toolCall);
         this.#emit(sessionId, "tool.completed", { toolCall });
@@ -329,6 +335,7 @@ export class SessionEventTracker {
           error: denied ? "The user denied this tool call." : toErrorMessage(data.error),
           output: mapToolContent(data.content),
           completedAt: event.created !== undefined ? new Date(event.created).toISOString() : nowTimestamp(),
+          ...this.#childLink(data),
         };
         this.#upsertToolPart(assembly, toolCall);
         this.#emit(sessionId, "tool.failed", { toolCall });
@@ -499,6 +506,15 @@ export class SessionEventTracker {
     const partId = assembly.reasoningPartId.get(ordinal);
     const part = assembly.parts.find((candidate) => candidate.id === partId);
     if (part && part.type === "reasoning") part.text = text;
+  }
+
+  /** A sub-agent tool reports its own session as `metadata.sessionId`; absent or malformed yields no link. */
+  #childLink(data: Record<string, unknown>): { childSessionId?: string } {
+    const metadata = data.metadata;
+    if (typeof metadata !== "object" || metadata === null) return {};
+    const value = (metadata as Record<string, unknown>).sessionId;
+    if (typeof value !== "string" || value.length === 0) return {};
+    return { childSessionId: this.#deps.toPublicId ? this.#deps.toPublicId(value) : value };
   }
 
   #toolCall(assembly: AssistantAssembly, toolId: string): AgentToolCall | undefined {

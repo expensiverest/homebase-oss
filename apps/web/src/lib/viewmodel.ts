@@ -407,3 +407,96 @@ export function activeRunView(items: TimelineItem[], running: boolean): ActiveRu
   }
   return { mode: "trace", workId: work?.id ?? null };
 }
+
+// --- sub-agents ---------------------------------------------------------------
+
+/**
+ * A sub-agent the model spawned. Providers report these as ordinary tool calls
+ * (Claude's `Task`, OpenCode's `task`), so this is derived from normalized tool
+ * calls and needs no provider-specific event.
+ */
+export interface SubagentView {
+  id: string;
+  title: string;
+  /** The kind of agent asked for (e.g. "explore"), when the provider says. */
+  kind: string | null;
+  status: AgentToolCall["status"];
+  prompt: string | null;
+  result: string | null;
+  error: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  /** The sub-agent's own thread (a child session), when the provider exposes one. */
+  threadId: string | null;
+}
+
+const SUBAGENT_TOOL_NAMES = new Set(["task", "agent", "subagent"]);
+
+export function isSubagentTool(tool: AgentToolCall): boolean {
+  return SUBAGENT_TOOL_NAMES.has(tool.name.toLowerCase());
+}
+
+function inputString(input: unknown, key: string): string | null {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return null;
+  const value = (input as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function outputText(output: AgentToolCall["output"]): string | null {
+  if (output == null) return null;
+  if (typeof output === "string") return output.trim() || null;
+  if (typeof output === "object" && !Array.isArray(output) && typeof (output as { text?: unknown }).text === "string") {
+    return (output as { text: string }).text.trim() || null;
+  }
+  return null;
+}
+
+export function subagentsOf(tools: AgentToolCall[]): SubagentView[] {
+  return tools.filter(isSubagentTool).map((tool) => ({
+    id: tool.id,
+    title: shorten(
+      inputString(tool.input, "description") ?? (tool.title && tool.title !== tool.name ? tool.title : "Sub-agent"),
+      90,
+    ),
+    kind: inputString(tool.input, "subagent_type"),
+    status: tool.status,
+    prompt: inputString(tool.input, "prompt"),
+    result: outputText(tool.output),
+    error: tool.error ?? null,
+    startedAt: tool.startedAt ?? null,
+    completedAt: tool.completedAt ?? null,
+    threadId: tool.childSessionId ?? null,
+  }));
+}
+
+export interface SubagentSummary {
+  total: number;
+  working: number;
+  done: number;
+  failed: number;
+}
+
+export function subagentSummary(agents: SubagentView[]): SubagentSummary {
+  let working = 0;
+  let done = 0;
+  let failed = 0;
+  for (const agent of agents) {
+    if (agent.status === "running") working += 1;
+    else if (agent.status === "completed") done += 1;
+    else failed += 1;
+  }
+  return { total: agents.length, working, done, failed };
+}
+
+/** The sub-agents of the run after the newest user prompt: what the user is currently watching. */
+export function currentSubagents(items: TimelineItem[]): SubagentView[] {
+  let lastUser = -1;
+  items.forEach((item, index) => {
+    if (item.kind === "user") lastUser = index;
+  });
+  const tools: AgentToolCall[] = [];
+  for (const item of items.slice(lastUser + 1)) {
+    if (item.kind === "work") tools.push(...item.tools);
+  }
+  return subagentsOf(tools);
+}

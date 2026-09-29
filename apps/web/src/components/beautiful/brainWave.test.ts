@@ -34,14 +34,14 @@ describe("animated Brain wave", () => {
     expect(byPhase.at(-1)?.d).toBe("M18 18a4 4 0 0 0 2-7.464");
   });
 
-  it("loops forever over a 1.2s ease-in-out cycle", () => {
+  it("loops forever over a calm 2.4s ease-in-out cycle", () => {
     for (const { phase, role } of BRAIN_PATHS) {
       const { transition } = active(phase, role);
-      expect(transition.duration).toBe(1.2);
+      expect(transition.duration).toBe(2.4);
       expect(transition.repeat).toBe(Infinity);
       expect(transition.ease).toBe("easeInOut");
     }
-    expect(CYCLE_SECONDS).toBe(1.2);
+    expect(CYCLE_SECONDS).toBe(2.4);
   });
 
   it("dips deep on the folds and only brushes the outline, which never scales", () => {

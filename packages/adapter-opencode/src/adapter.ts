@@ -130,6 +130,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     this.#tracker = new SessionEventTracker({
       emit: (event) => context.emit(event),
       sessionSnapshot: (sessionId) => this.#sessions.get(sessionId),
+      toPublicId: (nativeId) => this.#toPublicId(nativeId),
       patchSession: (sessionId, patch) => {
         const current = this.#sessions.get(sessionId);
         if (current) this.#sessions.set(sessionId, { ...current, ...patch });
@@ -316,7 +317,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       const data = response.data ?? [];
       const items: AgentMessage[] = [];
       for (const native of data) {
-        const mapped = toAgentMessage(native, sessionId);
+        const mapped = toAgentMessage(native, sessionId, (nativeId) => this.#toPublicId(nativeId));
         if (mapped) items.push(mapped);
       }
       return toAgentPage(items, {
@@ -524,7 +525,11 @@ export class OpenCodeAdapter implements AgentAdapter {
 
   #ingest(native: NativeSession, projectId: string): AgentSession {
     const publicId = this.#toPublicId(native.id);
-    const session = toAgentSession({ ...native, id: publicId }, projectId, this.#stateFor(native, publicId));
+    const session = toAgentSession(
+      { ...native, id: publicId, ...(native.parentID ? { parentID: this.#toPublicId(native.parentID) } : {}) },
+      projectId,
+      this.#stateFor(native, publicId),
+    );
     this.#sessions.set(publicId, session);
     return session;
   }

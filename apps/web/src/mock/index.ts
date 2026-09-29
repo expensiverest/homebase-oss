@@ -49,6 +49,8 @@ export const SCENARIOS = [
   "run-thinking",
   "run-tools",
   "confirm",
+  "agents",
+  "long-stream",
 ] as const;
 
 export type Scenario = (typeof SCENARIOS)[number];
@@ -427,7 +429,7 @@ function buildState(scenario: Scenario): MockState {
 
   messages.set(
     "ses_aurora_docs",
-    scenario === "long-conversation"
+    scenario === "long-conversation" || scenario === "long-stream"
       ? Array.from({ length: 60 }, (_, index) =>
           index % 2 === 0
             ? textMessage(
@@ -951,7 +953,7 @@ async function handleRequest(input: string, init?: RequestInit): Promise<Respons
     const projectId = decodeURIComponent(sessionsMatch[1] ?? "");
     const order = url.searchParams.get("cursor");
     const list = state.sessions
-      .filter((session) => session.projectId === projectId)
+      .filter((session) => session.projectId === projectId && !session.parentSessionId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     const offset = order ? Number.parseInt(order.replace("mock:", ""), 10) || 0 : 0;
     const limit = Number.parseInt(url.searchParams.get("limit") ?? "25", 10);
@@ -1315,10 +1317,345 @@ export function installMock(scenario: Scenario): void {
     const session = state.sessions.find((candidate) => candidate.id === "ses_aurora_docs");
     if (session) scriptLiveRun(session, state.scenario);
   }
-  if (state.scenario === "long-conversation") {
+  if (state.scenario === "long-conversation" || state.scenario === "long-stream") {
     const session = state.sessions.find((candidate) => candidate.id === "ses_aurora_docs");
     if (session) session.state = "idle";
+    // A long history that keeps receiving live replies, to check that reading older
+    // messages is never interrupted by new ones.
+    if (session && state.scenario === "long-stream") {
+      [2_500, 6_500, 10_500].forEach((delay, index) =>
+        later(delay, () => {
+          appendUserMessage(session, `Live follow-up ${index + 1}`);
+          streamReply(session, `Live follow-up ${index + 1}`);
+        }),
+      );
+    }
   }
+  if (state.scenario === "agents") {
+    const session = state.sessions.find((candidate) => candidate.id === "ses_aurora_docs");
+    if (session) scriptAgentsRun(session);
+  }
+  if (state.scenario === "attachments") seedImageMessages();
+}
+
+/** Two non-square pictures already in the conversation: one from the user, one from the model. */
+function seedImageMessages(): void {
+  const picture = (from: string, to: string, label: string) =>
+    new TextEncoder().encode(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480">` +
+        `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${from}"/>` +
+        `<stop offset="1" stop-color="${to}"/></linearGradient></defs><rect width="720" height="480" fill="url(#g)"/>` +
+        `<circle cx="150" cy="240" r="90" fill="#fff" fill-opacity=".85"/><rect x="330" y="150" width="300" height="180" rx="24" fill="#fff" fill-opacity=".85"/>` +
+        `<text x="360" y="440" font-size="40" font-family="sans-serif" fill="#fff" text-anchor="middle">${label}</text></svg>`,
+    );
+  state.attachments.set("att_seed_screenshot", {
+    mimeType: "image/svg+xml",
+    name: "mockup.svg",
+    bytes: picture("#6d5ef5", "#2bb5a0", "Your screenshot"),
+  });
+  // A tall phone screenshot (402x874), to check portrait images in the large preview.
+  state.attachments.set("att_seed_phone", {
+    mimeType: "image/svg+xml",
+    name: "phone-screenshot.svg",
+    bytes: new TextEncoder().encode(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="402" height="874" viewBox="0 0 402 874">` +
+        `<rect width="402" height="874" fill="#f5f3ee"/><rect y="0" width="402" height="62" fill="#e8e4da"/>` +
+        `<text x="34" y="40" font-size="20" font-family="sans-serif" font-weight="700" fill="#222">4:56</text>` +
+        `<rect x="24" y="110" width="354" height="90" rx="20" fill="#5a52dc"/><rect x="24" y="230" width="354" height="60" rx="16" fill="#fff"/>` +
+        `<rect x="24" y="310" width="354" height="60" rx="16" fill="#fff"/><rect x="24" y="390" width="354" height="60" rx="16" fill="#fff"/>` +
+        `<text x="201" y="860" font-size="16" font-family="sans-serif" fill="#666" text-anchor="middle">Phone screenshot</text></svg>`,
+    ),
+  });
+  state.attachments.set("att_seed_chart", {
+    mimeType: "image/svg+xml",
+    name: "latency-chart.svg",
+    bytes: picture("#f0883e", "#d1477a", "Model output"),
+  });
+  const sessionId = "ses_aurora_docs";
+  const user: AgentMessage = {
+    id: "msg_seed_image_user",
+    sessionId,
+    role: "user",
+    createdAt: nowTimestamp(),
+    state: "completed",
+    parts: [
+      { type: "text", id: "msg_seed_image_user:text", text: "Here is the layout I mean." },
+      {
+        type: "image",
+        id: "msg_seed_image_user:img",
+        attachmentId: "att_seed_screenshot",
+        mimeType: "image/svg+xml",
+        name: "mockup.svg",
+      },
+      {
+        type: "image",
+        id: "msg_seed_image_user:phone",
+        attachmentId: "att_seed_phone",
+        mimeType: "image/svg+xml",
+        name: "phone-screenshot.svg",
+      },
+    ],
+  };
+  const assistant: AgentMessage = {
+    id: "msg_seed_image_assistant",
+    sessionId,
+    role: "assistant",
+    createdAt: nowTimestamp(),
+    state: "completed",
+    parts: [
+      { type: "text", id: "msg_seed_image_assistant:text", text: "Got it. Here is the latency chart for that layout." },
+      {
+        type: "image",
+        id: "msg_seed_image_assistant:img",
+        attachmentId: "att_seed_chart",
+        mimeType: "image/svg+xml",
+        name: "latency-chart.svg",
+      },
+    ],
+  };
+  state.messages.set(sessionId, [...(state.messages.get(sessionId) ?? []), user, assistant]);
+}
+
+/**
+ * A model that fans out to sub-agents. One turn plays through in real time
+ * (about 22 seconds): the main agent thinks, spawns four agents a beat apart,
+ * they finish at different times (one fails), then the main agent summarises.
+ * Reload the page to watch it again.
+ */
+function scriptAgentsRun(session: AgentSession): void {
+  const context = { provider: session.provider, projectId: session.projectId, sessionId: session.id };
+  const prompt = "Audit the gateway: review the routes, tests, docs and dependencies in parallel.";
+  session.state = "working";
+  appendUserMessage(session, prompt);
+  const messageId = "msg_agents_scripted";
+  const textId = `${messageId}:text:0`;
+  const startedAt = nowTimestamp();
+
+  const specs = [
+    {
+      id: "agent_routes",
+      childId: "ses_agent_routes",
+      steps: [
+        ["read", { file_path: "src/routes/gateway.ts" }],
+        ["grep", { pattern: "requireAuth", path: "src" }],
+      ] as Array<[string, Record<string, string>]>,
+      description: "Review gateway routes",
+      kind: "explore",
+      prompt: "Read src/routes/gateway.ts and list every endpoint with its auth requirement and pagination shape.",
+      spawnAt: 1_800,
+      endAt: 9_000,
+      result:
+        "Found 4 endpoints. `/sessions` and `/sessions/:id/messages` are cursor-paged; only `/events` is unauthenticated.",
+    },
+    {
+      id: "agent_tests",
+      childId: "ses_agent_tests",
+      steps: [
+        ["bash", { command: "npm test -- gateway" }],
+        ["read", { file_path: "test/gateway.test.ts" }],
+      ] as Array<[string, Record<string, string>]>,
+      description: "Run and read the gateway tests",
+      kind: "general-purpose",
+      prompt: "Run `npm test -- gateway`, then summarise which behaviours have no test coverage.",
+      spawnAt: 2_600,
+      endAt: 17_000,
+      result: "38 tests pass. No coverage for cursor expiry or the retry headers on `/events`.",
+    },
+    {
+      id: "agent_docs",
+      childId: "ses_agent_docs",
+      steps: [
+        ["read", { file_path: "docs/gateway.md" }],
+        ["grep", { pattern: "nextCursor", path: "docs" }],
+      ] as Array<[string, Record<string, string>]>,
+      description: "Compare docs with the code",
+      kind: "explore",
+      prompt: "Diff docs/gateway.md against the routes and report anything stale or missing.",
+      spawnAt: 3_400,
+      endAt: 13_000,
+      result: "docs/gateway.md is missing `nextCursor` and still documents the removed `/v1/poll` endpoint.",
+    },
+    {
+      id: "agent_deps",
+      childId: "ses_agent_deps",
+      steps: [
+        ["read", { file_path: "package.json" }],
+        ["bash", { command: "npm audit --json" }],
+      ] as Array<[string, Record<string, string>]>,
+      description: "Audit dependency versions",
+      kind: "general-purpose",
+      prompt: "Check every gateway dependency against the registry for known advisories.",
+      spawnAt: 4_200,
+      endAt: 11_000,
+      error: "The npm registry request timed out after 30s.",
+    },
+  ];
+
+  const toolFor = (spec: (typeof specs)[number], status: AgentToolCall["status"], started: string): AgentToolCall => ({
+    id: spec.id,
+    name: "task",
+    status,
+    title: spec.description,
+    input: { description: spec.description, subagent_type: spec.kind, prompt: spec.prompt },
+    startedAt: started,
+    childSessionId: spec.childId,
+    ...(status === "completed"
+      ? { output: { type: "text", text: spec.result ?? "" }, completedAt: nowTimestamp() }
+      : {}),
+    ...(status === "failed" ? { error: spec.error ?? "The agent failed.", completedAt: nowTimestamp() } : {}),
+  });
+
+  const initial: AgentMessage = {
+    id: messageId,
+    sessionId: session.id,
+    role: "assistant",
+    createdAt: startedAt,
+    state: "streaming",
+    parts: [
+      {
+        type: "reasoning",
+        id: `${messageId}:reasoning:0`,
+        text: "This splits cleanly into four independent checks, so I will hand each to its own agent and merge what they report.",
+      },
+      { type: "text", id: textId, text: "" },
+    ],
+  };
+  later(300, () => {
+    emit("turn.started", { turnId: "turn_agents" }, context);
+    emit("message.started", { message: initial }, context);
+  });
+
+  // The sub-agent's own thread: a child session that fills in while it works.
+  const childTool = (
+    spec: (typeof specs)[number],
+    index: number,
+    status: AgentToolCall["status"],
+  ): AgentMessage["parts"][number] => {
+    const [name, input] = spec.steps[index]!;
+    const id = `${spec.childId}:tool:${index}`;
+    return {
+      type: "tool_call",
+      id,
+      toolCall: {
+        id,
+        name,
+        title: name,
+        status,
+        input,
+        startedAt: nowTimestamp(),
+        ...(status === "completed" ? { output: { type: "text", text: "ok" }, completedAt: nowTimestamp() } : {}),
+      },
+    };
+  };
+  const spawnChild = (spec: (typeof specs)[number]) => {
+    const child: AgentSession = {
+      id: spec.childId,
+      provider: session.provider,
+      projectId: session.projectId,
+      title: spec.description,
+      createdAt: nowTimestamp(),
+      updatedAt: nowTimestamp(),
+      state: "working",
+      model: session.model ?? null,
+      mode: spec.kind,
+      parentSessionId: session.id,
+    };
+    state.sessions.push(child);
+    appendUserMessage(child, spec.prompt);
+    const working: AgentMessage = {
+      id: `${spec.childId}:msg`,
+      sessionId: child.id,
+      role: "assistant",
+      createdAt: nowTimestamp(),
+      state: "streaming",
+      parts: [childTool(spec, 0, "completed"), childTool(spec, 1, "running")],
+    };
+    state.messages.set(child.id, [...(state.messages.get(child.id) ?? []), working]);
+  };
+  const finishChild = (spec: (typeof specs)[number], status: AgentToolCall["status"]) => {
+    const child = state.sessions.find((candidate) => candidate.id === spec.childId);
+    if (!child) return;
+    const failed = status === "failed";
+    const done: AgentMessage = {
+      id: `${spec.childId}:msg`,
+      sessionId: child.id,
+      role: "assistant",
+      createdAt: nowTimestamp(),
+      updatedAt: nowTimestamp(),
+      state: failed ? "failed" : "completed",
+      parts: [
+        childTool(spec, 0, "completed"),
+        childTool(spec, 1, failed ? "failed" : "completed"),
+        failed
+          ? { type: "error", id: `${spec.childId}:error`, message: spec.error ?? "The agent failed." }
+          : { type: "text", id: `${spec.childId}:text`, text: spec.result ?? "Done." },
+      ],
+    };
+    const messages = state.messages.get(child.id) ?? [];
+    state.messages.set(
+      child.id,
+      messages.map((message) => (message.id === done.id ? done : message)),
+    );
+    child.state = failed ? "failed" : "idle";
+    child.updatedAt = nowTimestamp();
+    const childContext = { provider: child.provider, projectId: child.projectId, sessionId: child.id };
+    emit("message.completed", { message: done }, childContext);
+    emit("session.updated", { session: { ...child } }, childContext);
+  };
+
+  const startedAtByAgent = new Map<string, string>();
+  const outcomes = new Map<string, AgentToolCall["status"]>();
+  for (const spec of specs) {
+    later(spec.spawnAt, () => {
+      const started = nowTimestamp();
+      startedAtByAgent.set(spec.id, started);
+      spawnChild(spec);
+      emit("tool.started", { toolCall: toolFor(spec, "running", started) }, context);
+    });
+    later(spec.endAt, () => {
+      const status = spec.error ? "failed" : "completed";
+      outcomes.set(spec.id, status);
+      finishChild(spec, status);
+      const toolCall = toolFor(spec, status, startedAtByAgent.get(spec.id) ?? startedAt);
+      emit(status === "failed" ? "tool.failed" : "tool.completed", { toolCall }, context);
+    });
+  }
+
+  const summary =
+    "All four agents reported back. The routes are cursor-paged and only `/events` is public; the gateway tests pass but skip cursor expiry; `docs/gateway.md` is missing `nextCursor` and documents a removed endpoint; and the dependency audit could not finish (registry timeout), so I will retry it.";
+  const words = summary.split(/\s+/);
+  const streamFrom = 18_000;
+  words.forEach((word, index) => {
+    later(streamFrom + index * 60, () =>
+      emit(
+        "message.delta",
+        { messageId, partId: textId, delta: `${word}${index < words.length - 1 ? " " : ""}` },
+        context,
+      ),
+    );
+  });
+  later(streamFrom + words.length * 60 + 300, () => {
+    const completed: AgentMessage = {
+      ...initial,
+      state: "completed",
+      updatedAt: nowTimestamp(),
+      parts: [
+        initial.parts[0]!,
+        ...specs.map((spec) => ({
+          type: "tool_call" as const,
+          id: `tool:${spec.id}`,
+          toolCall: toolFor(spec, outcomes.get(spec.id) ?? "completed", startedAtByAgent.get(spec.id) ?? startedAt),
+        })),
+        { type: "text", id: textId, text: summary },
+      ],
+    };
+    emit("message.completed", { message: completed }, context);
+    emit("turn.completed", { turnId: "turn_agents" }, context);
+    const stored = state.messages.get(session.id) ?? [];
+    stored.push(completed);
+    state.messages.set(session.id, stored);
+    session.state = "idle";
+  });
 }
 
 /**

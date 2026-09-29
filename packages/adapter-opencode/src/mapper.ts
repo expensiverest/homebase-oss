@@ -122,6 +122,7 @@ export function toAgentSession(native: NativeSession, projectId: string, state: 
     model: native.model ? toAgentModelRef(native.model) : null,
     mode: native.agent ?? null,
     thinkingLevel: native.model?.variant ?? null,
+    ...(native.parentID ? { parentSessionId: native.parentID } : {}),
   };
 }
 
@@ -151,7 +152,28 @@ export function toToolOutput(content: NativeToolContent[] | undefined): JsonValu
   });
 }
 
-export function toAgentToolCall(tool: NativeToolPart): AgentToolCall {
+/**
+ * OpenCode's task tool records the sub-agent's own session in the tool's
+ * `metadata.sessionId`. The link is only emitted for a well-formed id, wrapped
+ * with `toPublicId` so it routes like every other session id.
+ */
+function childSessionOf(tool: NativeToolPart, toPublicId: (nativeId: string) => string): string | null {
+  const state = tool.state;
+  if (state.status === "streaming") return null;
+  const value = state.metadata?.sessionId;
+  return typeof value === "string" && value.length > 0 ? toPublicId(value) : null;
+}
+
+export function toAgentToolCall(
+  tool: NativeToolPart,
+  toPublicId: (nativeId: string) => string = (nativeId) => nativeId,
+): AgentToolCall {
+  const call = toBaseToolCall(tool);
+  const childSessionId = childSessionOf(tool, toPublicId);
+  return childSessionId ? { ...call, childSessionId } : call;
+}
+
+function toBaseToolCall(tool: NativeToolPart): AgentToolCall {
   const base = {
     id: tool.id,
     name: tool.name,
@@ -190,7 +212,11 @@ export function toAgentToolCall(tool: NativeToolPart): AgentToolCall {
  * they are not user-visible conversation, and inventing bubbles for them would
  * be worse than their absence. `idle` markers drive session state instead.
  */
-export function toAgentMessage(native: NativeMessage, sessionId: string): AgentMessage | null {
+export function toAgentMessage(
+  native: NativeMessage,
+  sessionId: string,
+  toPublicId?: (nativeId: string) => string,
+): AgentMessage | null {
   switch (native.type) {
     case "user": {
       if (native.id === undefined) return null;
@@ -223,7 +249,7 @@ export function toAgentMessage(native: NativeMessage, sessionId: string): AgentM
         } else if (part.type === "reasoning") {
           parts.push({ type: "reasoning", id: partId(native.id, "reasoning", reasoningIndex++), text: part.text });
         } else if (part.type === "tool") {
-          parts.push({ type: "tool_call", id: part.id, toolCall: toAgentToolCall(part) });
+          parts.push({ type: "tool_call", id: part.id, toolCall: toAgentToolCall(part, toPublicId) });
         }
       }
       const failed = native.error !== undefined;

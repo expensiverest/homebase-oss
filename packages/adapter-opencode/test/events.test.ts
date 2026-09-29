@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { SessionEventTracker } from "../src/events.js";
 import { event, nativeForm, nativePermission } from "./fixtures.js";
 
-function createTracker() {
+function createTracker(extra: { toPublicId?: (nativeId: string) => string } = {}) {
   const emitted: AgentEvent[] = [];
   const patched: Array<{ sessionId: string; patch: Record<string, unknown> }> = [];
   const session: AgentSession = {
@@ -26,6 +26,7 @@ function createTracker() {
       if (current) sessions.set(sessionId, { ...current, ...patch });
     },
     logger: createRecordingLogger().logger,
+    ...extra,
   });
   return { tracker, emitted, patched, sessions };
 }
@@ -138,6 +139,47 @@ describe("SessionEventTracker", () => {
     const completed = emitted.find((entry) => entry.type === "tool.completed");
     expect(completed?.type === "tool.completed" ? completed.data.toolCall.status : "").toBe("completed");
     expect(JSON.stringify(completed)).not.toContain("/home/example");
+  });
+
+  it("links a sub-agent tool call to its child session, wrapped as a public id", () => {
+    const { tracker, emitted } = createTracker({ toPublicId: (nativeId) => `public:${nativeId}` });
+    tracker.handle(event("session.step.started", { sessionID: "ses_1", assistantMessageID: "msg_a1" }), "ses_1");
+    tracker.handle(
+      event("session.tool.input.started", {
+        sessionID: "ses_1",
+        assistantMessageID: "msg_a1",
+        id: "call_t",
+        name: "task",
+      }),
+      "ses_1",
+    );
+    tracker.handle(
+      event("session.tool.progress", {
+        sessionID: "ses_1",
+        assistantMessageID: "msg_a1",
+        id: "call_t",
+        metadata: { sessionId: "ses_child" },
+      }),
+      "ses_1",
+    );
+    tracker.handle(
+      event("session.tool.success", {
+        sessionID: "ses_1",
+        assistantMessageID: "msg_a1",
+        id: "call_t",
+        content: [{ type: "text", text: "done" }],
+      }),
+      "ses_1",
+    );
+    const updated = emitted.filter((entry) => entry.type === "tool.updated");
+    expect(updated.at(-1)?.type === "tool.updated" ? updated.at(-1)!.data.toolCall.childSessionId : null).toBe(
+      "public:ses_child",
+    );
+    // The link survives completion even when the completion event repeats no metadata.
+    const completed = emitted.find((entry) => entry.type === "tool.completed");
+    expect(completed?.type === "tool.completed" ? completed.data.toolCall.childSessionId : null).toBe(
+      "public:ses_child",
+    );
   });
 
   it("marks a tool denied after its approval is rejected", () => {

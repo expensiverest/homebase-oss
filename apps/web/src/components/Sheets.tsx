@@ -112,7 +112,6 @@ export function ModelSheet({
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search models"
           aria-label="Search models"
-          data-autofocus
           className="min-h-12 w-full rounded-[var(--radius-md)] bg-fill pl-10 pr-3 text-body text-text placeholder:text-muted focus:outline-2 focus:outline-accent"
         />
       </div>

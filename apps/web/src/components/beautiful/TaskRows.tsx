@@ -21,6 +21,8 @@ export interface TaskRowItem {
   meta?: string | null;
   status: TaskStatus;
   details?: ReactNode;
+  /** A standalone action at the row's end (e.g. open a sub-agent's thread); never toggles the row. */
+  action?: ReactNode;
 }
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -108,36 +110,41 @@ export function TaskRows({ rows, label, animate = false }: { rows: TaskRowItem[]
             }`}
             style={animate ? { animation: "bui-fade-up 360ms cubic-bezier(0.23,1,0.32,1) both" } : undefined}
           >
-            <button
-              type="button"
-              aria-expanded={expandable ? rowOpen : undefined}
-              onClick={() => expandable && setOpen((current) => ({ ...current, [row.key]: !rowOpen }))}
-              className="flex min-h-11 w-full items-center gap-2.5 px-2.5 py-1.5 text-left"
-            >
-              <span className="flex size-6 shrink-0 items-center justify-center">
-                <Badge status={row.status} animate={animate} />
-              </span>
-              <span className="sr-only">{STATUS_LABEL[row.status]}: </span>
-              <span
-                className={`min-w-0 flex-1 truncate text-callout font-medium ${
-                  row.status === "pending" ? "text-muted" : "text-text"
-                }`}
+            <div className="flex items-center">
+              <button
+                type="button"
+                aria-expanded={expandable ? rowOpen : undefined}
+                onClick={() => expandable && setOpen((current) => ({ ...current, [row.key]: !rowOpen }))}
+                className="flex min-h-11 min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-left"
               >
-                {row.label}
-              </span>
-              {row.meta ? (
-                <span className="readout min-w-0 max-w-[40%] shrink truncate text-caption text-muted">{row.meta}</span>
-              ) : null}
-              <StatusPill status={row.status} />
-              {expandable ? (
-                <ChevronDown
-                  size={15}
-                  strokeWidth={2.25}
-                  aria-hidden
-                  className={`shrink-0 text-faint transition-transform duration-300 ${rowOpen ? "rotate-180" : ""}`}
-                />
-              ) : null}
-            </button>
+                <span className="flex size-6 shrink-0 items-center justify-center">
+                  <Badge status={row.status} animate={animate} />
+                </span>
+                <span className="sr-only">{STATUS_LABEL[row.status]}: </span>
+                <span
+                  className={`min-w-0 flex-1 truncate text-callout font-medium ${
+                    row.status === "pending" ? "text-muted" : "text-text"
+                  }`}
+                >
+                  {row.label}
+                </span>
+                {row.meta ? (
+                  <span className="readout min-w-0 max-w-[40%] shrink truncate text-caption text-muted">
+                    {row.meta}
+                  </span>
+                ) : null}
+                <StatusPill status={row.status} />
+                {expandable ? (
+                  <ChevronDown
+                    size={15}
+                    strokeWidth={2.25}
+                    aria-hidden
+                    className={`shrink-0 text-faint transition-transform duration-300 ${rowOpen ? "rotate-180" : ""}`}
+                  />
+                ) : null}
+              </button>
+              {row.action}
+            </div>
             {expandable && rowOpen ? (
               <div className="mb-2.5 grid grid-cols-[24px_1fr] gap-2.5 px-2.5">
                 <span aria-hidden className="mx-auto h-full w-px bg-border" />

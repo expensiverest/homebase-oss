@@ -1,13 +1,15 @@
-import { ArrowUp, ImagePlus, ListEnd, Paperclip, Square, Zap } from "lucide-react";
+import { ImagePlus, Paperclip } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import type { AgentAttachmentRef, AgentModel, AgentProvider, AgentSession } from "@homebase/protocol";
 
 import { api } from "../lib/api.js";
+import { useSoftKeyboard } from "../lib/chatScroll.js";
 import { readDraft, writeDraft } from "../lib/prefs.js";
 import { attachmentRules } from "../lib/viewmodel.js";
 import { PendingAttachmentChip } from "./attachments.js";
 import { PromptBar } from "./beautiful/PromptBar.js";
+import { RunButton, type RunButtonMode, type RunMenuItem } from "./RunButton.js";
 import { IconButton } from "./ui.js";
 
 export type ComposerAction = "send" | "queue" | "steer";
@@ -24,14 +26,17 @@ interface ComposerProps {
   onInterrupt: () => void;
   /** Model / mode / effort controls, shown above the input. */
   controls?: ReactNode;
+  /** A status strip (e.g. sub-agents) shown directly above the prompt bar. */
+  status?: ReactNode;
   disabled?: boolean;
 }
 
 /**
  * The composer is built around the text: the input owns the full width, and
  * every action lives on a toolbar beneath it, so nothing can squeeze the
- * draft. Idle, the only action is Send. While a run is going, Queue is the
- * primary follow-up, Steer is secondary, and Stop sits apart on the left.
+ * draft. There is exactly one action button (RunButton): Send when idle; while
+ * a run is going, Stop for an empty input and Queue once there is text, with
+ * Steer, Queue and Stop also in the button's hold/chevron menu.
  */
 export function Composer({
   session,
@@ -41,6 +46,7 @@ export function Composer({
   onSend,
   onInterrupt,
   controls,
+  status,
   disabled = false,
 }: ComposerProps) {
   const [draft, setDraft] = useState(() => readDraft(session.id));
@@ -50,6 +56,9 @@ export function Composer({
   const [busy, setBusy] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // While typing on a phone everything above the input (pickers, agents) steps aside,
+  // so the conversation gets the room and can be scrolled and referenced.
+  const keyboardOpen = useSoftKeyboard();
 
   const rules = attachmentRules(provider, model);
   const canAttach = rules.images || rules.files;
@@ -123,7 +132,7 @@ export function Composer({
 
   const requestAction: ComposerAction = !running ? "send" : canQueue ? "queue" : "send";
   const empty = draft.trim().length === 0 && attachments.length === 0;
-  const primaryDisabled = disabled || busy || uploading || (running && !canQueue) || empty;
+  const blocked = disabled || busy || uploading;
 
   const submit = async (action: ComposerAction) => {
     const text = draft.trim();
@@ -146,6 +155,43 @@ export function Composer({
     }
   };
 
+  // The one button: Stop while running with nothing typed; otherwise the best
+  // way to deliver the text (Queue, else Steer when that is all there is).
+  const followUp: ComposerAction | null = !running ? "send" : canQueue ? "queue" : canSteer ? "steer" : null;
+  // Text is what a follow-up needs, so attachments alone still leave Stop as the action.
+  const noText = draft.trim().length === 0;
+  const mode: RunButtonMode = running && noText && canInterrupt ? "stop" : (followUp ?? "send");
+  const pressDisabled = mode === "stop" ? disabled : blocked || empty || followUp === null;
+  const press = () => {
+    if (mode === "stop") onInterrupt();
+    else if (followUp) void submit(followUp);
+  };
+  const menu: RunMenuItem[] = running
+    ? [
+        ...(canSteer
+          ? [
+              {
+                key: "steer" as const,
+                label: "Steer now",
+                disabled: blocked || empty,
+                onSelect: () => void submit("steer"),
+              },
+            ]
+          : []),
+        ...(canQueue
+          ? [
+              {
+                key: "queue" as const,
+                label: "Queue after this run",
+                disabled: blocked || empty,
+                onSelect: () => void submit("queue"),
+              },
+            ]
+          : []),
+        ...(canInterrupt ? [{ key: "stop" as const, label: "Stop the run", disabled, onSelect: onInterrupt }] : []),
+      ]
+    : [];
+
   const placeholder = running
     ? canQueue
       ? "Queue a follow-up…"
@@ -153,10 +199,14 @@ export function Composer({
     : `Message ${provider?.name ?? "your agent"}…`;
 
   return (
-    <div className="relative z-10 border-t border-[var(--chrome-border)] bg-chrome px-safe pt-2.5 pb-safe-composer backdrop-blur-xl backdrop-saturate-150">
+    <div
+      data-keyboard-open={keyboardOpen}
+      className="relative z-10 border-t border-[var(--chrome-border)] bg-chrome px-safe pt-2.5 pb-safe-composer backdrop-blur-xl backdrop-saturate-150"
+    >
+      {status && !keyboardOpen ? <div className="mx-auto mb-2 max-w-[680px]">{status}</div> : null}
       <PromptBar
         busy={running}
-        controls={controls}
+        controls={keyboardOpen ? null : controls}
         attachments={
           attachments.length > 0 || uploading ? (
             <>
@@ -200,60 +250,9 @@ export function Composer({
                 )}
               </IconButton>
             ) : null}
-            {running && canInterrupt ? (
-              <button
-                type="button"
-                aria-label="Stop the run"
-                title="Stop the run"
-                onClick={onInterrupt}
-                disabled={disabled}
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-bad-soft text-bad transition-transform active:scale-95 disabled:opacity-40"
-              >
-                <Square size={13} fill="currentColor" strokeWidth={0} aria-hidden />
-              </button>
-            ) : null}
           </>
         }
-        trailing={
-          <>
-            {running && canSteer ? (
-              <button
-                type="button"
-                onClick={() => void submit("steer")}
-                disabled={disabled || busy || empty}
-                aria-label="Steer the agent now"
-                title="Send into the current run"
-                className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-fill px-3.5 text-callout font-semibold text-text transition-[transform,opacity] active:scale-95 disabled:opacity-40"
-              >
-                <Zap size={16} strokeWidth={2.25} className="text-accent" aria-hidden />
-                Steer
-              </button>
-            ) : null}
-            {running ? (
-              <button
-                type="button"
-                onClick={() => void submit(requestAction)}
-                disabled={primaryDisabled}
-                aria-label="Queue message"
-                title="Send after this run"
-                className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-callout font-semibold text-on-accent shadow-[var(--shadow-accent)] transition-[transform,background-color,color,box-shadow] duration-200 enabled:active:scale-[0.96] disabled:bg-fill-strong disabled:text-muted disabled:shadow-none"
-              >
-                <ListEnd size={17} strokeWidth={2.25} aria-hidden />
-                Queue
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void submit(requestAction)}
-                disabled={primaryDisabled}
-                aria-label="Send message"
-                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent shadow-[var(--shadow-accent)] transition-[transform,background-color,color,box-shadow] duration-200 enabled:active:scale-[0.94] disabled:bg-fill-strong disabled:text-muted disabled:shadow-none"
-              >
-                <ArrowUp size={20} strokeWidth={2.5} aria-hidden />
-              </button>
-            )}
-          </>
-        }
+        trailing={<RunButton mode={mode} disabled={pressDisabled} onPress={press} menu={menu} />}
         message={
           error ? (
             <p role="alert" className="px-2 text-caption text-bad">

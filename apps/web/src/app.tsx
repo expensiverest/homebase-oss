@@ -3,7 +3,8 @@ import { createRootRoute, createRoute, createRouter, Outlet, RouterProvider } fr
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 
-import { useVisualViewportHeight } from "./lib/chatScroll.js";
+import { useVisibleViewport } from "./lib/chatScroll.js";
+import { lockPagePanning } from "./lib/touchScroll.js";
 import { installVisibilityReconnect, registerInvalidator, startLiveStream, stopLiveStream } from "./lib/live.js";
 import { invalidateForEvent } from "./lib/queries.js";
 import { ChatScreen } from "./screens/ChatScreen.js";
@@ -27,13 +28,35 @@ const queryClient = new QueryClient({
 });
 
 function AppShell() {
-  // visualViewport shrinks when the iOS keyboard opens; the shell follows it so
-  // the composer is never hidden behind the keyboard.
-  const viewportHeight = useVisualViewportHeight();
+  // The shell is fixed to the screen (top and bottom 0), so the page itself never scrolls. (In an
+  // iOS standalone PWA that only reaches the real bottom because `html` has a tall min-height:
+  // see index.css.) Only while the
+  // software keyboard is up does it take the visual viewport's height AND offset: iOS keeps the
+  // layout viewport full-height and scrolls the visual one to reveal the caret, so without this
+  // the composer would jump under the status bar. (Android resizes the layout viewport itself.)
+  //
+  // The transform is always present, even at 0: it makes the shell the containing block for
+  // `position: fixed` descendants, so sheets fill exactly the shell (the visible area) instead of the
+  // full-height layout viewport, where the keyboard would cover or push them.
+  const visible = useVisibleViewport();
+  const keyboard = visible?.keyboard === true;
+  // `html` is deliberately taller than the screen (see index.css), so a drag on anything that is
+  // not a scroll area (the composer) must not be allowed to pan the page: that is what made the
+  // screen shake while the keyboard was up. Real scrollers are unaffected.
+  useEffect(() => lockPagePanning(), []);
   return (
     <div
-      className="relative mx-auto flex w-full max-w-[720px] flex-col overflow-hidden bg-bg text-text"
-      style={{ height: viewportHeight ? `${viewportHeight}px` : "100dvh" }}
+      data-app-shell
+      className="fixed inset-x-0 top-0 mx-auto flex w-full max-w-[720px] flex-col overflow-hidden bg-bg text-text"
+      style={
+        keyboard
+          ? {
+              bottom: "auto",
+              height: `${visible.height}px`,
+              transform: `translateY(${visible.top}px)`,
+            }
+          : { bottom: 0, transform: "translateY(0)" }
+      }
     >
       <Outlet />
     </div>

@@ -1,6 +1,9 @@
 import { ChevronDown, ChevronRight, GitBranch, Loader2 } from "lucide-react";
 import { useEffect, useId, useRef, type ButtonHTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 
+import { useVisibleViewport } from "../lib/chatScroll.js";
+import { useStatusBarTint } from "../lib/statusBarTint.js";
+
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -421,6 +424,12 @@ export function Sheet({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // Callers pass a fresh `onClose` every render. If the focus effect depended on it, any re-render
+  // (a viewport change, live updates) would pull focus back to the sheet mid-typing and close the keyboard.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -431,12 +440,14 @@ export function Sheet({
         'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
       ) ?? []),
     ];
+    // Focus lands on the dialog itself unless a sheet opts a control in with `data-autofocus`. A sheet
+    // must never raise the keyboard on its own: searching is the user's choice.
     const preferred = panel?.querySelector<HTMLElement>("[data-autofocus]");
-    (preferred ?? focusable()[0])?.focus();
+    (preferred ?? panel)?.focus();
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -444,7 +455,8 @@ export function Sheet({
       if (list.length === 0) return;
       const first = list[0];
       const last = list[list.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      // Shift+Tab from the dialog itself (where focus starts) must wrap, not leave the dialog.
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
         event.preventDefault();
         last?.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -457,18 +469,28 @@ export function Sheet({
       document.removeEventListener("keydown", onKeyDown, true);
       previous?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
+
+  // The frame is `fixed`, and the app shell is its containing block (see app.tsx), so with the
+  // keyboard up it is exactly the visible area: the sheet sits above the keyboard, search field in view.
+  // Only the padding differs: the keyboard covers the home-indicator area.
+  const keyboard = useVisibleViewport()?.keyboard === true;
+  // The dimmed page must reach the very top: retint iOS's status-bar fade to match the scrim.
+  useStatusBarTint("scrim", open);
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
+    <div data-sheet-frame className="fixed inset-0 z-50 flex items-end justify-center">
       <div aria-hidden className="hb-rise absolute inset-0 bg-scrim" onClick={onClose} />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="hb-sheet relative flex max-h-[88dvh] w-full max-w-[560px] flex-col rounded-t-[var(--radius-xl)] border border-b-0 border-border bg-bg pb-safe shadow-[var(--shadow-lift)]"
+        tabIndex={-1}
+        className={`hb-sheet relative flex max-h-[88%] outline-none w-full max-w-[560px] flex-col rounded-t-[var(--radius-xl)] border border-b-0 border-border bg-bg shadow-[var(--shadow-lift)] ${
+          keyboard ? "pb-2" : "pb-safe"
+        }`}
       >
         <div aria-hidden className="mx-auto mt-2 h-1 w-9 rounded-full bg-fill-strong" />
         <header className="flex items-center justify-between gap-3 px-5 pt-2 pb-2">
@@ -483,7 +505,10 @@ export function Sheet({
             Done
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">{children}</div>
+        {/* pt-1.5: a focused field's outline is drawn outside it and would be clipped by this scroller. */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4 pt-1.5" data-sheet-body>
+          {children}
+        </div>
         {footer ? <footer className="hairline-top px-5 py-3 pb-safe-composer">{footer}</footer> : null}
       </div>
     </div>

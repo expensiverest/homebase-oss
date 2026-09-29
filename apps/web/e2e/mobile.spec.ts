@@ -84,15 +84,20 @@ test.describe("primary user journey", () => {
     await expect(card).toHaveCount(0);
   });
 
-  test("stops a running turn and offers queue and steer while working", async ({ page }) => {
+  test("one button stops, queues and steers a running turn", async ({ page }) => {
     await page.goto("/?mock=active-stream");
     await openProject(page, "aurora-api");
     await openSession(page, "Document the gateway endpoints");
+    // Nothing typed: the one button is Stop, with a chevron for the rest.
     await expect(page.getByLabel("Stop the run")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByLabel("Steer the agent now")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Queue message" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "More run actions" })).toBeVisible();
+    // Text typed: the same button becomes Queue.
     await page.getByRole("textbox", { name: "Message" }).fill("also cover pagination");
-    await page.getByLabel("Steer the agent now").click();
+    await expect(page.getByRole("button", { name: "Queue message" })).toBeVisible();
+    await expect(page.getByLabel("Stop the run")).toHaveCount(0);
+    // Steer lives in the menu.
+    await page.getByRole("button", { name: "More run actions" }).click();
+    await page.getByRole("menuitem", { name: "Steer now" }).click();
     await expect(page.getByText("also cover pagination").first()).toBeVisible();
     await page.getByLabel("Stop the run").click();
     await expect(page.getByLabel("Stop the run")).toHaveCount(0, { timeout: 10_000 });
@@ -141,7 +146,8 @@ test.describe("primary user journey", () => {
     await page
       .locator('input[type="file"]')
       .setInputFiles({ name: "diagram.png", mimeType: "image/png", buffer: ONE_PIXEL_PNG });
-    await expect(page.getByText("diagram.png")).toBeVisible();
+    // The composer shows only the small preview, with a way to remove it (no name or size).
+    await expect(page.getByRole("button", { name: "Remove diagram.png" })).toBeVisible();
     await sendMessage(page, "What do you see here?");
     await expect(page.getByAltText(/diagram|Attached image/).first()).toBeVisible();
   });

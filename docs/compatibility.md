@@ -103,16 +103,16 @@
 
 ### Historical donor behavior that no longer applies
 
-| Donor observation                                       | Current status (2.0.18)                                                                                     |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `/api/info` warm-up failures on first call per location | Still possible for `/api/model` (empty catalog), not for `/api/info`; adapter retries the catalog once      |
-| `next` cursor on the last page                          | Still returned; adapter normalizes short pages                                                              |
-| Session list needs `parentID=null` to hide subagents    | Still true; adapter also filters `parentID` defensively                                                     |
-| `location[directory]=` deep-object scoping for catalogs | Unchanged for `/api/model`, `/api/agent`, `/api/command`; `/api/session` uses a plain `directory` parameter |
-| `_tag` error bodies                                     | Unchanged (`SessionNotFoundError`, `PermissionNotFoundError`, …)                                            |
-| `delivery: "steer"` is the default for plain prompts    | Unchanged; the adapter only sends `delivery` explicitly when steering or queueing                           |
-| Reasoning text may be present                           | Yes (model-dependent; e.g. reasoning-capable models stream `reasoning_content`)                             |
-| Form fields use `q0…` keys with options + `custom`      | Unchanged and verified live                                                                                 |
+| Donor observation                                       | Current status (2.0.18)                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/info` warm-up failures on first call per location | Still possible for `/api/model` (empty catalog), not for `/api/info`; adapter retries the catalog once                                                                                                                                                                                                                                                |
+| `next` cursor on the last page                          | Still returned; adapter normalizes short pages                                                                                                                                                                                                                                                                                                        |
+| Session list needs `parentID=null` to hide subagents    | Still true; adapter also filters `parentID` defensively. A child session is still fetchable by id and is exposed with `parentSessionId`; the `task` tool's `metadata.sessionId` becomes `AgentToolCall.childSessionId` (history path covered by tests; the live-event field is read defensively and **not yet verified against a live OpenCode run**) |
+| `location[directory]=` deep-object scoping for catalogs | Unchanged for `/api/model`, `/api/agent`, `/api/command`; `/api/session` uses a plain `directory` parameter                                                                                                                                                                                                                                           |
+| `_tag` error bodies                                     | Unchanged (`SessionNotFoundError`, `PermissionNotFoundError`, …)                                                                                                                                                                                                                                                                                      |
+| `delivery: "steer"` is the default for plain prompts    | Unchanged; the adapter only sends `delivery` explicitly when steering or queueing                                                                                                                                                                                                                                                                     |
+| Reasoning text may be present                           | Yes (model-dependent; e.g. reasoning-capable models stream `reasoning_content`)                                                                                                                                                                                                                                                                       |
+| Form fields use `q0…` keys with options + `custom`      | Unchanged and verified live                                                                                                                                                                                                                                                                                                                           |
 
 ### Live tests
 
@@ -233,7 +233,8 @@ Homebase exposes Claude sessions that are local, project-scoped, and resumable:
 - sessions recorded under the configured project directory's transcript folder,
 - with at least one real assistant answer (synthetic `<synthetic>` login/notice entries are skipped),
 - excluding `claude-desktop`/editor entrypoints, sidechain (subagent) entries, meta entries, and
-  never-answered runs.
+  never-answered runs. Claude sub-agents therefore have no separate thread yet: their `Task` tool calls still show in
+  the Agents strip, but without an "open thread" link (`childSessionId` is absent).
 
 Transcript format is treated as internal and version-sensitive: parsing skips unknown entry types
 and malformed lines, and never throws. Message history is built from user/assistant entries with

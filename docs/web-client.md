@@ -123,13 +123,13 @@ scripted stages, hard-coded content, hover-only reveals, `@` sources, slash comm
 
 **One narrative per run** (`activeRunView` in `lib/viewmodel.ts`, `buildTrace` for the steps):
 
-| Moment                            | Surface                                                                                        |
-| --------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Turn started, nothing visible yet | **Loading State (Orbit)**: "Starting…"/"Working…" with elapsed time from `turn.started`        |
-| Reasoning streaming               | **Thinking**, open, with the fold-ripple `Brain` looping (local `AnimatedBrain`, ~1.2 s cycle) |
-| Tools / plan in the live run      | **Task Rows** (status ring → check / cross, expandable input/output/error)                     |
-| Text                              | streaming Markdown; the Orbit never shows beside real work                                     |
-| Run finished                      | "Worked for …" folded; open: settled **Thinking**, interim updates, **Tool Chips**             |
+| Moment                            | Surface                                                                                            |
+| --------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Turn started, nothing visible yet | **Loading State (Orbit)**: "Starting…"/"Working…" with elapsed time from `turn.started`            |
+| Reasoning streaming               | **Thinking**, open, with the fold-ripple `Brain` looping (local `AnimatedBrain`, calm 2.4 s cycle) |
+| Tools / plan in the live run      | **Task Rows** (status ring → check / cross, expandable input/output/error)                         |
+| Text                              | streaming Markdown; the Orbit never shows beside real work                                         |
+| Run finished                      | "Worked for …" folded; open: settled **Thinking**, interim updates, **Tool Chips**                 |
 
 - **Orbit** is agent activity only; ordinary loading keeps skeletons. Elapsed time comes from the real turn start
   (the live overlay's `runStartedAt`, else the prompt's time), never from page mount.
@@ -143,8 +143,22 @@ scripted stages, hard-coded content, hover-only reveals, `@` sources, slash comm
 - **Recommendation Card** is used only when a request is a single `confirm` question. Its signal meter and
   alternatives drawer are optional and unused today: the protocol carries no confidence, so none is shown or
   inferred.
-- **Prompt Bar** is the composer's surface: pickers above, a full-width input, attach/Stop left and Steer/Queue (or
-  Send) right on a toolbar below that wraps as a group. Send/Queue change fill with readiness.
+- **Prompt Bar** is the composer's surface: pickers above, a full-width input, attach on the left and **one** round
+  action button on the right (`RunButton`). It is Send when idle; while a run is going it is Stop with an empty input
+  and Queue once there is text. Steer, Queue and Stop are also in a small menu opened by pressing and holding the
+  button or by the chevron beside it. The app shell is fixed to the true screen (top and bottom 0), so it can never leave a strip below it (a
+  standalone PWA's `visualViewport` can report a little short). Only while the software keyboard is up does it follow
+  the visual viewport's height _and_ offset, so the composer stays on top of the iOS keyboard.
+- **Sub-agents.** When the model spawns agents (Claude's `Task`, OpenCode's `task` tool calls) an **Agents strip** sits
+  above the prompt bar ("3 of 4 agents working", a dot per agent); tapping it opens a sheet with a row per agent
+  (status, how long, and expandable type, prompt, result or error). It is derived from normalized tool calls
+  (`subagentsOf` in `lib/viewmodel.ts`), so no provider-specific event is needed. The strip stays while any agent is
+  working, lingers about 5 seconds after the last one finishes, then steps aside (the run's trace keeps each state).
+  While the keyboard is up, everything above the input (pickers and the strip) is hidden so the thread can be scrolled
+  and referenced. When the provider exposes a child session (`AgentToolCall.childSessionId`), each agent has an
+  **open thread** button (in the sheet and on its Task Row). A sub-agent thread is an ordinary session with a
+  `parentSessionId`: labelled **Sub-agent**, "Spawned by <parent>", read only, no delete, and a way back to the
+  parent; it never appears in the project's own session list. Try `?mock=agents`.
 - **Code Block** tokenises with Shiki (web bundle, preloaded and cached) into text nodes; line numbers, wrapping,
   copy. Diff mode is used only for real `AgentDiff` patches in the Changes sheet.
 
@@ -163,7 +177,8 @@ covered by `e2e/quality.spec.ts`.
 In development, `?mock=<scenario>` installs a deterministic in-memory transport and event stream. Scenarios include
 `normal`, `empty`, `many-sessions`, `active-stream`, `approval`, `question`, `failed`, `provider-down`, `signed-out`,
 `reconnecting`, `resync`, `models-large`, `attachments`, `diff`, `reasoning`, `claude-image-only`,
-`long-conversation`, `host-error`, and the held live turns `run-starting`, `run-thinking`, `run-tools` plus `confirm`.
+`long-conversation`, `host-error`, the held live turns `run-starting`, `run-thinking`, `run-tools`, `confirm`, and
+`agents` (a model fanning out to four sub-agents over about 22 seconds; reload to replay).
 Fixtures are fictional; the normal scenario deliberately includes short and
 very long project names, a long branch, a long session title, mixed providers and states, and a long tool-heavy reply
 so screenshots exercise the design. The module is loaded through a dynamic import behind

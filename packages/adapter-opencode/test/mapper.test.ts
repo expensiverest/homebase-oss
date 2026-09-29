@@ -9,6 +9,7 @@ import {
   toAgentMessage,
   toAgentModel,
   toAgentSession,
+  toAgentToolCall,
   toApprovalRequest,
   toFormAnswer,
   toQuestionRequest,
@@ -64,6 +65,50 @@ describe("session mapping", () => {
     expect(session.model?.modelId).toBe("example-provider/example-model");
     expect(session.model?.thinkingLevel).toBe("low");
     expect(session.mode).toBe("build");
+    expect(session.parentSessionId).toBeUndefined();
+  });
+
+  it("links a sub-agent session to its parent", () => {
+    const session = toAgentSession({ ...nativeSession, parentID: "hb1~opencode~parent" }, "prj_1", "idle");
+    expect(session.parentSessionId).toBe("hb1~opencode~parent");
+  });
+});
+
+describe("sub-agent tool calls", () => {
+  const task = (state: Record<string, unknown>) =>
+    ({
+      type: "tool",
+      id: "call_task",
+      name: "task",
+      state,
+      time: { created: 1_700_000_000_000, completed: 1_700_000_005_000 },
+    }) as Parameters<typeof toAgentToolCall>[0];
+  const wrap = (nativeId: string) => `public:${nativeId}`;
+
+  it("exposes the child session from the task tool's metadata, wrapped as a public id", () => {
+    const call = toAgentToolCall(
+      task({ status: "running", input: { description: "Review routes" }, metadata: { sessionId: "ses_child" } }),
+      wrap,
+    );
+    expect(call.childSessionId).toBe("public:ses_child");
+    const done = toAgentToolCall(
+      task({
+        status: "completed",
+        input: {},
+        content: [{ type: "text", text: "ok" }],
+        metadata: { sessionId: "ses_child" },
+      }),
+      wrap,
+    );
+    expect(done).toMatchObject({ status: "completed", childSessionId: "public:ses_child" });
+  });
+
+  it("emits no link without a usable session id", () => {
+    for (const metadata of [undefined, {}, { sessionId: 42 }, { sessionId: "" }]) {
+      const call = toAgentToolCall(task({ status: "running", input: {}, metadata }), wrap);
+      expect("childSessionId" in call).toBe(false);
+    }
+    expect("childSessionId" in toAgentToolCall(task({ status: "streaming", input: "{" }), wrap)).toBe(false);
   });
 });
 

@@ -5,11 +5,14 @@ import {
   activeRunView,
   attachmentRules,
   buildTrace,
+  currentSubagents,
   foldTimeline,
   providerStatus,
   resolveThinkingLevel,
   safeHref,
   sessionStatus,
+  subagentsOf,
+  subagentSummary,
   toolPresentation,
 } from "./viewmodel.js";
 
@@ -244,5 +247,75 @@ describe("tool presentation for future tools", () => {
     expect(toolPresentation(call("g", "grep", "completed", { pattern: "nextCursor", path: "src" })).detail).toBe(
       "nextCursor",
     );
+  });
+});
+
+describe("sub-agents", () => {
+  const spawn = (id: string, name: string, status: AgentToolCall["status"], extra: Partial<AgentToolCall> = {}) =>
+    ({
+      id,
+      name,
+      status,
+      input: { description: `Review ${id}`, prompt: `Look at ${id} closely`, subagent_type: "explore" },
+      ...extra,
+    }) satisfies AgentToolCall;
+
+  it("recognises task-style tool calls from any provider and ignores ordinary tools", () => {
+    const agents = subagentsOf([
+      spawn("routes", "Task", "running"),
+      spawn("docs", "task", "completed", { output: { type: "text", text: "Docs are stale." } }),
+      spawn("deps", "agent", "failed", { error: "registry timed out" }),
+      tool("plain", "bash"),
+    ]);
+    expect(agents.map((agent) => agent.id)).toEqual(["routes", "docs", "deps"]);
+    expect(agents[0]).toMatchObject({ title: "Review routes", kind: "explore", prompt: "Look at routes closely" });
+    expect(agents[1]?.result).toBe("Docs are stale.");
+    expect(agents[2]?.error).toBe("registry timed out");
+  });
+
+  it("carries the sub-agent's own thread when the provider exposes one", () => {
+    const [linked, unlinked] = subagentsOf([
+      spawn("a", "task", "running", { childSessionId: "hb1~opencode~child" }),
+      spawn("b", "task", "running"),
+    ]);
+    expect(linked?.threadId).toBe("hb1~opencode~child");
+    expect(unlinked?.threadId).toBeNull();
+  });
+
+  it("falls back to a generic title and survives odd inputs", () => {
+    const [agent] = subagentsOf([{ id: "x", name: "task", status: "running", input: "just a string" }]);
+    expect(agent).toMatchObject({ title: "Sub-agent", kind: null, prompt: null, result: null });
+  });
+
+  it("summarises how many are working, done and failed", () => {
+    const summary = subagentSummary(
+      subagentsOf([
+        spawn("a", "task", "running"),
+        spawn("b", "task", "running"),
+        spawn("c", "task", "completed"),
+        spawn("d", "task", "failed"),
+        spawn("e", "task", "denied"),
+      ]),
+    );
+    expect(summary).toEqual({ total: 5, working: 2, done: 1, failed: 2 });
+  });
+
+  it("only watches the run after the newest prompt", () => {
+    const timeline = foldTimeline([
+      user("u1", "first"),
+      assistant("a1", [{ type: "tool_call", id: "t1", toolCall: spawn("old", "task", "completed") }]),
+      assistant("a2", [{ type: "text", id: "a2:t", text: "Done." }]),
+      user("u2", "second"),
+      assistant(
+        "a3",
+        [
+          { type: "tool_call", id: "t2", toolCall: spawn("new1", "task", "running") },
+          { type: "tool_call", id: "t3", toolCall: spawn("new2", "task", "completed") },
+        ],
+        "streaming",
+      ),
+    ]);
+    expect(currentSubagents(timeline).map((agent) => agent.id)).toEqual(["new1", "new2"]);
+    expect(currentSubagents(foldTimeline([user("u", "hi")]))).toEqual([]);
   });
 });

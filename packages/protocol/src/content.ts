@@ -35,6 +35,8 @@ export const agentToolCallSchema = z.object({
   error: z.string().nullable().optional(),
   startedAt: timestampSchema.nullable().optional(),
   completedAt: timestampSchema.nullable().optional(),
+  /** For a tool call that spawned a sub-agent: the session holding that agent's own thread, when the provider exposes one. */
+  childSessionId: sessionIdSchema.nullable().optional(),
 });
 export type AgentToolCall = z.infer<typeof agentToolCallSchema>;
 

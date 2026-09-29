@@ -56,7 +56,7 @@ export function PromptBar({
       >
         {attachments ? (
           <div
-            className="flex flex-wrap gap-1.5 px-1 pt-1 [&>*]:animate-[bui-pop-in_200ms_cubic-bezier(0.23,1,0.32,1)_both]"
+            className="flex flex-wrap gap-2 pl-1 pr-3 pt-3 [&>*]:animate-[bui-pop-in_200ms_cubic-bezier(0.23,1,0.32,1)_both]"
             aria-label="Attached files"
           >
             {attachments}

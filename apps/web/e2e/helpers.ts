@@ -59,3 +59,39 @@ export const ONE_PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64",
 );
+
+/**
+ * Chromium has no software keyboard, so tests drive `visualViewport` the way iOS
+ * does: shorter, and scrolled down inside the layout viewport. Until told
+ * otherwise the mock reports the real window height, like a browser would.
+ * Call before `page.goto`.
+ */
+export async function installMockVisualViewport(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const target = new EventTarget();
+    let height: number | null = null;
+    const viewport = Object.defineProperties(target, {
+      height: { get: () => height ?? window.innerHeight },
+      width: { get: () => window.innerWidth },
+      offsetTop: { value: 0, writable: true },
+      offsetLeft: { value: 0 },
+      pageTop: { value: 0 },
+      pageLeft: { value: 0 },
+      scale: { value: 1 },
+    });
+    Object.defineProperty(window, "visualViewport", { value: viewport, configurable: true });
+    (window as unknown as { __setViewport: (h: number | null, t: number) => void }).__setViewport = (next, top) => {
+      height = next;
+      (viewport as unknown as { offsetTop: number }).offsetTop = top;
+      target.dispatchEvent(new Event("resize"));
+    };
+  });
+}
+
+/** Simulates the keyboard opening (`height` shorter, `top` scrolled) or closing (`null`, 0). */
+export async function setMockVisualViewport(page: Page, height: number | null, top: number): Promise<void> {
+  await page.evaluate(
+    ([h, t]) => (window as unknown as { __setViewport: (h: number | null, t: number) => void }).__setViewport(h, t!),
+    [height, top] as const,
+  );
+}

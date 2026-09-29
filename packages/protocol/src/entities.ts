@@ -127,5 +127,11 @@ export const agentSessionSchema = z.object({
   model: agentModelRefSchema.nullable().optional(),
   mode: z.string().nullable().optional(),
   thinkingLevel: z.string().nullable().optional(),
+  /**
+   * Set when this session is a sub-agent thread spawned by another session.
+   * Sub-agent threads are never listed with a project's own sessions; they are
+   * reached from the parent's tool call (`AgentToolCall.childSessionId`).
+   */
+  parentSessionId: sessionIdSchema.nullable().optional(),
 });
 export type AgentSession = z.infer<typeof agentSessionSchema>;

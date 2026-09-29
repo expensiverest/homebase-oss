@@ -19,20 +19,20 @@ paths or derive provider behavior from their shape.
 
 ## Entities
 
-| Type                             | Purpose                                    | Notable fields                                                                                          |
-| -------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `AgentProvider`                  | A registered provider and its state        | `installed`, `authenticated` (`boolean \| null` for "unknown"), `compatible`, `capabilities`, `warning` |
-| `AgentProject`                   | A Homebase-owned project                   | `path` is always Host-canonical; `providersAvailable` is computed by the Host                           |
-| `AgentSession`                   | A session with one provider                | `provider`, `projectId`, `state`, `model`, `mode`, `thinkingLevel`                                      |
-| `AgentModel`                     | A selectable model                         | `thinkingLevels`, `defaultThinkingLevel`, context/output limits, per-model `inputCapabilities`          |
-| `AgentModelRef`                  | Model selection for a session              | `provider`, `modelId`, `thinkingLevel`                                                                  |
-| `AgentMode`                      | A selectable mode (for example plan/agent) | `id`, `name`, `description`                                                                             |
-| `AgentMessage`                   | One user/assistant/system message          | `state` (`streaming`/`completed`/`failed`/`interrupted`), `parts`                                       |
-| `AgentToolCall`                  | A tool invocation                          | `status` (`running`/`completed`/`failed`/`denied`), `input`, `output`, `error`                          |
-| `AgentApprovalRequest`           | A pending approval                         | `kind`, `title`, `detail`, `options[]` with `allow_once`/`allow_always`/`deny`/`custom`                 |
-| `AgentQuestionRequest`           | A pending structured question              | `questions[]` with `single_select`/`multi_select`/`text`/`confirm`                                      |
-| `AgentDiff` / `AgentDiffSummary` | File changes                               | `files[]` with status and line counts, optional patch                                                   |
-| `AgentUsage`                     | Usage windows                              | `windows[]` with unit (`percent`/`tokens`/`requests`/`usd`/`minutes`)                                   |
+| Type                             | Purpose                                    | Notable fields                                                                                             |
+| -------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `AgentProvider`                  | A registered provider and its state        | `installed`, `authenticated` (`boolean \| null` for "unknown"), `compatible`, `capabilities`, `warning`    |
+| `AgentProject`                   | A Homebase-owned project                   | `path` is always Host-canonical; `providersAvailable` is computed by the Host                              |
+| `AgentSession`                   | A session with one provider                | `provider`, `projectId`, `state`, `model`, `mode`, `thinkingLevel`, optional `parentSessionId` (sub-agent) |
+| `AgentModel`                     | A selectable model                         | `thinkingLevels`, `defaultThinkingLevel`, context/output limits, per-model `inputCapabilities`             |
+| `AgentModelRef`                  | Model selection for a session              | `provider`, `modelId`, `thinkingLevel`                                                                     |
+| `AgentMode`                      | A selectable mode (for example plan/agent) | `id`, `name`, `description`                                                                                |
+| `AgentMessage`                   | One user/assistant/system message          | `state` (`streaming`/`completed`/`failed`/`interrupted`), `parts`                                          |
+| `AgentToolCall`                  | A tool invocation                          | `status` (`running`/`completed`/`failed`/`denied`), `input`, `output`, `error`, optional `childSessionId`  |
+| `AgentApprovalRequest`           | A pending approval                         | `kind`, `title`, `detail`, `options[]` with `allow_once`/`allow_always`/`deny`/`custom`                    |
+| `AgentQuestionRequest`           | A pending structured question              | `questions[]` with `single_select`/`multi_select`/`text`/`confirm`                                         |
+| `AgentDiff` / `AgentDiffSummary` | File changes                               | `files[]` with status and line counts, optional patch                                                      |
+| `AgentUsage`                     | Usage windows                              | `windows[]` with unit (`percent`/`tokens`/`requests`/`usd`/`minutes`)                                      |
 
 ### Session states
 

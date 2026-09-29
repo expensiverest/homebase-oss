@@ -61,7 +61,7 @@ SOFTWARE.
 Homebase does **not** depend on the `lucide-react-motion` package at runtime. `apps/web/src/components/beautiful/AnimatedBrain.tsx`
 contains a narrow, purpose-built adaptation of that project's `brain` signature animation and its `brain-fold-ripple`
 motion (`packages/lucide-react-motion/src/modes/signatures/brain.ts` and `.../motions/brain-fold-ripple.ts`): the
-per-path propagation order, the fold/outline roles, the keyframes and the 1.2 s ease-in-out cycle. It is reimplemented
+per-path propagation order, the fold/outline roles, the keyframes and the ease-in-out cycle (Homebase runs it at 2.4 s instead of 1.2 s). It is reimplemented
 directly on `motion/react` for the Thinking indicator only; nothing else from the library (icon catalog, mode registry,
 other animations) is included.
 

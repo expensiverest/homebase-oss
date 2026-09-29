@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { expectNoHorizontalOverflow, openProject, openSession } from "../helpers.js";
+import { expectNoHorizontalOverflow, ONE_PIXEL_PNG, openProject, openSession } from "../helpers.js";
 
 /**
  * Deterministic screenshots of the key mobile screens for design review.
@@ -133,6 +133,72 @@ for (const theme of ["dark", "light"] as const) {
         .fill("Also cover pagination,\nerror shapes,\nand the retry headers\nfor the event stream.");
       await expectWideComposer(page);
       await shot(page, "10-chat-running", theme);
+    });
+
+    test("10b chat run menu", async ({ page }) => {
+      await boot(page, "active-stream", theme);
+      await openProject(page, "aurora-api");
+      await openSession(page, "Document the gateway endpoints");
+      await expect(page.getByLabel("Stop the run")).toBeVisible({ timeout: 10_000 });
+      await page.getByRole("textbox", { name: "Message" }).fill("Also cover pagination.");
+      await page.getByRole("button", { name: "More run actions" }).click();
+      await expect(page.getByRole("menu", { name: "Run actions" })).toBeVisible();
+      await expectWideComposer(page);
+      await shot(page, "10b-chat-run-menu", theme);
+    });
+
+    test("16 agents strip while sub-agents work", async ({ page }) => {
+      await boot(page, "agents", theme);
+      await openProject(page, "aurora-api");
+      await openSession(page, "Document the gateway endpoints");
+      await expect(page.locator("[data-agents-strip]")).toContainText("4 of 4 agents working", { timeout: 20_000 });
+      await shot(page, "16-agents-strip", theme);
+    });
+
+    test("17 agents sheet", async ({ page }) => {
+      await boot(page, "agents", theme);
+      await openProject(page, "aurora-api");
+      await openSession(page, "Document the gateway endpoints");
+      await expect(page.locator("[data-agents-strip]")).toContainText("of 4 agents working", { timeout: 20_000 });
+      await page.locator("[data-agents-strip]").click();
+      const sheet = page.getByRole("dialog", { name: "Agents" });
+      await expect(sheet).toBeVisible();
+      await expect(sheet.locator("[data-task-rows] > li")).toHaveCount(4);
+      await shot(page, "17-agents-sheet", theme);
+    });
+
+    test("18 sub-agent thread", async ({ page }) => {
+      await boot(page, "agents", theme);
+      await openProject(page, "aurora-api");
+      await openSession(page, "Document the gateway endpoints");
+      await expect(page.locator("[data-agents-strip]")).toContainText("of 4 agents working", { timeout: 20_000 });
+      await page.locator("[data-agents-strip]").click();
+      await page
+        .getByRole("dialog", { name: "Agents" })
+        .getByRole("button", { name: "Open sub-agent thread: Review gateway routes" })
+        .click();
+      await expect(page.locator("[data-subagent-header]")).toContainText("Sub-agent");
+      await expect(page.getByText("Found 4 endpoints", { exact: false })).toBeVisible({ timeout: 20_000 });
+      await shot(page, "18-subagent-thread", theme);
+    });
+
+    test("19 image attachments: thread, composer preview and large preview", async ({ page }) => {
+      await boot(page, "attachments", theme);
+      await openProject(page, "aurora-api");
+      await openSession(page, "Document the gateway endpoints");
+      await expect(page.locator("[data-chat-scroll] [data-image-thumb]")).toHaveCount(3);
+      await page
+        .locator('input[type="file"]')
+        .setInputFiles({ name: "notes.png", mimeType: "image/png", buffer: ONE_PIXEL_PNG });
+      await expect(page.locator("[data-pending-image]")).toBeVisible();
+      await shot(page, "19a-images-thread-composer", theme);
+      await page.getByRole("button", { name: "Open image: latency-chart.svg" }).click();
+      await expect(page.getByRole("dialog", { name: "Image preview" })).toBeVisible();
+      await shot(page, "19b-image-lightbox", theme);
+      await page.getByRole("button", { name: "Close preview" }).click();
+      await page.getByRole("button", { name: "Open image: phone-screenshot.svg" }).click();
+      await expect(page.getByRole("dialog", { name: "Image preview" })).toBeVisible();
+      await shot(page, "19c-image-lightbox-portrait", theme);
     });
 
     test("11 code block", async ({ page }) => {

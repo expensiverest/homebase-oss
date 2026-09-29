@@ -31,7 +31,11 @@ export const BRAIN_PATHS: ReadonlyArray<{ d: string; phase: number; role: Role }
 export const WAVE_LEAD = 0.04;
 /** How long the activity front takes to cross one fold, as a fraction of the cycle. */
 export const WAVE_WIDTH = 0.12;
-export const CYCLE_SECONDS = 1.2;
+/**
+ * Upstream runs the wave over 1.2s, which reads as a flicker on a phone at 17px.
+ * Homebase slows it to a calm 2.4s; the wave shape and timing fractions are unchanged.
+ */
+export const CYCLE_SECONDS = 2.4;
 
 /** Opacity and scale both start and end at rest. */
 export function foldVariants(phase: number, role: Role): Variants {
