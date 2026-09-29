@@ -52,9 +52,10 @@ Managed server rules:
 - Readiness: Homebase polls `/api/info` with the generated credentials until 200, treating 503 as "starting"; a
   bounded startup timeout and early-exit diagnostics (including port-in-use) produce a clear warning instead of a
   generic failure.
-- Shutdown: only the child Homebase spawned is stopped (stdin EOF → SIGTERM → SIGKILL). Homebase never reads,
-  edits, restarts, or kills the user's shared OpenCode service and never touches service files, daemon passwords,
-  CORS, or ports.
+- Shutdown: only the child Homebase spawned is stopped (stdin EOF → SIGTERM → SIGKILL on POSIX; on Windows the
+  owned process tree is terminated with `taskkill /PID <pid> /T` and `/T /F` escalation, so a `cmd.exe`/`.cmd`
+  wrapper cannot orphan the real server). Homebase never reads, edits, restarts, or kills the user's shared OpenCode
+  service and never touches service files, daemon passwords, CORS, or ports.
 - Recovery: a failed managed start is cached so reconnect loops cannot cause restart storms; an explicit provider
   refresh (or `POST /api/v1/providers/refresh`) makes one bounded new attempt.
 
@@ -274,6 +275,22 @@ normal process environment, so a user-managed `XAI_API_KEY` reaches Grok directl
 
 ### Known quirks and assumptions
 
+- **Homebase records the submitted user prompt itself.** Real Grok persists the user message but does not live-echo
+  it over ACP without the `x.ai/userMessageEcho` extension, and Homebase deliberately does not depend on that
+  extension. Every accepted `send()` is added to authoritative in-memory history before the model turn starts, so
+  `listMessages()` contains the user prompt and the assistant answer even when no `user_message_chunk` is received
+  live. If a provider _does_ live-echo the prompt, the echo is associated with the locally recorded message instead
+  of producing a duplicate; identical repeated prompts remain separate messages.
+- **After a Host restart, `session/load` replay is authoritative.** Replay reconstructs persisted user and assistant
+  history and never injects or duplicates locally recorded messages; replay is also never emitted as a live turn.
+- **Provider refresh recovers after `grok login`.** When the last detection was `authenticated: false`, an explicit
+  provider refresh (or `POST /api/v1/providers/refresh`) recycles only the ACP process state — endpoint, initialize
+  result, auth state, catalogs — and re-initializes so Grok can reload cached credentials, without restarting
+  Homebase and without discarding session history. An active model turn is never interrupted, and a healthy
+  authenticated transport is never restarted by refresh.
+- **`unknown` state for cold sessions.** Sessions discovered through `session/list` are not claimed to be `idle`;
+  they stay `unknown` until Homebase's own turn lifecycle moves them to `working`/`waiting`/`idle`, or the provider
+  reports failure.
 - **Live-verified shapes:** `initialize` returns `protocolVersion: 1`, auth methods
   (`cached_token`, `grok.com`, plus `defaultAuthMethodId` in `_meta`), `loadSession: true`,
   `sessionCapabilities: { list, resume, close }` (no `delete`), and `_meta.modelState.availableModels` with

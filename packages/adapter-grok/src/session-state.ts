@@ -39,7 +39,11 @@ export interface GrokSessionRecord {
   title: string | null;
   createdAt: string;
   updatedAt: string;
-  /** Idle/working/waiting/failed; `unknown` only for sessions discovered cold. */
+  /**
+   * Session state. `unknown` is used for cold sessions discovered through
+   * `session/list` that Homebase has not driven itself; `idle` is reserved for
+   * sessions Homebase created or completed its own turn on.
+   */
   state: AgentSession["state"];
   configOptions: SessionConfigOption[];
   availableModes: AgentMode[];
@@ -51,8 +55,38 @@ export interface GrokSessionRecord {
   tools: Map<string, AgentToolCall>;
   pendingPermissions: Set<string>;
   replaying: boolean;
+  /**
+   * The most recent locally accepted prompt whose provider echo has not been
+   * fully associated yet. Real Grok does not live-echo user messages without an
+   * extension Homebase deliberately does not use, so authoritative history is
+   * recorded locally; if a provider does echo, the echo is merged here instead
+   * of producing a duplicate user message.
+   */
+  pendingLocalUser: PendingLocalUser | null;
   /** Fallback counter used to build deterministic ids outside live turns. */
   fallbackCounter: number;
+}
+
+interface PendingLocalUser {
+  messageId: string;
+  text: string;
+  /** True once the provider's live echo has been associated with this message. */
+  echoSeen: boolean;
+  /** ACP message ids observed for the associated echo. */
+  nativeMessageIds: Set<string>;
+}
+
+export interface LocalUserAttachment {
+  id: string;
+  kind: "image" | "file";
+  name: string;
+  mimeType: string;
+  sizeBytes?: number | null;
+}
+
+export interface LocalUserMessageInput {
+  text: string;
+  attachments?: LocalUserAttachment[];
 }
 
 interface TurnState {
@@ -129,7 +163,10 @@ export class GrokSessionTracker {
       title: options.title ?? null,
       createdAt: this.#now(),
       updatedAt: this.#now(),
-      state: "idle",
+      // A cold/discovered session may be running elsewhere; claiming `idle`
+      // would be false certainty, so it starts as `unknown` until Homebase's
+      // own turn lifecycle gives evidence.
+      state: options.cold ? "unknown" : "idle",
       configOptions: options.configOptions ?? [],
       availableModes: modesFromModeState(options.modeState),
       modeId: options.modeState?.currentModeId ?? null,
@@ -138,6 +175,7 @@ export class GrokSessionTracker {
       tools: new Map(),
       pendingPermissions: new Set(),
       replaying: false,
+      pendingLocalUser: null,
       fallbackCounter: 0,
     };
     this.#sessions.set(options.nativeId, record);
@@ -174,8 +212,11 @@ export class GrokSessionTracker {
   }
 
   #sessionState(record: GrokSessionRecord): AgentSession["state"] {
-    if (this.#turns.has(record.nativeId)) return "working";
+    // A pending approval is actionable and takes precedence over "working",
+    // matching the shared Host/UI convention: the user must act before the
+    // turn can continue.
     if (record.pendingPermissions.size > 0) return "waiting";
+    if (this.#turns.has(record.nativeId)) return "working";
     return record.state;
   }
 
@@ -188,9 +229,42 @@ export class GrokSessionTracker {
     record.projectId = projectId;
   }
 
-  /** Marks a cold (listed but not opened) session as opened. */
+  /**
+   * Marks a cold (listed but not opened) session as opened. The state is
+   * deliberately left alone: replaying history is not evidence that a remote
+   * session is idle. Only Homebase's own turn lifecycle resolves `unknown`.
+   */
   markOpened(record: GrokSessionRecord): void {
     record.cold = false;
+  }
+
+  /**
+   * Records a prompt Homebase accepted through `send()` in authoritative
+   * history. Real Grok persists the user message but does not live-echo it
+   * without the `x.ai/userMessageEcho` extension, so Homebase must not depend
+   * on `user_message_chunk` for its own sends. No live events are emitted: the
+   * client already has the optimistic message and history is authoritative.
+   */
+  recordLocalUserMessage(nativeId: string, input: LocalUserMessageInput): AgentMessage {
+    const record = this.#require(nativeId);
+    const message: AgentMessage = {
+      id: `ul_${++record.fallbackCounter}`,
+      sessionId: record.publicId,
+      role: "user",
+      createdAt: this.#now(),
+      updatedAt: this.#now(),
+      state: "completed",
+      parts: [{ type: "text", id: "p0", text: input.text }, ...localAttachmentParts(input.attachments ?? [])],
+    };
+    record.messages.push(message);
+    record.pendingLocalUser = {
+      messageId: message.id,
+      text: input.text,
+      echoSeen: false,
+      nativeMessageIds: new Set(),
+    };
+    record.updatedAt = this.#now();
+    return message;
   }
 
   /** Creates a turn and emits `turn.started`. */
@@ -224,6 +298,9 @@ export class GrokSessionTracker {
     const turn = this.#turns.get(nativeId);
     if (!turn) return;
     this.#turns.delete(nativeId);
+    // The prompt is settled: any provider echo association window is closed, so
+    // an identical later prompt is never deduplicated against this one.
+    record.pendingLocalUser = null;
     this.#completeCurrentMessage(
       record,
       turn,
@@ -275,6 +352,9 @@ export class GrokSessionTracker {
   beginReplay(nativeId: string): void {
     const record = this.#require(nativeId);
     record.replaying = true;
+    // Replay is authoritative history from the provider; never inject a local
+    // user message into it and never associate replay chunks with a live send.
+    record.pendingLocalUser = null;
   }
 
   endReplay(nativeId: string): void {
@@ -340,11 +420,30 @@ export class GrokSessionTracker {
   }
 
   #applyUserChunk(record: GrokSessionRecord, chunk: ContentChunk): void {
+    const nativeId = chunk.messageId ?? null;
+    const pending = record.pendingLocalUser;
+    if (pending && !record.replaying) {
+      // Deduplicate against the most recently accepted local prompt only, never
+      // by global text matching. The first live echo associates with the local
+      // message; continuation chunks (same ACP message id, or no id at all
+      // while this prompt is the active association) are ignored because the
+      // local text is authoritative for the submitted prompt.
+      if (!pending.echoSeen) {
+        pending.echoSeen = true;
+        if (nativeId) pending.nativeMessageIds.add(nativeId);
+        return;
+      }
+      if (nativeId === null || pending.nativeMessageIds.has(nativeId)) {
+        return;
+      }
+      // A different ACP message id is a genuinely separate user message.
+    }
     const text = chunk.content.type === "text" ? chunk.content.text : "";
     if (!text) return;
-    const messageId = this.#nativeMessageId(record, chunk.messageId ?? null, "user");
+    const messageId = this.#nativeMessageId(record, nativeId, "user");
     const message = this.#ensureMessage(record, messageId, "user");
     this.#appendTextPart(message, text);
+    message.state = "completed";
     message.updatedAt = this.#now();
   }
 
@@ -691,6 +790,32 @@ export class GrokSessionTracker {
 
 function encodeCursor(offset: number): string {
   return Buffer.from(JSON.stringify({ v: 1, offset }), "utf8").toString("base64url");
+}
+
+/** Attachment metadata only; bytes continue to flow through the ACP prompt. */
+function localAttachmentParts(attachments: LocalUserAttachment[]): AgentContentPart[] {
+  return attachments.map((attachment, index) => {
+    const id = `p${index + 1}`;
+    if (attachment.kind === "image") {
+      return {
+        type: "image",
+        id,
+        attachmentId: attachment.id,
+        mimeType: attachment.mimeType,
+        name: attachment.name,
+      };
+    }
+    return {
+      type: "file",
+      id,
+      attachmentId: attachment.id,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      ...(attachment.sizeBytes !== undefined && attachment.sizeBytes !== null
+        ? { sizeBytes: attachment.sizeBytes }
+        : {}),
+    };
+  });
 }
 
 function decodeCursor(cursor: string): number | null {

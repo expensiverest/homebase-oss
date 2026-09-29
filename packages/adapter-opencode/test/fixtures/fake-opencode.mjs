@@ -15,6 +15,7 @@
  * mirroring OpenCode's "starting" state.
  */
 import http from "node:http";
+import { writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 const mode = process.env.FAKE_OPENCODE_MODE ?? "normal";
@@ -28,6 +29,10 @@ if (args.includes("--version") || args[0] === "version") {
 if (args[0] !== "serve") {
   console.error(`fake-opencode: unsupported command: ${args.join(" ")}`);
   process.exit(2);
+}
+
+if (process.env.FAKE_OPENCODE_PID_FILE) {
+  writeFileSync(process.env.FAKE_OPENCODE_PID_FILE, String(process.pid));
 }
 
 if (mode === "port-busy") {

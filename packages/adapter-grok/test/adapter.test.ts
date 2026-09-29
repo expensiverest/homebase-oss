@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -32,6 +33,8 @@ interface HarnessOptions {
   config?: Record<string, unknown>;
   projects?: Record<string, string>;
   runFn?: RunExecutable;
+  /** Override the default fixture spawner (for mutable auth-state tests). */
+  spawnFn?: SpawnExecutable;
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -44,15 +47,17 @@ function createHarness(options: HarnessOptions = {}) {
   });
   context.findProjectByPath = async (candidate: string) => projects[candidate] ?? null;
 
-  const spawnFn: SpawnExecutable = (_command, args, spawnOptions) => {
-    const env = {
-      ...(spawnOptions?.env ?? {}),
-      ...(options.mode !== undefined ? { FAKE_ACP_MODE: options.mode } : {}),
-      ...(options.auth !== undefined ? { FAKE_ACP_AUTH: options.auth } : {}),
-      ...(options.extraEnv ?? {}),
-    };
-    return spawnExecutable(process.execPath, [FIXTURE, ...args], { ...spawnOptions, env });
-  };
+  const spawnFn: SpawnExecutable =
+    options.spawnFn ??
+    ((_command, args, spawnOptions) => {
+      const env = {
+        ...(spawnOptions?.env ?? {}),
+        ...(options.mode !== undefined ? { FAKE_ACP_MODE: options.mode } : {}),
+        ...(options.auth !== undefined ? { FAKE_ACP_AUTH: options.auth } : {}),
+        ...(options.extraEnv ?? {}),
+      };
+      return spawnExecutable(process.execPath, [FIXTURE, ...args], { ...spawnOptions, env });
+    });
 
   const runFn: RunExecutable = (command, args, runOptions) => {
     if (options.runFn) return options.runFn(command, args, runOptions);
@@ -90,6 +95,11 @@ async function detectReady(adapter: GrokAdapter) {
 
 function eventsOf<T extends AgentEventType>(events: AgentEvent[], type: T): Array<Extract<AgentEvent, { type: T }>> {
   return events.filter((event): event is Extract<AgentEvent, { type: T }> => event.type === type);
+}
+
+function waitForExit(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => child.once("close", () => resolve()));
 }
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -251,6 +261,9 @@ describe("Grok sessions", () => {
     const assistant = page.items[0];
     expect(assistant?.parts.some((part) => part.type === "reasoning")).toBe(true);
     expect(assistant?.parts.some((part) => part.type === "text")).toBe(true);
+    const replayedUser = page.items[1];
+    expect(replayedUser?.state).toBe("completed");
+    expect(replayedUser?.parts).toEqual([{ type: "text", id: "p0", text: "Earlier question." }]);
     expect(eventsOf(context.events, "turn.started")).toHaveLength(0);
     expect(eventsOf(context.events, "message.delta")).toHaveLength(0);
 
@@ -350,6 +363,79 @@ describe("Grok turns", () => {
     await adapter.send(session.id, { text: "again" });
     await context.waitForEvent("turn.started", (event) => event.sessionId === session.id, 8_000);
     await adapter.interrupt(session.id);
+  });
+});
+
+describe("Grok authoritative history", () => {
+  it("records the submitted prompt even when the provider never live-echoes it", async () => {
+    const { adapter, context, project } = await harness({ auth: "cached" });
+    await detectReady(adapter);
+    const session = await adapter.createSession({ provider: "grok", projectId: project.id }, project);
+    context.clearEvents();
+    await adapter.send(session.id, { text: "fix the failing test" });
+    await context.waitForEvent("turn.completed", (event) => event.sessionId === session.id, 8_000);
+
+    const page = await adapter.listMessages(session.id, { limit: 10 });
+    const users = page.items.filter((message) => message.role === "user");
+    expect(users).toHaveLength(1);
+    expect(users[0]?.state).toBe("completed");
+    expect(users[0]?.parts).toEqual([{ type: "text", id: "p0", text: "fix the failing test" }]);
+    expect(page.items.some((message) => message.role === "assistant")).toBe(true);
+  });
+
+  it("merges a provider live echo instead of duplicating the prompt", async () => {
+    const { adapter, context, project } = await harness({
+      auth: "cached",
+      mode: "tools",
+      extraEnv: { FAKE_ACP_ECHO_USER: "1" },
+    });
+    await detectReady(adapter);
+    const session = await adapter.createSession({ provider: "grok", projectId: project.id }, project);
+    context.clearEvents();
+    await adapter.send(session.id, { text: "hello" });
+    await context.waitForEvent("turn.completed", (event) => event.sessionId === session.id, 8_000);
+
+    const page = await adapter.listMessages(session.id, { limit: 10 });
+    const users = page.items.filter((message) => message.role === "user");
+    expect(users).toHaveLength(1);
+    expect(users[0]?.parts).toEqual([{ type: "text", id: "p0", text: "hello" }]);
+  });
+
+  it("merges a multi-chunk echo that carries no ACP message id", async () => {
+    const { adapter, context, project } = await harness({
+      auth: "cached",
+      mode: "tools",
+      extraEnv: { FAKE_ACP_ECHO_USER: "1", FAKE_ACP_ECHO_USER_SPLIT: "1" },
+    });
+    await detectReady(adapter);
+    const session = await adapter.createSession({ provider: "grok", projectId: project.id }, project);
+    context.clearEvents();
+    await adapter.send(session.id, { text: "hello there" });
+    await context.waitForEvent("turn.completed", (event) => event.sessionId === session.id, 8_000);
+
+    const page = await adapter.listMessages(session.id, { limit: 10 });
+    const users = page.items.filter((message) => message.role === "user");
+    expect(users).toHaveLength(1);
+    expect(users[0]?.parts).toEqual([{ type: "text", id: "p0", text: "hello there" }]);
+  });
+
+  it("keeps repeated identical prompts as separate messages", async () => {
+    const { adapter, context, project } = await harness({ auth: "cached" });
+    await detectReady(adapter);
+    const session = await adapter.createSession({ provider: "grok", projectId: project.id }, project);
+    context.clearEvents();
+    await adapter.send(session.id, { text: "hello" });
+    await context.waitForEvent("turn.completed", (event) => event.sessionId === session.id, 8_000);
+    await adapter.send(session.id, { text: "hello" });
+    await context.waitForEvent("turn.completed", (event) => event.sessionId === session.id, 8_000);
+
+    const page = await adapter.listMessages(session.id, { limit: 10 });
+    const users = page.items.filter((message) => message.role === "user");
+    expect(users).toHaveLength(2);
+    expect(new Set(users.map((message) => message.id)).size).toBe(2);
+    expect(users.every((message) => message.parts.some((part) => part.type === "text" && part.text === "hello"))).toBe(
+      true,
+    );
   });
 });
 
@@ -458,5 +544,129 @@ describe("Grok model and mode controls", () => {
     await adapter.setMode(session.id, { mode: "plan" });
     expect((await adapter.getSession(session.id)).mode).toBe("plan");
     expect(eventsOf(context.events, "session.updated").length).toBeGreaterThan(0);
+  });
+});
+
+describe("Grok session state", () => {
+  it("uses unknown for cold discovered sessions and idle for created ones", async () => {
+    const { adapter, project } = await harness({
+      auth: "cached",
+      extraEnv: { FAKE_ACP_SEED_SESSION_CWD: PROJECT_PATH },
+    });
+    await detectReady(adapter);
+    const listed = await adapter.listSessions(project);
+    expect(listed.items[0]?.state).toBe("unknown");
+
+    const created = await adapter.createSession({ provider: "grok", projectId: project.id }, project);
+    expect(created.state).toBe("idle");
+  });
+
+  it("resolves a cold session's state only through Homebase's own turn lifecycle", async () => {
+    const { adapter, context, project } = await harness({
+      auth: "cached",
+      extraEnv: { FAKE_ACP_SEED_SESSION_CWD: PROJECT_PATH },
+    });
+    await detectReady(adapter);
+    const seeded = (await adapter.listSessions(project)).items[0];
+    expect(seeded?.state).toBe("unknown");
+    context.clearEvents();
+
+    await adapter.send(seeded!.id, { text: "hello" });
+    await context.waitForEvent("turn.started", (event) => event.sessionId === seeded!.id, 8_000);
+    expect((await adapter.getSession(seeded!.id)).state).toBe("working");
+    await context.waitForEvent("turn.completed", (event) => event.sessionId === seeded!.id, 8_000);
+    expect((await adapter.getSession(seeded!.id)).state).toBe("idle");
+  });
+
+  it("reports waiting while an approval is pending, then idle after resolution", async () => {
+    const { adapter, context, project } = await harness({ auth: "cached", mode: "permission" });
+    await detectReady(adapter);
+    const session = await adapter.createSession({ provider: "grok", projectId: project.id }, project);
+    context.clearEvents();
+    await adapter.send(session.id, { text: "run tests" });
+    const requested = await context.waitForEvent(
+      "approval.requested",
+      (event) => event.sessionId === session.id,
+      8_000,
+    );
+    expect((await adapter.getSession(session.id)).state).toBe("waiting");
+
+    await adapter.resolveApproval(requested.data.approval.id, { optionId: "allow-once" });
+    await context.waitForEvent("turn.completed", (event) => event.sessionId === session.id, 8_000);
+    expect((await adapter.getSession(session.id)).state).toBe("idle");
+  });
+});
+
+describe("Grok authentication refresh", () => {
+  it("recovers after `grok login` through one bounded provider-refresh recycle", async () => {
+    const authState = { value: "interactive" };
+    const spawned: ChildProcess[] = [];
+    const spawnFn: SpawnExecutable = (_command, args, spawnOptions) => {
+      const env = {
+        ...(spawnOptions?.env ?? {}),
+        FAKE_ACP_MODE: "normal",
+        FAKE_ACP_AUTH: authState.value,
+      };
+      const child = spawnExecutable(process.execPath, [FIXTURE, ...args], { ...spawnOptions, env });
+      spawned.push(child);
+      return child;
+    };
+    const { adapter } = await harness({ spawnFn });
+    try {
+      const signedOut = await adapter.detect();
+      expect(signedOut).toMatchObject({ installed: true, authenticated: false });
+      expect(spawned).toHaveLength(1);
+
+      // The user runs `grok login` on the Host; the next explicit refresh must
+      // recycle the unauthenticated ACP process and re-initialize.
+      authState.value = "cached";
+      const recovered = await adapter.detect();
+      expect(recovered).toMatchObject({ installed: true, authenticated: true });
+      expect(spawned).toHaveLength(2);
+      await waitForExit(spawned[0]!);
+
+      // A healthy authenticated transport is not restarted by further refreshes.
+      const stable = await adapter.detect();
+      expect(stable.authenticated).toBe(true);
+      expect(spawned).toHaveLength(2);
+    } finally {
+      await adapter.dispose();
+      for (const child of spawned) await waitForExit(child);
+      expect(spawned.every((child) => child.exitCode !== null || child.signalCode !== null)).toBe(true);
+    }
+  });
+
+  it("never recycles the transport while a model turn is active", async () => {
+    const authState = { value: "interactive" };
+    const spawned: ChildProcess[] = [];
+    const spawnFn: SpawnExecutable = (_command, args, spawnOptions) => {
+      const env = {
+        ...(spawnOptions?.env ?? {}),
+        FAKE_ACP_MODE: "long",
+        FAKE_ACP_AUTH: authState.value,
+      };
+      const child = spawnExecutable(process.execPath, [FIXTURE, ...args], { ...spawnOptions, env });
+      spawned.push(child);
+      return child;
+    };
+    const { adapter, context, project } = await harness({ spawnFn });
+    try {
+      const signedOut = await adapter.detect();
+      expect(signedOut.authenticated).toBe(false);
+      const session = await adapter.createSession({ provider: "grok", projectId: project.id }, project);
+      context.clearEvents();
+      await adapter.send(session.id, { text: "long" });
+      await context.waitForEvent("turn.started", (event) => event.sessionId === session.id, 8_000);
+
+      const duringTurn = await adapter.detect();
+      expect(duringTurn.authenticated).toBe(false);
+      expect(spawned).toHaveLength(1);
+
+      await adapter.interrupt(session.id);
+      await context.waitForEvent("turn.interrupted", (event) => event.sessionId === session.id, 8_000);
+    } finally {
+      await adapter.dispose();
+      for (const child of spawned) await waitForExit(child);
+    }
   });
 });

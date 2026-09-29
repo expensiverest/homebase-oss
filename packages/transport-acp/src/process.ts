@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 
-import { spawnExecutable, type SpawnExecutable } from "@homebase/adapter-sdk";
+import { spawnExecutable, terminateOwnedProcess, type SpawnExecutable } from "@homebase/adapter-sdk";
 
 import type { AcpTransportLogger } from "./logger.js";
 
@@ -141,7 +141,12 @@ export class AcpProcess {
     return new Promise((resolve) => this.onExit(resolve));
   }
 
-  /** Ends stdin, then escalates SIGTERM → SIGKILL. Idempotent. */
+  /**
+   * Ends stdin for a protocol-friendly graceful exit, then escalates through
+   * the shared owned-process tree terminator (SIGTERM → SIGKILL on POSIX;
+   * `taskkill /T` → `/T /F` on Windows so wrapper descendants cannot be
+   * orphaned). Idempotent.
+   */
   async stop(timeoutMs: number): Promise<void> {
     const child = this.#child;
     if (!child || this.#exitInfo) return;
@@ -153,35 +158,24 @@ export class AcpProcess {
     }
     const closed = this.waitForExit();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const timedOut = await Promise.race([
+    const stillAlive = await Promise.race([
       closed.then(() => false),
       new Promise<boolean>((resolve) => {
         timer = setTimeout(() => resolve(true), Math.min(timeoutMs, 500));
       }),
     ]);
     if (timer) clearTimeout(timer);
-    if (!timedOut) return;
+    if (!stillAlive) return;
 
-    child.kill("SIGTERM");
-    let forceTimer: ReturnType<typeof setTimeout> | undefined;
-    const afterTerm = await Promise.race([
-      closed.then(() => false),
-      new Promise<boolean>((resolve) => {
-        forceTimer = setTimeout(() => resolve(true), timeoutMs);
-      }),
-    ]);
-    if (forceTimer) clearTimeout(forceTimer);
-    if (!afterTerm) return;
-
-    child.kill("SIGKILL");
-    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    await terminateOwnedProcess(child, { terminateTimeoutMs: timeoutMs, forceTimeoutMs: 500 });
+    let finalTimer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
       closed,
       new Promise<void>((resolve) => {
-        killTimer = setTimeout(() => resolve(), 500);
+        finalTimer = setTimeout(() => resolve(), 500);
       }),
     ]);
-    if (killTimer) clearTimeout(killTimer);
+    if (finalTimer) clearTimeout(finalTimer);
   }
 
   #finish(info: AcpProcessExitInfo): void {

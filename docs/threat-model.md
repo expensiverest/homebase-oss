@@ -93,8 +93,11 @@ Assets worth protecting, in order:
   kills the user's shared OpenCode service. ACP agents are value-configured (no credential fields accepted) and
   spawned with `shell: false` and argv arrays. On Windows an npm `.cmd`/`.bat` shim is launched through
   `cmd.exe /d /s /c` with a fixed, Homebase-controlled argv (no user content, no credentials on the command line);
-  the helper is centrally implemented and unit-tested. ACP stdout is protocol-only, stderr is a bounded local tail,
-  and the client advertises no fs/terminal capabilities, so a malicious provider cannot use Homebase as a shell.
+  the helper is centrally implemented and unit-tested. Shutdown of an owned process uses the shared process-tree
+  terminator (`taskkill /PID <pid> /T`, escalating to `/T /F`), so wrapper descendants cannot be orphaned; it is only
+  ever applied to a `ChildProcess` Homebase itself spawned, never to an external/shared provider process. ACP stdout
+  is protocol-only, stderr is a bounded local tail, and the client advertises no fs/terminal capabilities, so a
+  malicious provider cannot use Homebase as a shell.
 - **T14 (stuck sessions):** ACP transport exit rejects outstanding requests, cancels pending permission bridges, and
   fails active turns; provider refresh can reconnect. A failed managed OpenCode start is cached to prevent restart
   storms, and only an explicit refresh may retry it.

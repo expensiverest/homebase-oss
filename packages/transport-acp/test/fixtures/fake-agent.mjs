@@ -340,6 +340,38 @@ app.onRequest(methods.agent.session.prompt, async (context) => {
     return { stopReason: holdSelected === "cancelled" ? "cancelled" : "end_turn" };
   }
 
+  if (env.FAKE_ACP_ECHO_USER === "1") {
+    // Optional provider behavior: some ACP agents live-echo the user message.
+    // Real Grok does not (without x.ai/userMessageEcho, which Homebase does not
+    // use); tests use this mode to prove deduplication.
+    if (env.FAKE_ACP_ECHO_USER_SPLIT === "1") {
+      const splitAt = Math.max(1, Math.ceil(userText.length / 2));
+      await send({
+        sessionId,
+        update: {
+          sessionUpdate: "user_message_chunk",
+          content: { type: "text", text: userText.slice(0, splitAt) },
+        },
+      });
+      await send({
+        sessionId,
+        update: {
+          sessionUpdate: "user_message_chunk",
+          content: { type: "text", text: userText.slice(splitAt) },
+        },
+      });
+    } else {
+      await send({
+        sessionId,
+        update: {
+          sessionUpdate: "user_message_chunk",
+          messageId: "live_user_1",
+          content: { type: "text", text: userText },
+        },
+      });
+    }
+  }
+
   await send({
     sessionId,
     update: {

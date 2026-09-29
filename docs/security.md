@@ -82,7 +82,9 @@ This is the most important boundary in the product:
   `opencode serve --hostname 127.0.0.1` with a random 256-bit in-memory password (`OPENCODE_PASSWORD` /
   `OPENCODE_SERVER_PASSWORD`). The password is never logged, persisted, returned to the browser, or exposed through
   Tailscale; only the authenticated Homebase Host is remotely reachable. Homebase never reads OpenCode daemon
-  password files, edits service configuration, or kills a server it did not spawn.
+  password files, edits service configuration, or kills a server it did not spawn. Shutdown terminates the complete
+  process tree Homebase created (Windows `taskkill /PID <pid> /T`, escalating to `/T /F`), so npm `.cmd` wrappers
+  cannot orphan the real server; external/shared servers are never passed to that path.
 - **Grok credentials stay with Grok.** The adapter accepts only executable/timeout configuration (strict schema);
   API keys, OAuth tokens, refresh tokens, emails, and browser sessions are rejected as unknown fields. Non-interactive
   auth methods are preferred; interactive login is never started from Homebase. Grok's child environment is inherited,
@@ -91,7 +93,9 @@ This is the most important boundary in the product:
   dependency-free Windows `.cmd`/`.bat` shim wrapper described in `packages/adapter-sdk/src/exec.ts`, which still
   passes argv as an array and never interpolates user content). stdout is protocol-only; stderr is bounded (default
   64 KiB) for local diagnostics and is never returned to the PWA. The ACP client advertises no `fs/*` or `terminal/*`
-  capabilities, so a provider cannot use Homebase as a file or shell execution surface.
+  capabilities, so a provider cannot use Homebase as a file or shell execution surface. Shutdown uses the shared
+  owned-process-tree terminator: stdin EOF for ACP first, then SIGTERM → SIGKILL on POSIX or `taskkill /T` → `/T /F`
+  on Windows, only ever against children Homebase spawned.
 - **Provider crashes cannot leave a session "Working".** Transport exit rejects outstanding requests, cancels pending
   permission bridges, and fails active turns; provider refresh can reconnect.
 

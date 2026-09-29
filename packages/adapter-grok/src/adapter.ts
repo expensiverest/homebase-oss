@@ -91,6 +91,7 @@ export class GrokAdapter implements AgentAdapter {
 
   #transport: AcpTransport | null = null;
   #connecting: Promise<AcpTransport> | null = null;
+  #authRefresh: Promise<void> | null = null;
   #initializeResult: AcpInitializeResult | null = null;
   #cliVersion: string | null = null;
   #authenticated: boolean | null = null;
@@ -135,6 +136,7 @@ export class GrokAdapter implements AgentAdapter {
 
   async detect(): Promise<ProviderDetection> {
     try {
+      await this.#refreshUnauthenticatedTransportIfNeeded();
       await this.#ensureTransport();
       const compatibility = versionCompatibility(this.#cliVersion);
       if (this.#authenticated === false) {
@@ -312,6 +314,13 @@ export class GrokAdapter implements AgentAdapter {
     }
     const transport = await this.#ensureTransport();
     const prompt = await this.#promptBlocks(input);
+    // Homebase knows the submitted prompt; record it locally before the model
+    // turn because real Grok does not live-echo user messages without an
+    // extension Homebase deliberately does not depend on.
+    this.#tracker!.recordLocalUserMessage(record.nativeId, {
+      text: input.text,
+      ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
+    });
     const turn = this.#tracker!.beginTurn(record.nativeId);
     const task = this.#runTurn(transport, record, prompt);
     this.#activeTurns.set(record.nativeId, { turnId: turn.turnId, task });
@@ -401,6 +410,45 @@ export class GrokAdapter implements AgentAdapter {
     } finally {
       this.#connecting = null;
     }
+  }
+
+  /**
+   * Explicit provider detection is the only place a signed-out Grok transport
+   * is recycled. This lets `grok login` on the Host be picked up by the next
+   * provider refresh without restarting Homebase. Background reconnects never
+   * do this, and an active model turn is never interrupted.
+   */
+  async #refreshUnauthenticatedTransportIfNeeded(): Promise<void> {
+    if (this.#authenticated !== false || this.#disposed) return;
+    if (this.#activeTurns.size > 0) return; // protect user work in progress
+    await this.#recycleUnauthenticatedTransport();
+  }
+
+  async #recycleUnauthenticatedTransport(): Promise<void> {
+    if (this.#authRefresh) return await this.#authRefresh;
+    const task = this.#resetAndStopTransport();
+    this.#authRefresh = task;
+    try {
+      await task;
+    } finally {
+      if (this.#authRefresh === task) this.#authRefresh = null;
+    }
+  }
+
+  /**
+   * Drops only ACP-process state (endpoint, initialize result, auth state,
+   * catalogs) so the next connect re-initializes and re-authenticates. Session
+   * history stays authoritative and is never discarded for an auth refresh.
+   */
+  async #resetAndStopTransport(): Promise<void> {
+    const transport = this.#transport;
+    this.#transport = null;
+    this.#initializeResult = null;
+    this.#authenticated = null;
+    this.#authWarning = null;
+    this.#modelCatalog = [];
+    this.#modeCatalog = [];
+    await transport?.stop();
   }
 
   async #connect(): Promise<AcpTransport> {

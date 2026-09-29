@@ -6,6 +6,7 @@ import {
   redactSecrets,
   runExecutable,
   spawnExecutable,
+  terminateOwnedProcess,
   type AdapterLogger,
   type ExecutableFailure,
 } from "@homebase/adapter-sdk";
@@ -591,28 +592,13 @@ export class OpenCodeSupervisor {
     }
   }
 
+  /**
+   * Stops only the managed server Homebase spawned, using the shared owned
+   * process-tree terminator so a Windows `cmd.exe`/`.cmd` wrapper cannot orphan
+   * the real server process. External servers are never passed here.
+   */
   async #stopChild(child: ChildProcess, timeoutMs: number): Promise<void> {
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
-    child.kill("SIGTERM");
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timedOut = await Promise.race([
-      closed.then(() => false),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(true), timeoutMs);
-      }),
-    ]);
-    if (timer) clearTimeout(timer);
-    if (!timedOut) return;
-    child.kill("SIGKILL");
-    let killTimer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([
-      closed,
-      new Promise<void>((resolve) => {
-        killTimer = setTimeout(() => resolve(), 500);
-      }),
-    ]);
-    if (killTimer) clearTimeout(killTimer);
+    await terminateOwnedProcess(child, { terminateTimeoutMs: timeoutMs, forceTimeoutMs: 500 });
   }
 }
 

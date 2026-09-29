@@ -229,7 +229,9 @@ export async function runExecutable(
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill("SIGKILL");
+      // The command timed out: terminate the tree Homebase spawned (the
+      // wrapper's descendants included) without blocking the rejection.
+      void terminateOwnedProcess(child, { terminateTimeoutMs: 500, forceTimeoutMs: 500 }).catch(() => undefined);
       reject(
         new ExecutableFailure("timeout", `${resolved.command} did not finish within ${timeoutMs}ms.`, {
           stdout,
@@ -264,3 +266,137 @@ export async function runExecutable(
 export type SpawnExecutable = typeof spawnExecutable;
 /** Injectable bounded-command-runner type (tests, detection helpers). */
 export type RunExecutable = typeof runExecutable;
+
+const TASKKILL_EXECUTABLE = "taskkill.exe";
+const DEFAULT_TERMINATE_TIMEOUT_MS = 3_000;
+const DEFAULT_FORCE_TIMEOUT_MS = 500;
+const TASKKILL_TIMEOUT_MS = 5_000;
+
+export type OwnedProcessTermination = "already-exited" | "terminated" | "forced";
+
+export interface TerminateOwnedProcessOptions {
+  /** How long to wait after the first termination attempt before forcing. */
+  terminateTimeoutMs?: number;
+  /** Bounded wait after the forced attempt (and after a final SIGKILL). */
+  forceTimeoutMs?: number;
+  /** Test hook: platform override. Defaults to `process.platform`. */
+  platform?: NodeJS.Platform;
+  /** Test hook: spawner used to run `taskkill.exe`. */
+  spawnFn?: SpawnExecutable;
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Builds the argv for the built-in Windows tree terminator. The PID is always
+ * validated as a positive integer and passed as an argv element; Homebase never
+ * constructs a shell command string.
+ */
+export function buildTaskkillArgs(pid: number, force: boolean): string[] {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error(`Invalid process id for taskkill: ${String(pid)}`);
+  }
+  return ["/PID", String(pid), "/T", ...(force ? ["/F"] : [])];
+}
+
+function processHasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function waitForProcessClose(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (processHasExited(child)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const onClose = () => finish(true);
+    const finish = (exited: boolean) => {
+      clearTimeout(timer);
+      child.removeListener("close", onClose);
+      resolve(exited);
+    };
+    const timer = setTimeout(() => finish(false), Math.max(0, timeoutMs));
+    child.once("close", onClose);
+  });
+}
+
+async function runTaskkill(pid: number, force: boolean, options: TerminateOwnedProcessOptions): Promise<boolean> {
+  const spawn = options.spawnFn ?? spawnExecutable;
+  let child: ChildProcess;
+  try {
+    child = spawn(TASKKILL_EXECUTABLE, buildTaskkillArgs(pid, force), {
+      env: options.env ?? process.env,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  } catch {
+    return false;
+  }
+  return await new Promise<boolean>((resolve) => {
+    const finish = (ok: boolean) => {
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // already gone
+      }
+      finish(false);
+    }, TASKKILL_TIMEOUT_MS);
+    child.once("error", () => finish(false));
+    child.once("close", (code) => finish(code === 0));
+  });
+}
+
+/**
+ * Terminates only a process tree Homebase itself spawned.
+ *
+ * POSIX: SIGTERM → bounded wait → SIGKILL → bounded wait.
+ * Windows: `taskkill.exe /PID <pid> /T` → bounded wait → `/T /F` → bounded
+ * wait, with a direct child kill as a last resort. Killing the wrapper alone
+ * would orphan descendants (`cmd.exe` → provider process), which is why the
+ * tree form is used.
+ *
+ * Never call this with a PID discovered from a provider; it must only receive
+ * a `ChildProcess` this application started. Already-exited children and
+ * "process not found" results are normal and never surface as errors.
+ */
+export async function terminateOwnedProcess(
+  child: ChildProcess,
+  options: TerminateOwnedProcessOptions = {},
+): Promise<OwnedProcessTermination> {
+  if (processHasExited(child)) return "already-exited";
+  const platform = options.platform ?? process.platform;
+  const terminateTimeoutMs = options.terminateTimeoutMs ?? DEFAULT_TERMINATE_TIMEOUT_MS;
+  const forceTimeoutMs = options.forceTimeoutMs ?? DEFAULT_FORCE_TIMEOUT_MS;
+
+  if (platform === "win32") {
+    const pid = child.pid;
+    if (typeof pid === "number" && Number.isInteger(pid) && pid > 0) {
+      await runTaskkill(pid, false, options);
+      if (await waitForProcessClose(child, terminateTimeoutMs)) return "terminated";
+      await runTaskkill(pid, true, options);
+      if (await waitForProcessClose(child, forceTimeoutMs)) return "forced";
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // already gone
+      }
+      await waitForProcessClose(child, DEFAULT_FORCE_TIMEOUT_MS);
+      return "forced";
+    }
+    // Falling through to the direct path is the only option without a PID.
+  }
+
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    // already gone
+  }
+  if (await waitForProcessClose(child, terminateTimeoutMs)) return "terminated";
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    // already gone
+  }
+  if (await waitForProcessClose(child, forceTimeoutMs)) return "forced";
+  return "forced";
+}

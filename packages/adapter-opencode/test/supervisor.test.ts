@@ -1,4 +1,7 @@
 import type { ChildProcess } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -18,6 +21,15 @@ import { OpenCodeSupervisor, parseOpenCodeVersion } from "../src/supervisor.js";
 import { createFakeFetch, jsonResponse } from "./helpers.js";
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/fake-opencode.mjs", import.meta.url));
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 interface FixtureControl {
   mode: string;
@@ -263,6 +275,65 @@ describe("OpenCode managed lifecycle", () => {
     await supervisor.stop();
     expect(control.spawned).toHaveLength(0);
   });
+
+  it(
+    "stops a real Windows npm-style .cmd wrapper without orphaning the server process",
+    { timeout: 30_000 },
+    async ({ skip }) => {
+      if (process.platform !== "win32") return skip("Windows-only process-tree behavior");
+      const treeDir = await mkdtemp(path.join(tmpdir(), "homebase-opencode-tree-"));
+      let serverPid: number | null = null;
+      try {
+        const pidFile = path.join(treeDir, "server.pid");
+        const wrapper = path.join(treeDir, "opencode.cmd");
+        await writeFile(
+          wrapper,
+          `@echo off\r\nset FAKE_OPENCODE_PID_FILE=${pidFile}\r\n"${process.execPath}" "${FIXTURE}" %*\r\n`,
+          "utf8",
+        );
+        const recording = createRecordingLogger();
+        const config = parseOpenCodeConfig({
+          serverMode: "managed",
+          executable: wrapper,
+          managedPort: 0,
+          startupTimeoutMs: 8_000,
+          shutdownTimeoutMs: 1_000,
+        });
+        const supervisor = new OpenCodeSupervisor({ config, logger: recording.logger, fetchFn: unreachableFetch });
+
+        const detection = await supervisor.detect();
+        expect(detection.status).toBe("ready");
+        expect(detection.connection?.source).toBe("managed");
+
+        const deadline = Date.now() + 10_000;
+        while (serverPid === null && Date.now() < deadline) {
+          try {
+            serverPid = Number.parseInt((await readFile(pidFile, "utf8")).trim(), 10);
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+        }
+        expect(serverPid, "managed server pid file").toBeTruthy();
+        expect(processAlive(serverPid!)).toBe(true);
+
+        await supervisor.stop();
+        const goneBy = Date.now() + 5_000;
+        while (processAlive(serverPid!) && Date.now() < goneBy) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        expect(processAlive(serverPid!), "managed server descendant must be dead").toBe(false);
+      } finally {
+        if (serverPid !== null && processAlive(serverPid)) {
+          try {
+            process.kill(serverPid, "SIGKILL");
+          } catch {
+            // best effort cleanup
+          }
+        }
+        await rm(treeDir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("OpenCodeAdapter managed lifecycle", () => {
