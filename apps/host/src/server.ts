@@ -32,6 +32,7 @@ export interface CreateHostRuntimeOptions {
   /** Absolute path to a built web client; defaults to apps/web/dist when present. */
   webDistPath?: string | null;
   stateDir?: string;
+  onShutdown?: () => void;
 }
 
 export interface HostRuntime {
@@ -46,6 +47,7 @@ export interface HostRuntime {
   readonly app: Hono<ApiEnv>;
   start(): Promise<{ hostname: string; port: number }>;
   close(): Promise<void>;
+  readonly closed: Promise<void>;
 }
 
 /**
@@ -127,6 +129,51 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
           ? defaultWebDist
           : null;
 
+  let resolveClosed!: () => void;
+  const closed = new Promise<void>((resolve) => {
+    resolveClosed = resolve;
+  });
+  let closing: Promise<void> | null = null;
+  let isClosing = false;
+  const close = (): Promise<void> => {
+    if (closing) return closing;
+    isClosing = true;
+    providers.beginClose();
+    return (closing = (async () => {
+      const errors: unknown[] = [];
+      const running = server;
+      server = null;
+      try {
+        if (running) {
+          // Stop accepting first: no connection can arrive between socket teardown
+          // and listener shutdown. Admin shutdown schedules close after response finish.
+          await new Promise<void>((resolve, reject) => {
+            running.close((error) => (error ? reject(error) : resolve()));
+            if ("closeAllConnections" in running) running.closeAllConnections();
+          });
+        }
+      } catch (error) {
+        errors.push(error);
+      } finally {
+        try {
+          await providers.dispose();
+        } catch (error) {
+          errors.push(error);
+        } finally {
+          try {
+            attachments.dispose();
+          } catch (error) {
+            errors.push(error);
+          } finally {
+            // closed signals completion of all cleanup attempts; close() reports errors.
+            resolveClosed();
+            options.onShutdown?.();
+          }
+        }
+      }
+      if (errors.length) throw new AggregateError(errors, "Homebase shutdown cleanup failed.");
+    })());
+  };
   const app = createApiApp({
     version: HOST_VERSION,
     startedAt: Date.now(),
@@ -140,6 +187,10 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     devices,
     logger,
     webDist,
+    requestShutdown: () => {
+      void close().catch((error: unknown) => logger.error("Host shutdown failed.", { error: String(error) }));
+    },
+    isClosing: () => isClosing,
   });
 
   let server: ReturnType<typeof serve> | null = null;
@@ -154,7 +205,9 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     auth,
     devices,
     app,
+    closed,
     async start() {
+      if (isClosing) throw new Error("The Homebase Host is shutting down.");
       if (server) {
         throw new Error("The Homebase Host is already running.");
       }
@@ -169,16 +222,6 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
 
       return address;
     },
-    async close() {
-      await providers.dispose();
-      attachments.dispose();
-      const running = server;
-      server = null;
-      if (running) {
-        await new Promise<void>((resolve, reject) => {
-          running.close((error) => (error ? reject(error) : resolve()));
-        });
-      }
-    },
+    close,
   };
 }

@@ -1,10 +1,17 @@
 # Homebase architecture
 
-> **Status:** Phases 0-5.5 implemented: protocol, adapter SDK, ACP transport, Host core, OpenCode, Claude Code and
+> **Status:** Phases 0-6 implemented: setup, user services, diagnostics, protocol, adapter SDK, ACP transport, Host core, OpenCode, Claude Code and
 > Grok Build adapters, mobile web client, and device pairing. This document describes what exists in the repository
 > today and the intended end-state from [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md).
 
 ## Overview
+
+Phase 6 adds desktop-only orchestration: injectable setup prompts, a shared service controller with platform
+adapters/pure definition builders, structured private Tailscale detection, read-only diagnostics, guarded
+uninstall, and service refresh after manual source upgrades. The PWA/session APIs remain unchanged. Two local
+admin routes expose safe cached status and request response-flushed runtime shutdown under existing Phase 5
+middleware. All service managers receive absolute runtime/config/state paths; none depend on repository layout
+or a shell finding `homebase`. See [service operations](service.md) for platform contracts and research.
 
 Homebase is a local-first, mobile-first control plane for AI coding agents running on the user's own
 computer. The Host runs on the development machine; the PWA runs on the phone and never talks to a

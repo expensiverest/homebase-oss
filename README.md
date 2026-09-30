@@ -55,28 +55,71 @@ Homebase; the provider CLIs authenticate themselves, on your machine, exactly as
   an agent.
 - See [SECURITY.md](SECURITY.md) and `docs/security.md` for details.
 
-## Install (development)
+## Install from source (pre-alpha)
 
-Homebase is not packaged for end users yet. To work on it:
+A packaged public release does not exist yet. Install Node.js 22 or later and the provider CLIs you want to use,
+and sign in through those CLIs. Tailscale is needed for private phone access.
 
 ```bash
 git clone https://github.com/expensiverest/homebase-oss.git
 cd homebase-oss
 npm install
-npm run build
-npm run link:cli     # links the `homebase` command (npm run unlink:cli removes it)
-
-homebase projects add D:\Development   # or run it inside a folder; defaults to the current directory
-homebase                                # starts the Host and serves the PWA
-
-# private remote access (optional)
-tailscale serve --bg 8787
-homebase pair
+npm run setup
 ```
 
-`homebase --help`, `homebase devices`, `homebase revoke <id>`, and `homebase projects ...` all work from any
-directory. Configuration lives at `${HOMEBASE_STATE_DIR:-~/.homebase}/config.json`; a legacy
-`./homebase.config.json` is migrated once and left in place. `--config <path>` and `HOMEBASE_CONFIG` still win.
+`npm run setup` builds all workspaces, links `homebase` using npm's standard workspace mechanism, and opens the
+terminal wizard. It validates configuration, asks for one or more project folders, detects provider versions and
+sign-in state without sending model prompts, offers private Tailscale Serve, installs a user background Host,
+and offers a pairing QR. If Tailscale is disconnected, run `tailscale up` yourself and rerun setup.
+
+Setup can also review or repair an existing installation. It preserves custom settings and paired devices,
+deduplicates canonical project roots, recognizes existing Serve, and refreshes the same service. Partial failures
+preserve completed work and give guidance. Once the service is running, you can close the terminal.
+
+| Platform | User background service                 | Startup              |
+| -------- | --------------------------------------- | -------------------- |
+| Windows  | Task Scheduler task `Homebase Host`     | Current user's logon |
+| macOS    | launchd LaunchAgent `com.homebase.host` | User GUI session     |
+| Linux    | systemd user unit `homebase.service`    | User session         |
+
+No administrator/root account is used. Where the user service manager is unavailable (for example, a minimal
+container), run `homebase` in the foreground. Linux setup does not enable lingering; see
+[service operations](docs/service.md) for headless session guidance. macOS and Linux definitions have portable
+fixture coverage; real service-manager validation for this milestone was performed on Windows.
+
+Normal operation from any directory:
+
+```text
+homebase --help
+homebase service status
+homebase service start
+homebase service stop
+homebase service restart
+homebase doctor
+homebase doctor --json
+homebase pair
+homebase projects add <folder>
+homebase projects remove <folder>
+```
+
+Project changes restart a running Homebase service after the config is committed; duplicates do not restart it.
+Use `--no-restart` to defer a restart. A manually running Host still needs a manual restart.
+
+Configuration lives at `${HOMEBASE_STATE_DIR:-~/.homebase}/config.json`; a legacy `./homebase.config.json` is
+migrated once and preserved. `--config <path>` and `HOMEBASE_CONFIG` win. The service records that exact config
+and state directory, absolute Node/entrypoint paths, and a sanitized PATH. It does not copy shell API keys;
+use provider-owned saved login. Keep `HOMEBASE_STATE_DIR` set when managing a custom state location.
+
+During pre-alpha, fetch source updates yourself, run `npm install` and `npm run build`, then `homebase upgrade`
+to refresh/restart the service and verify its version. `npm run setup` is also a repair/refresh path. Homebase
+does not fetch updates, publish an npm package, or download release archives.
+
+`homebase uninstall` gracefully stops and removes the background service while preserving Homebase state,
+provider installations/logins, project repositories, and Tailscale. `homebase uninstall --purge-state` requires
+confirmation and refuses unsafe or unowned directories. Remove the linked command with `npm run unlink:cli`
+in the checkout, then remove the source checkout yourself if desired.
+
+For development, `npm run link:cli` remains available. It builds and links without running the wizard.
 
 Direct Node invocation stays available as a development fallback:
 
@@ -104,6 +147,7 @@ curl http://127.0.0.1:8787/api/v1/health
 - [docs/private-homebase-reuse-map.md](docs/private-homebase-reuse-map.md) — audit of the private reference implementation
 - [docs/security.md](docs/security.md) — security model
 - [docs/remote-access.md](docs/remote-access.md) — Tailscale Serve and pairing
+- [docs/service.md](docs/service.md) — setup, service lifecycle, upgrade, uninstall, and platform research
 - [docs/threat-model.md](docs/threat-model.md) — threat model draft
 
 ## License

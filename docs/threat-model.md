@@ -104,6 +104,23 @@ Assets worth protecting, in order:
 - **Grok credentials:** Homebase stores and transmits no xAI API key, OAuth/refresh token, account email, or browser
   session. Non-interactive auth methods only; interactive login is never started from the remote client.
 
+## Phase 6 service/install reassessment
+
+- **Privilege:** current SID/InteractiveToken/LeastPrivilege on Windows, GUI LaunchAgents on macOS, and
+  `systemctl --user` on Linux. No system policy/lingering changes. Unavailable managers report manual fallback.
+- **Path/command substitution:** exact absolute runtime paths remove interactive shell lookup at startup.
+  Sanitized provider PATH and native definitions are compared by doctor. XML/systemd values are escaped;
+  encoded Windows path data goes through a fixed .NET CreateNoWindow launcher, never user PowerShell code.
+  Same-user service/executable replacement remains outside the protection boundary.
+- **Remote shutdown:** status/shutdown reuse Phase 5 socket/key/origin/proxy checks; even a forwarded valid
+  admin key fails. Paired browser credentials cannot control services.
+- **Removal:** preserve state/Serve by default. Explicit purge checks ownership, ancestry, shallow paths,
+  symlinks, and unexpected contents, then rechecks after service removal.
+- **Stale definitions:** native state remains authoritative; doctor compares metadata/version/paths/config/PATH.
+  Alternate-state commands refuse to operate on another installation. Corrupt metadata does not trigger deletion.
+- **Credentials/update supply chain:** no provider/device/admin secrets or full environment in definitions.
+  Bounded/redacted operational logs; no network updater or unsigned archive installation.
+
 ## 6. Open items before public alpha
 
 1. Additional hostile-output and provider fixture privacy audit.

@@ -6,6 +6,13 @@ import { consoleIo, printFailure, type CliIo } from "./io.js";
 import { CliUsageError, parseCliArguments, type CliArguments } from "./parse.js";
 import { runProjectsCommand } from "./projects.js";
 import { USAGE } from "./usage.js";
+import { runSetupCommand } from "./setup.js";
+import { runServiceCommand } from "./service.js";
+import { runDoctorCommand } from "./doctor.js";
+import { runUninstallCommand } from "./uninstall.js";
+import { runUpgradeCommand } from "./upgrade.js";
+import { serviceLogging } from "../service/logging.js";
+import path from "node:path";
 
 export type { CliIo } from "./io.js";
 
@@ -46,21 +53,22 @@ export async function runCli(argv: string[], io: CliIo = consoleIo): Promise<num
 
   const command = args.positionals[0];
   try {
-    switch (command) {
-      case undefined:
-        return await runHost(args, io);
-      case "pair":
-        return await runPair(args, io);
-      case "devices":
-        return await runDevices(args, io);
-      case "revoke":
-        return await runRevoke(args, io);
-      case "projects":
-        return await runProjectsCommand(args, io);
-      default:
-        io.error(`Unknown command "${command}". Run homebase --help.`);
-        return 1;
-    }
+    if (command === undefined) return await runHost(args, io);
+    const handlers: Record<string, (args: CliArguments, io: CliIo) => Promise<number>> = {
+      pair: runPair,
+      devices: runDevices,
+      revoke: runRevoke,
+      projects: runProjectsCommand,
+      setup: runSetupCommand,
+      service: runServiceCommand,
+      doctor: runDoctorCommand,
+      uninstall: runUninstallCommand,
+      upgrade: runUpgradeCommand,
+    };
+    const handler = handlers[command];
+    if (handler) return await handler(args, io);
+    io.error(`Unknown command "${command}". Run homebase --help.`);
+    return 1;
   } catch (error) {
     printFailure(io, error);
     return 1;
@@ -68,6 +76,23 @@ export async function runCli(argv: string[], io: CliIo = consoleIo): Promise<num
 }
 
 async function runHost(args: CliArguments, io: CliIo): Promise<number> {
+  if (args.serviceRuntime) {
+    if (
+      !args.stateDir ||
+      !path.isAbsolute(args.stateDir) ||
+      args.servicePath === undefined ||
+      !args.config ||
+      !path.isAbsolute(args.config)
+    )
+      throw new Error("Invalid installed Homebase service context. Run `homebase setup`.");
+    // Keep OS-owned user context; never inherit shell Homebase overrides at login.
+    for (const key of Object.keys(process.env)) if (key.startsWith("HOMEBASE_")) delete process.env[key];
+    process.env.HOMEBASE_STATE_DIR = args.stateDir;
+    delete process.env.Path;
+    process.env.PATH = args.servicePath;
+  }
+  const logging = args.serviceRuntime ? serviceLogging(args.stateDir!) : undefined;
+  if (logging) io = logging.io;
   const env = hostEnvironment(args);
   const loaded = await loadConfigDetailed({
     ...(args.config !== undefined ? { configPath: args.config } : {}),
@@ -75,8 +100,14 @@ async function runHost(args: CliArguments, io: CliIo): Promise<number> {
     cwd: process.cwd(),
     onNotice: (message) => io.out(message),
   });
-  const runtime = await createHostRuntime({ config: loaded.config });
-  const address = await runtime.start();
+  const runtime = await createHostRuntime({ config: loaded.config, ...(logging ? { logger: logging.logger } : {}) });
+  let address: { hostname: string; port: number };
+  try {
+    address = await runtime.start();
+  } catch (error) {
+    await runtime.close();
+    throw error;
+  }
 
   const displayHost = address.hostname.includes(":") ? `[${address.hostname}]` : address.hostname;
   io.out(`Homebase Host ${HOST_VERSION} listening on http://${displayHost}:${address.port}`);
@@ -101,8 +132,15 @@ async function runHost(args: CliArguments, io: CliIo): Promise<number> {
         resolve(1);
       }
     };
-    process.on("SIGINT", () => void shutdown("SIGINT"));
-    process.on("SIGTERM", () => void shutdown("SIGTERM"));
+    const interrupt = () => void shutdown("SIGINT");
+    const terminate = () => void shutdown("SIGTERM");
+    process.on("SIGINT", interrupt);
+    process.on("SIGTERM", terminate);
+    void runtime.closed.then(() => {
+      process.removeListener("SIGINT", interrupt);
+      process.removeListener("SIGTERM", terminate);
+      resolve(0);
+    });
   });
 }
 

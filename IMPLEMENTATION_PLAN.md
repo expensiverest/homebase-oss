@@ -1068,12 +1068,12 @@ Initial options may include:
 
 # 19. Installation and setup
 
-**Phase 5.5 provides the linked CLI and local project-root management; the wizard itself stays Phase 6.**
-The current dogfood flow is `npm install && npm run build && npm run link:cli`, then
-`homebase projects add <folder>`, `homebase`, and `homebase pair` (see the README). A direct
-`node apps/host/dist/index.js` invocation remains available as a development fallback.
+**Phase 5.5 is COMPLETE / MERGED; Phase 6 builds on that infrastructure.** The main merge commit is
+`781adf977ef7b1925c86c0c6f4c90104f55af1a9`. The current pre-alpha source flow is `npm install`, then
+`npm run setup`: build, standard npm workspace link, and `homebase setup`. Direct foreground `homebase`
+and `npm run link:cli` remain development fallbacks.
 
-Long-term target:
+A possible long-term packaged target (not published or usable in this milestone):
 
 ```bash
 npx homebase setup
@@ -1435,6 +1435,10 @@ Browser auth is cookie-based to support WebKit's iOS/iPadOS 17.2+ Home Screen co
 
 ## Phase 5.5 — Dogfood Setup Ergonomics + ACP Foundation + Grok
 
+**COMPLETE / MERGED** at main `781adf977ef7b1925c86c0c6f4c90104f55af1a9` (PR #4).
+Established the usable linked CLI, user-scoped config, project-root management, managed OpenCode,
+ACP v1 transport, Grok, Windows owned-process-tree handling, and Grok concurrency/lifecycle hardening.
+
 Real dogfooding after Phase 5 showed that setup ergonomics, project-root management, and provider lifecycle need to land
 before expanding the provider matrix further. This phase is not the installer.
 
@@ -1460,23 +1464,34 @@ longer needs a manually maintained server, and no Phase 5 security property regr
 
 ## Phase 6 — Installer and background service
 
-Move the old installer/background-service work here.
+Make the pre-alpha source installation one coherent product. Retain Phase 5 pairing/admin security and
+Phase 5.5 provider lifecycles; the desktop CLI owns setup, never the mobile PWA.
 
 ### Tasks
 
-- interactive `homebase setup` (provider detection, project-root wizard, Tailscale detection)
-- background service installation (Windows service/startup, launchd, systemd)
-- startup at login
-- Tailscale setup assistance
-- pairing as part of first-run setup
-- diagnostics / `homebase doctor`
-- upgrade and uninstall flows
-- polished distribution/package installation
+- injectable, idempotent interactive `homebase setup`; source-install `npm run setup` builds and links
+- user-level background Host: Windows Task Scheduler, macOS LaunchAgent, Linux systemd user service
+- service install/status/start/stop/restart/uninstall; exact executable/config/state paths and sanitized PATH
+- local-admin graceful shutdown/status with all existing socket/origin/proxy/key protections
+- service-aware project-root restarts after atomic changes, with `--no-restart`
+- structured Tailscale status and safe private Serve assistance; conflict/Funnel rejection
+- first-run pairing through existing five-minute, one-time fragment invitations
+- read-only `homebase doctor` / `--json`, deterministic checks and fail-only nonzero exit
+- safe uninstall preserving state by default; explicit guarded state purge
+- upgrade handoff/service refresh after manually updating the source installation
+
+**Distribution decision / deviation:** no npm publication, network self-updater, unsigned release download,
+release-signing system, or GitHub Release. There is no public release channel yet. "Installation" here means
+the current source checkout, with service definitions independent of repository layout. Signed artifacts,
+public packaging, and any true remote updater belong with public-alpha/release hardening.
 
 ### Exit criteria
 
-A technically competent user can install Homebase from README instructions without manually wiring multiple services
-or editing a large environment file.
+A new pre-alpha user can clone, run `npm install` and `npm run setup`, select project roots, install a user Host,
+configure or receive guidance for private Tailscale Serve, pair a phone, close the terminal, continue after login,
+diagnose problems with `homebase doctor`, add a project with automatic service restart, and remove the service
+with `homebase uninstall`, without editing OS service files or copying permanent auth tokens. Reboot autostart
+is defined by each user service manager; a Windows lifecycle smoke test proves the real implementation.
 
 ## Phase 7 — Gemini + ACP hardening
 

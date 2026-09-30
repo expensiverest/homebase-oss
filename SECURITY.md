@@ -46,3 +46,8 @@ Homebase is pre-alpha. There are no supported release versions yet; security fix
 - Remote access is expected through private Tailscale Serve with HTTPS and Homebase pairing, not Funnel or router port forwarding.
 - Provider processes are spawned without a shell; ACP agents get no filesystem or terminal client capabilities.
 - Secrets are redacted from logs and diagnostics where practical.
+- Background services run as the current user, never root/LocalSystem by default. Definitions persist absolute
+  executable/config/state paths and sanitized PATH, without provider keys or device/admin credentials.
+- Local-admin status/shutdown require an actual loopback socket, the machine key, no Origin, and no proxy
+  headers. Paired browsers cannot use them. Uninstall preserves state by default, with explicit guarded purge;
+  no network self-updater exists. See [service boundaries](docs/service.md).

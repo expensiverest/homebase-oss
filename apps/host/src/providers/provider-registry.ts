@@ -1,5 +1,4 @@
 import {
-  createConsoleLogger,
   toAgentError,
   type AdapterContext,
   type AdapterLogger,
@@ -65,6 +64,13 @@ export class ProviderRegistry {
   readonly #findProjectByPath: (path: string) => Promise<ProjectId | null>;
   readonly #resolveAttachment: (attachmentId: AttachmentId) => Promise<ResolvedAttachment>;
   readonly #providers = new Map<ProviderId, RegisteredProvider>();
+  #closing = false;
+  beginClose(): void {
+    this.#closing = true;
+  }
+  #assertOpen(): void {
+    if (this.#closing) throw new HostError("provider_unavailable", "Homebase is shutting down.");
+  }
 
   constructor(options: ProviderRegistryOptions) {
     this.#config = options.config;
@@ -77,6 +83,7 @@ export class ProviderRegistry {
   }
 
   register(registration: AdapterRegistration): void {
+    this.#assertOpen();
     if (this.#providers.has(registration.id)) {
       throw new HostError("conflict", `Provider "${registration.id}" is already registered.`);
     }
@@ -93,19 +100,24 @@ export class ProviderRegistry {
 
   /** Initializes and detects every enabled provider. */
   async initialize(): Promise<void> {
+    this.#assertOpen();
+    const initializing: Promise<void>[] = [];
     for (const entry of this.#providers.values()) {
       if (this.#config.providers[entry.registration.id]?.enabled === false) {
         entry.enabled = false;
         this.#logger.info("Provider disabled by configuration.", { provider: entry.registration.id });
         continue;
       }
-      await this.#initializeProvider(entry);
+      initializing.push(this.#initializeProvider(entry));
     }
+    await Promise.all(initializing);
   }
 
   /** Re-runs detection for all enabled providers and publishes transitions. */
   async refresh(): Promise<void> {
+    this.#assertOpen();
     for (const entry of this.#providers.values()) {
+      this.#assertOpen();
       if (!entry.enabled) continue;
       const wasAvailable = this.#isAvailable(entry);
       await this.#probeProvider(entry);
@@ -132,7 +144,7 @@ export class ProviderRegistry {
     const context: AdapterContext = {
       hostVersion: this.#hostVersion,
       config: Object.freeze({ ...providerConfig }),
-      logger: createConsoleLogger(`provider:${entry.registration.id}`, { level: this.#config.host.logLevel }),
+      logger: this.#logger,
       resolveProjectPath: this.#resolveProjectPath,
       findProjectByPath: this.#findProjectByPath,
       resolveAttachment: this.#resolveAttachment,
@@ -223,6 +235,7 @@ export class ProviderRegistry {
 
   /** Adapter instances for enabled providers (used for session listing). */
   adapters(): Array<{ id: ProviderId; adapter: AgentAdapter }> {
+    this.#assertOpen();
     return [...this.#providers.values()]
       .filter((entry) => entry.enabled)
       .map((entry) => ({ id: entry.registration.id, adapter: entry.adapter }));
@@ -290,6 +303,7 @@ export class ProviderRegistry {
   }
 
   async dispose(): Promise<void> {
+    this.beginClose();
     for (const entry of this.#providers.values()) {
       try {
         await entry.adapter.dispose?.();
@@ -303,6 +317,7 @@ export class ProviderRegistry {
   }
 
   #requireEntry(providerId: ProviderId): RegisteredProvider {
+    this.#assertOpen();
     const entry = this.#providers.get(providerId);
     if (!entry || !entry.enabled) {
       throw new HostError("provider_not_found", `Unknown provider "${providerId}".`);
