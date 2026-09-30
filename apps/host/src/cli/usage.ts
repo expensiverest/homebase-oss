@@ -11,6 +11,13 @@ Usage: homebase [options]
        homebase projects remove <path>
 
 Commands:
+  setup                   First-run setup, review, and repair
+  service status|install|start|stop|restart|uninstall
+                          Manage the current user's background Host
+  doctor [--json]         Read-only installation diagnostics
+  uninstall [--purge-state]
+                          Remove the service; preserve state by default
+  upgrade                 Refresh the service after a manual source update
   (no command)            Start the Homebase Host
   pair                    Print a pairing invitation and QR for a new device
   devices                 List paired devices
@@ -20,6 +27,9 @@ Commands:
   projects remove <path>  Remove a project root
 
 Options:
+  --no-restart      Skip automatic service restart after project-root changes
+  --json            Machine-readable doctor output
+  --purge-state     Confirm and remove verified Homebase-owned state
   --config <path>   Path to the Homebase config file
                     (default: <state-dir>/config.json, state dir: ~/.homebase)
   --port <port>     Override host.port

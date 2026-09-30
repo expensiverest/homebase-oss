@@ -1,5 +1,4 @@
 import {
-  createConsoleLogger,
   toAgentError,
   type AdapterContext,
   type AdapterLogger,
@@ -93,14 +92,16 @@ export class ProviderRegistry {
 
   /** Initializes and detects every enabled provider. */
   async initialize(): Promise<void> {
+    const initializing: Promise<void>[] = [];
     for (const entry of this.#providers.values()) {
       if (this.#config.providers[entry.registration.id]?.enabled === false) {
         entry.enabled = false;
         this.#logger.info("Provider disabled by configuration.", { provider: entry.registration.id });
         continue;
       }
-      await this.#initializeProvider(entry);
+      initializing.push(this.#initializeProvider(entry));
     }
+    await Promise.all(initializing);
   }
 
   /** Re-runs detection for all enabled providers and publishes transitions. */
@@ -132,7 +133,7 @@ export class ProviderRegistry {
     const context: AdapterContext = {
       hostVersion: this.#hostVersion,
       config: Object.freeze({ ...providerConfig }),
-      logger: createConsoleLogger(`provider:${entry.registration.id}`, { level: this.#config.host.logLevel }),
+      logger: this.#logger,
       resolveProjectPath: this.#resolveProjectPath,
       findProjectByPath: this.#findProjectByPath,
       resolveAttachment: this.#resolveAttachment,

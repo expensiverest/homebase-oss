@@ -1,5 +1,10 @@
 # Adapters
 
+Phase 6 setup reuses ProviderRegistry detection and disposes temporary managed providers; no session/prompt
+is created. Doctor reads the running Host's cached safe provider status, or reports unknown when unavailable.
+The background Host runs as the same OS user with sanitized PATH and provider-owned persisted login; no new
+provider credential store exists. Service shutdown awaits adapter disposal, including owned Windows trees.
+
 > Contract: `packages/adapter-sdk/src/adapter.ts`. Compliance suite:
 > `packages/adapter-sdk/src/compliance.ts`.
 

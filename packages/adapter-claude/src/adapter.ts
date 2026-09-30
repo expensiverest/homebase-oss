@@ -178,10 +178,12 @@ export class ClaudeAdapter implements AgentAdapter {
 
   async dispose(): Promise<void> {
     this.#disposed = true;
+    const closing: Promise<void>[] = [];
     for (const session of this.#sessions.values()) {
       this.#clearIdleTimer(session);
-      session.controller?.stop();
+      if (session.controller) closing.push(session.controller.dispose());
     }
+    await Promise.all(closing);
     this.#sessions.clear();
     if (this.#channelServer) {
       await new Promise<void>((resolve) => this.#channelServer?.close(() => resolve()));

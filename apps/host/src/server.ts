@@ -32,6 +32,7 @@ export interface CreateHostRuntimeOptions {
   /** Absolute path to a built web client; defaults to apps/web/dist when present. */
   webDistPath?: string | null;
   stateDir?: string;
+  onShutdown?: () => void;
 }
 
 export interface HostRuntime {
@@ -46,6 +47,7 @@ export interface HostRuntime {
   readonly app: Hono<ApiEnv>;
   start(): Promise<{ hostname: string; port: number }>;
   close(): Promise<void>;
+  readonly closed: Promise<void>;
 }
 
 /**
@@ -127,6 +129,25 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
           ? defaultWebDist
           : null;
 
+  let resolveClosed!: () => void;
+  const closed = new Promise<void>((resolve) => {
+    resolveClosed = resolve;
+  });
+  let closing: Promise<void> | null = null;
+  const close = (): Promise<void> =>
+    (closing ??= (async () => {
+      await providers.dispose();
+      attachments.dispose();
+      const running = server;
+      server = null;
+      if (running) {
+        // Close SSE/keepalive sockets too, after provider cleanup and the admin response.
+        if ("closeAllConnections" in running) running.closeAllConnections();
+        await new Promise<void>((resolve, reject) => running.close((error) => (error ? reject(error) : resolve())));
+      }
+      resolveClosed();
+      options.onShutdown?.();
+    })());
   const app = createApiApp({
     version: HOST_VERSION,
     startedAt: Date.now(),
@@ -140,6 +161,9 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     devices,
     logger,
     webDist,
+    requestShutdown: () => {
+      void close().catch((error: unknown) => logger.error("Host shutdown failed.", { error: String(error) }));
+    },
   });
 
   let server: ReturnType<typeof serve> | null = null;
@@ -154,6 +178,7 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     auth,
     devices,
     app,
+    closed,
     async start() {
       if (server) {
         throw new Error("The Homebase Host is already running.");
@@ -169,16 +194,6 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
 
       return address;
     },
-    async close() {
-      await providers.dispose();
-      attachments.dispose();
-      const running = server;
-      server = null;
-      if (running) {
-        await new Promise<void>((resolve, reject) => {
-          running.close((error) => (error ? reject(error) : resolve()));
-        });
-      }
-    },
+    close,
   };
 }

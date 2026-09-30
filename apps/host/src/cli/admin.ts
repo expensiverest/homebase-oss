@@ -17,7 +17,7 @@ interface AdminClientOptions {
  * machine-local admin key from the Homebase state directory; the key is never
  * printed and never leaves the machine.
  */
-class AdminClient {
+export class AdminClient {
   readonly #port: number;
   readonly #keyPath: string;
 
@@ -39,6 +39,8 @@ class AdminClient {
       return await fetch(`http://127.0.0.1:${this.#port}${endpoint}`, {
         method,
         headers: { "x-homebase-admin": key },
+        signal: AbortSignal.timeout(3000),
+        redirect: "error",
       });
     } catch {
       throw new Error(

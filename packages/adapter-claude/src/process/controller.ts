@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
-import type { AdapterLogger } from "@homebase/adapter-sdk";
+import { terminateOwnedProcess, type AdapterLogger } from "@homebase/adapter-sdk";
 import { defineCapabilities, noCapabilities } from "@homebase/protocol";
 
 import { ClaudeProcessError } from "../errors.js";
@@ -180,6 +180,31 @@ export class ClaudeProcessController {
     const toArray = (value: unknown): string[] =>
       Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
     return { stillQueued: toArray(response?.still_queued), cancelled: toArray(response?.cancelled) };
+  }
+
+  /** SIGINT ends a turn cleanly; SIGTERM (fallback) may leave it unfinished. */
+  async dispose(): Promise<void> {
+    const child = this.#child;
+    if (!child || this.#exited) return;
+    this.#stopRequested = true;
+    // Windows SIGINT kills the root immediately; terminate its owned tree
+    // before that root disappears. POSIX keeps the existing SIGINT-first path.
+    if (process.platform === "win32") {
+      await terminateOwnedProcess(child);
+      return;
+    }
+    this.stop();
+    await new Promise<void>((resolve) => {
+      const remove = this.onceExit(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+      const timer = setTimeout(() => {
+        remove();
+        resolve();
+      }, 1700);
+    });
+    await terminateOwnedProcess(child);
   }
 
   /** SIGINT ends a turn cleanly; SIGTERM (fallback) may leave it unfinished. */

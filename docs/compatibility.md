@@ -1,5 +1,11 @@
 # Provider compatibility
 
+Background service PATH/auth can differ from a terminal. `homebase setup` captures a sanitized PATH and
+detects installed providers without model prompts, disposing temporary managed processes. `homebase doctor`
+compares service/terminal executable resolution and cached Host status without starting providers. Saved
+provider CLI login is preferred; shell-local API keys are never copied into service definitions. See [service
+operations](service.md). Unsupported service managers retain foreground `homebase`.
+
 > Policy: IMPLEMENTATION_PLAN §23. If an installed provider is newer than the latest tested version,
 > warn rather than hard-fail unless a known incompatibility exists.
 

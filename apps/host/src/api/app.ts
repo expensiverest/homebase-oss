@@ -1,4 +1,5 @@
 import { bodyLimit } from "hono/body-limit";
+import type { ServerResponse } from "node:http";
 import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z, type ZodType } from "zod";
@@ -51,6 +52,8 @@ export interface ApiDependencies {
   logger: AdapterLogger;
   /** Absolute path to the built web client; enables static serving when set. */
   webDist?: string | null;
+  /** Runtime owns shutdown; the route schedules it only after the response flushes. */
+  requestShutdown?: () => void;
 }
 
 export interface ApiEnv {
@@ -256,6 +259,33 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
   });
   app.post("/api/v1/admin/pair", smallLimit, (c) => c.json(deps.auth.createInvitation(), 201));
   app.get("/api/v1/admin/devices", (c) => c.json({ devices: deps.devices!.list() }));
+  app.get("/api/v1/admin/status", (c) => {
+    const devices = deps.devices!.list();
+    return c.json({
+      version: deps.version,
+      uptimeSeconds: Math.round((Date.now() - deps.startedAt) / 1000),
+      config: { port: deps.config.host.port, bindAddress: deps.config.host.bindAddress, authMode: deps.auth.mode },
+      projects: { count: deps.projects.list().length },
+      providers: deps.providers
+        .listProviders()
+        .map(({ id, name, installed, authenticated, compatible, version, warning }) => ({
+          id,
+          name,
+          installed,
+          authenticated,
+          compatible,
+          version,
+          warning,
+        })),
+      devices: { total: devices.length, active: devices.filter((device) => !device.revokedAt).length },
+    });
+  });
+  app.post("/api/v1/admin/shutdown", (c) => {
+    const outgoing = (c.env as { outgoing?: ServerResponse } | undefined)?.outgoing;
+    if (!outgoing || !deps.requestShutdown) throw new HostError("internal", "Runtime shutdown unavailable.");
+    outgoing.once("finish", () => setImmediate(() => deps.requestShutdown?.()));
+    return c.json({ accepted: true }, 202);
+  });
   app.delete("/api/v1/admin/devices/:deviceId", async (c) => {
     const device = await deps.devices!.revoke(c.req.param("deviceId"));
     if (!device) throw new HostError("not_found", "Device not found.", { status: 404 });

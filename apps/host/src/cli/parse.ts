@@ -9,6 +9,12 @@ export interface CliArguments {
   url?: string;
   help: boolean;
   version: boolean;
+  json?: boolean;
+  noRestart?: boolean;
+  purgeState?: boolean;
+  serviceRuntime?: boolean;
+  stateDir?: string;
+  servicePath?: string;
 }
 
 /** Raised for malformed invocations; the dispatcher maps it to a usage error. */
@@ -31,6 +37,12 @@ export function parseCliArguments(argv: string[]): CliArguments {
           url: { type: "string" },
           help: { type: "boolean", short: "h" },
           version: { type: "boolean", short: "v" },
+          json: { type: "boolean" },
+          "no-restart": { type: "boolean" },
+          "purge-state": { type: "boolean" },
+          "service-runtime": { type: "boolean" },
+          "state-dir": { type: "string" },
+          "service-path": { type: "string" },
         },
         allowPositionals: true,
       });
@@ -48,5 +60,11 @@ export function parseCliArguments(argv: string[]): CliArguments {
     ...(values.url !== undefined ? { url: values.url } : {}),
     help: values.help === true,
     version: values.version === true,
+    json: values.json === true,
+    noRestart: values["no-restart"] === true,
+    purgeState: values["purge-state"] === true,
+    serviceRuntime: values["service-runtime"] === true,
+    ...(values["state-dir"] !== undefined ? { stateDir: values["state-dir"] } : {}),
+    ...(values["service-path"] !== undefined ? { servicePath: values["service-path"] } : {}),
   };
 }

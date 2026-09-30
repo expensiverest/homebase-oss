@@ -1,6 +1,6 @@
 {
   "name": "@homebase/host",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "Homebase Host: the local control plane that runs provider adapters and serves the PWA",
   "license": "Apache-2.0",

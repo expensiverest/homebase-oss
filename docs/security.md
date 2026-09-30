@@ -119,6 +119,31 @@ This is the most important boundary in the product:
   logged server-side only.
 - No third-party scripts, analytics, or CDNs anywhere in the stack.
 
+## Setup and user-service boundary (Phase 6)
+
+Setup uses validated raw config and existing canonical project mutations. It never copies shell credentials
+into configuration or service files. Definitions store exact executable/entry/config/state paths and sanitized
+absolute PATH only; CLI provider authentication remains provider-owned. Services run as the current user through
+Task Scheduler, LaunchAgent, or systemd user units. No sudo, LocalSystem, automatic login, Funnel, or public
+update download is introduced.
+
+`GET /api/v1/admin/status` returns operational counts/config/provider status only. `POST /api/v1/admin/shutdown`
+flushes 202 before requesting runtime disposal. Both reuse Phase 5 checks: actual loopback peer, private key,
+no Origin, and no forwarded headers. They are absent from the PWA and reject paired credentials and Serve.
+
+OS commands use bounded argv execution. Windows hidden startup uses a fixed encoded PowerShell/.NET process
+launcher; paths are encoded data, argv uses the tested Windows quote helper, and user strings never become
+PowerShell expressions. Native fallback captures only children of the exact action, then rechecks creation
+identity before tree termination. POSIX definitions escape XML/systemd values without shell wrappers.
+Commands refuse mismatched/unowned definitions; corrupt metadata does not authorize destructive repair.
+Private POSIX state/metadata remain 0700/0600; Windows depends on current-user profile ACLs.
+
+Purge requires confirmation plus an exact ownership marker and rejects symlinks, shallow paths, root/home/repo
+and project ancestors, and unexpected contents. Default uninstall leaves state, providers/auth, projects, and
+Serve untouched. Operational logs rotate at 1 MiB plus one backup. Doctor performs no repair or provider
+initialization. Same-user executable/PATH/state replacement is outside meaningful protection; doctor checks
+missing/stale paths and PATH differences. Network updating/signing awaits a public release channel.
+
 ## Remaining hardening
 
 - Generic per-device limits for costly agent operations and further hostile-content regression coverage.
