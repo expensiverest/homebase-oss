@@ -32,6 +32,10 @@ homebase doctor --json
 ```
 
 Installation writes a definition and private versioned `<state>/service.json`; OS state is authoritative.
+`service install` is idempotent: an exact, enabled native definition is left running (or stopped) as it was.
+Missing or stale Homebase metadata is repaired without reinstalling or restarting that service. Setup uses
+the same repair path and starts a stopped service for normal use. Updating a stale verified definition
+gracefully stops a running Host, updates the service, and restores it with matching-version health checks.
 Metadata contains manager/identifier/install time/version, absolute Node/entry/config/state paths, and PATH.
 The logical command is:
 
@@ -60,9 +64,18 @@ only its captured child trees. Normal stop first uses the protected local-admin 
 
 Stop/restart requests local graceful shutdown, waits boundedly for health/task exit, then uses bounded native
 fallback. The Host disposes managed provider processes, and the HTTP 202 response finishes before shutdown.
+After that response finishes, the Host rejects new operations, stops accepting HTTP connections, and closes
+existing SSE/keepalive sockets before disposing providers. Cleanup attempts all owned components even if
+one fails; repeated shutdown requests share the same cleanup operation.
 Version mismatch or a missing executable is actionable through doctor/setup/upgrade. Alternate-state commands
 refuse to operate on a native service that does not match their installation. Corrupt metadata is reported;
 Homebase does not delete or overwrite services based on corrupt metadata.
+Same-name launchd/systemd services fail closed unless ownership can be verified from the complete Homebase
+definition and native state. A loaded LaunchAgent must match the expected plist path and executable/arguments;
+a loaded systemd unit must use the expected user unit's `FragmentPath`. An unrelated file also blocks
+installation even if no job/unit is loaded. Systemd overrides or pending reloads require inspection before
+Homebase can establish ownership. Unverified collisions are never stopped, overwritten or removed;
+inspect the existing service before retrying setup.
 
 Homebase rotates its sanitized operational log at `<state>/logs/host.log` (1 MiB plus one 1 MiB backup).
 Linux additionally has `journalctl --user -u homebase.service`; macOS uses the same bounded Host log and

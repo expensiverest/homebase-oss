@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { systemdUnit } from "./definitions.js";
 import { writeServiceFile } from "./files.js";
+import { fileExists } from "../config/index.js";
+import { ownedSystemdDefinition, ownershipCollision } from "./ownership.js";
 import type { ManagerOptions, ServiceDefinition, ServiceInspection, ServiceManager } from "./types.js";
 
 export class SystemdUserServiceManager implements ServiceManager {
@@ -38,33 +40,50 @@ export class SystemdUserServiceManager implements ServiceManager {
       "--user",
       "show",
       this.identifier,
-      "--property=LoadState,ActiveState,UnitFileState,FragmentPath",
+      "--property=LoadState,ActiveState,UnitFileState,FragmentPath,DropInPaths,NeedDaemonReload",
+      "--all",
     ]);
-    if (result.code !== 0) throw new Error("systemd --user is unavailable. Homebase can run manually with `homebase`.");
+    if (result.code !== 0 || result.truncated)
+      throw new Error("systemd --user is unavailable. Homebase can run manually with `homebase`.");
     const properties = Object.fromEntries(
       result.stdout
         .trim()
         .split("\n")
         .map((line) => line.split(/=(.*)/s).slice(0, 2)),
     );
-    const installed = properties.LoadState !== "not-found" && !!properties.FragmentPath;
-    const definition = installed ? await readFile(properties.FragmentPath!, "utf8").catch(() => "") : "";
+    const installed = await fileExists(this.#file);
+    const definition = installed ? await readFile(this.#file, "utf8") : "";
+    const loaded = properties.LoadState !== "not-found";
+    const owned = installed ? ownedSystemdDefinition(definition) : null;
+    if (
+      !properties.LoadState ||
+      (installed && !owned) ||
+      (loaded &&
+        (!installed ||
+          properties.FragmentPath !== this.#file ||
+          properties.DropInPaths !== "" ||
+          properties.NeedDaemonReload !== "no")) ||
+      (!loaded && (properties.ActiveState !== "inactive" || !!properties.FragmentPath))
+    )
+      throw ownershipCollision("systemd", this.identifier);
     return {
       installed,
+      loaded,
+      ...(owned ? { ownedDefinition: owned } : {}),
       enabled: properties.UnitFileState === "enabled",
       running: properties.ActiveState === "active",
       definition,
     };
   }
   async install(d: ServiceDefinition): Promise<void> {
-    const state = await this.inspect();
-    if (state.installed && !state.definition?.includes("Description=Homebase user Host"))
-      throw new Error("An unrelated homebase.service was left unchanged.");
+    await this.inspect();
     await writeServiceFile(this.#file, systemdUnit(d));
     await this.#command(["daemon-reload"]);
     await this.#command(["enable", this.identifier]);
   }
   async start(): Promise<void> {
+    if (!(await this.inspect()).installed)
+      throw new Error("Homebase user service is not installed. Run `homebase setup`.");
     await this.#command(["start", this.identifier]);
   }
   async stop(): Promise<void> {
@@ -73,8 +92,6 @@ export class SystemdUserServiceManager implements ServiceManager {
   async uninstall(): Promise<void> {
     const state = await this.inspect();
     if (!state.installed) return;
-    if (!state.definition?.includes("Description=Homebase user Host"))
-      throw new Error("Refusing to remove an unrelated user service.");
     await this.#command(["disable", "--now", this.identifier]);
     await rm(this.#file, { force: true });
     await this.#command(["daemon-reload"]);

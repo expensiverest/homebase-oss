@@ -180,16 +180,23 @@ export async function runSetup(options: SetupOptions): Promise<number> {
         new ServiceController({ manager, definition, port: config.host.port });
       existing = await manager.inspect();
       const metadata = await readServiceMetadata(options.stateDir);
-      const current =
-        existing.installed &&
-        existing.enabled &&
-        manager.matches(existing, definition) &&
-        (!metadata || definitionsEqual(metadata, definition));
-      if (!current) {
+      const nativeCurrent = existing.installed && existing.enabled && manager.matches(existing, definition);
+      const metadataCurrent =
+        metadata &&
+        definitionsEqual(metadata, definition) &&
+        metadata.manager === manager.kind &&
+        metadata.serviceIdentifier === manager.identifier;
+      if (!nativeCurrent || !metadataCurrent) {
         await controller.install();
-        io.out("✓ Homebase service installed");
+        io.out(nativeCurrent ? "✓ Homebase service metadata repaired" : "✓ Homebase service installed");
       }
-      if (existing.running && (changed || !current)) await controller.restart();
+      const runningHealth = existing.running ? await (options.health ?? readHealth)(config.host.port) : null;
+      if (
+        existing.running &&
+        nativeCurrent &&
+        (changed || (runningHealth && runningHealth.version !== definition.homebaseVersion))
+      )
+        await controller.restart();
       else await controller.start();
       ready = true;
       io.out("✓ Homebase running");

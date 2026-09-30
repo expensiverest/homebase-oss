@@ -54,6 +54,7 @@ export interface ApiDependencies {
   webDist?: string | null;
   /** Runtime owns shutdown; the route schedules it only after the response flushes. */
   requestShutdown?: () => void;
+  isClosing?: () => boolean;
 }
 
 export interface ApiEnv {
@@ -92,6 +93,11 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
 
   app.use("/api/*", async (c, next) => {
     c.set("requestId", crypto.randomUUID());
+    if (deps.isClosing?.())
+      return c.json(
+        errorBody(new HostError("provider_unavailable", "Homebase is shutting down."), c.get("requestId")),
+        503,
+      );
     await next();
     c.header("cache-control", "no-store");
     c.header("x-content-type-options", "nosniff");

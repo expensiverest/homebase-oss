@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ServiceController } from "../src/service/service.js";
-import { readServiceMetadata } from "../src/service/metadata.js";
+import { readServiceMetadata, writeServiceMetadata } from "../src/service/metadata.js";
 import { fakeManager, goodHealth } from "./helpers/service-fixture.js";
 import type { ServiceDefinition } from "../src/service/types.js";
 let dir: string;
@@ -44,6 +44,81 @@ function fixture(options: { ready?: boolean; graceful?: boolean } = {}) {
   return { manager, health, shutdown, service };
 }
 describe("service lifecycle", () => {
+  it.each([true, false])(
+    "repairs missing metadata for an exact running=%s native service without native mutations",
+    async (running) => {
+      const f = fixture();
+      await f.manager.install(d);
+      f.manager.state.running = running;
+      f.manager.install.mockClear();
+      await f.service.install();
+      expect(await readServiceMetadata(d.stateDir)).toMatchObject(d);
+      expect(f.manager.install).not.toHaveBeenCalled();
+      expect(f.manager.stop).not.toHaveBeenCalled();
+      expect(f.manager.start).not.toHaveBeenCalled();
+      expect(f.shutdown).not.toHaveBeenCalled();
+      expect(f.manager.state.running).toBe(running);
+    },
+  );
+  it.each([true, false])("correct service and metadata are a true no-op (running=%s)", async (running) => {
+    const f = fixture();
+    await f.service.install();
+    if (running) await f.service.start();
+    const before = await readServiceMetadata(d.stateDir);
+    f.manager.install.mockClear();
+    f.manager.start.mockClear();
+    await f.service.install();
+    expect(await readServiceMetadata(d.stateDir)).toEqual(before);
+    expect(f.manager.install).not.toHaveBeenCalled();
+    expect(f.manager.start).not.toHaveBeenCalled();
+    expect(f.manager.stop).not.toHaveBeenCalled();
+  });
+  it("repairs stale metadata when native definition is exact", async () => {
+    const f = fixture();
+    await f.manager.install(d);
+    await writeServiceMetadata(f.manager, { ...d, homebaseVersion: "old" });
+    f.manager.install.mockClear();
+    await f.service.install();
+    expect((await readServiceMetadata(d.stateDir))?.homebaseVersion).toBe(d.homebaseVersion);
+    expect(f.manager.install).not.toHaveBeenCalled();
+  });
+  it.each([true, false])("updates stale owned native definition and restores running=%s state", async (running) => {
+    const f = fixture();
+    const old = { ...d, entryPath: path.join(dir, "old-entry.js") };
+    await f.manager.install(old);
+    await writeServiceMetadata(f.manager, old);
+    f.manager.state.running = running;
+    f.manager.install.mockClear();
+    await f.service.install();
+    expect(f.manager.install).toHaveBeenCalledOnce();
+    expect(f.manager.state.running).toBe(running);
+    expect(f.shutdown).toHaveBeenCalledTimes(running ? 1 : 0);
+    expect(f.manager.start).toHaveBeenCalledTimes(running ? 1 : 0);
+    if (running) expect(f.health).toHaveBeenCalled();
+    expect(await readServiceMetadata(d.stateDir)).toMatchObject(d);
+  });
+  it("unverified collision refuses installation without writing metadata", async () => {
+    const f = fixture();
+    await f.manager.install({ ...d, entryPath: "/unrelated" });
+    f.manager.install.mockClear();
+    await expect(f.service.install()).rejects.toThrow("left unchanged");
+    expect(f.manager.install).not.toHaveBeenCalled();
+    expect(f.manager.stop).not.toHaveBeenCalled();
+    expect(await readServiceMetadata(d.stateDir)).toBeNull();
+  });
+  it("can update a manager-verified stale definition even when metadata is missing", async () => {
+    const f = fixture();
+    const old = { ...d, entryPath: path.join(dir, "old.js") };
+    await f.manager.install(old);
+    f.manager.state.ownedDefinition = old;
+    f.manager.state.running = true;
+    f.manager.install.mockClear();
+    await f.service.install();
+    expect(f.manager.install).toHaveBeenCalledOnce();
+    expect(f.manager.start).toHaveBeenCalledOnce();
+    expect(f.shutdown).toHaveBeenCalledOnce();
+    expect(await readServiceMetadata(d.stateDir)).toMatchObject(d);
+  });
   it("installs atomically with secret-free versioned metadata", async () => {
     const f = fixture();
     await f.service.install();

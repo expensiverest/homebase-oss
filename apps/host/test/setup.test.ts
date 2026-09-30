@@ -6,6 +6,8 @@ import { runSetup, type SetupOptions } from "../src/setup/setup.js";
 import { SetupCancelled } from "../src/setup/prompts.js";
 import { fakeManager, fakePrompts, captureIo, goodHealth, goodTailscale } from "./helpers/service-fixture.js";
 import type { TailscaleStatus } from "../src/remote/tailscale.js";
+import { writeServiceMetadata, readServiceMetadata, metadataPath } from "../src/service/metadata.js";
+import { ServiceController } from "../src/service/service.js";
 let base: string;
 beforeEach(async () => {
   base = await mkdtemp(path.join(os.tmpdir(), "hb-setup-"));
@@ -32,6 +34,7 @@ function fixture(overrides: Partial<SetupOptions> = {}) {
   const service = {
     install: vi.fn(async () => {
       await manager.install(await definition());
+      await writeServiceMetadata(manager, await definition());
     }),
     start: vi.fn(async () => {
       await manager.start();
@@ -77,6 +80,56 @@ function fixture(overrides: Partial<SetupOptions> = {}) {
   return { options, manager, io, prompts, service, tailscale, pair };
 }
 describe("setup engine", () => {
+  it.each([true, false])("keeps an exact running setup uninterrupted (missing metadata=%s)", async (missing) => {
+    const f = fixture();
+    await runSetup(f.options);
+    if (missing) await rm(metadataPath(f.options.stateDir));
+    f.manager.install.mockClear();
+    f.manager.start.mockClear();
+    f.options.controller = (definition, config) =>
+      new ServiceController({
+        manager: f.manager,
+        definition,
+        port: config.host.port,
+        health: f.options.health,
+        availablePort: async () => true,
+      });
+    await runSetup({ ...f.options, prompts: fakePrompts([false, true, false]) });
+    expect(await readServiceMetadata(f.options.stateDir)).not.toBeNull();
+    expect(f.manager.install).not.toHaveBeenCalled();
+    expect(f.manager.stop).not.toHaveBeenCalled();
+    expect(f.manager.start).not.toHaveBeenCalled();
+    expect(f.manager.state.running).toBe(true);
+    expect(f.io.lines.includes("✓ Homebase service metadata repaired")).toBe(missing);
+  });
+  it("updates a stale running native service without a second setup restart", async () => {
+    const f = fixture();
+    await runSetup(f.options);
+    const desired = await f.options.definition!(f.options.configPath, f.options.stateDir);
+    const old = { ...desired, entryPath: path.join(base, "old entry.js") };
+    await f.manager.install(old);
+    await writeServiceMetadata(f.manager, old);
+    f.manager.install.mockClear();
+    f.manager.start.mockClear();
+    const shutdown = vi.fn(async () => {
+      f.manager.state.running = false;
+      return true;
+    });
+    f.options.controller = (definition, config) =>
+      new ServiceController({
+        manager: f.manager,
+        definition,
+        port: config.host.port,
+        health: f.options.health,
+        shutdown,
+        availablePort: async () => true,
+      });
+    await runSetup({ ...f.options, prompts: fakePrompts([false, true, false]) });
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(f.manager.install).toHaveBeenCalledOnce();
+    expect(f.manager.start).toHaveBeenCalledOnce();
+    expect(f.manager.state.running).toBe(true);
+  });
   it("migrates validated legacy raw config without persisting shell overrides", async () => {
     const f = fixture();
     await writeFile(

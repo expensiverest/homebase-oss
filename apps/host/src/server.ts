@@ -134,20 +134,46 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     resolveClosed = resolve;
   });
   let closing: Promise<void> | null = null;
-  const close = (): Promise<void> =>
-    (closing ??= (async () => {
-      await providers.dispose();
-      attachments.dispose();
+  let isClosing = false;
+  const close = (): Promise<void> => {
+    if (closing) return closing;
+    isClosing = true;
+    providers.beginClose();
+    return (closing = (async () => {
+      const errors: unknown[] = [];
       const running = server;
       server = null;
-      if (running) {
-        // Close SSE/keepalive sockets too, after provider cleanup and the admin response.
-        if ("closeAllConnections" in running) running.closeAllConnections();
-        await new Promise<void>((resolve, reject) => running.close((error) => (error ? reject(error) : resolve())));
+      try {
+        if (running) {
+          // Stop accepting first: no connection can arrive between socket teardown
+          // and listener shutdown. Admin shutdown schedules close after response finish.
+          await new Promise<void>((resolve, reject) => {
+            running.close((error) => (error ? reject(error) : resolve()));
+            if ("closeAllConnections" in running) running.closeAllConnections();
+          });
+        }
+      } catch (error) {
+        errors.push(error);
+      } finally {
+        try {
+          await providers.dispose();
+        } catch (error) {
+          errors.push(error);
+        } finally {
+          try {
+            attachments.dispose();
+          } catch (error) {
+            errors.push(error);
+          } finally {
+            // closed signals completion of all cleanup attempts; close() reports errors.
+            resolveClosed();
+            options.onShutdown?.();
+          }
+        }
       }
-      resolveClosed();
-      options.onShutdown?.();
+      if (errors.length) throw new AggregateError(errors, "Homebase shutdown cleanup failed.");
     })());
+  };
   const app = createApiApp({
     version: HOST_VERSION,
     startedAt: Date.now(),
@@ -164,6 +190,7 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     requestShutdown: () => {
       void close().catch((error: unknown) => logger.error("Host shutdown failed.", { error: String(error) }));
     },
+    isClosing: () => isClosing,
   });
 
   let server: ReturnType<typeof serve> | null = null;
@@ -180,6 +207,7 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     app,
     closed,
     async start() {
+      if (isClosing) throw new Error("The Homebase Host is shutting down.");
       if (server) {
         throw new Error("The Homebase Host is already running.");
       }

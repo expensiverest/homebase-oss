@@ -3,6 +3,7 @@ import { AdminClient } from "../cli/admin.js";
 import { readHealth, portAvailable, waitUntil, type HostHealth } from "./health.js";
 import { metadataPath, readServiceMetadata, writeServiceMetadata } from "./metadata.js";
 import type { ServiceDefinition, ServiceInspection, ServiceManager } from "./types.js";
+import { definitionsEqual } from "./metadata.js";
 
 export interface ServiceControllerOptions {
   manager: ServiceManager;
@@ -28,7 +29,12 @@ export class ServiceController {
   async #assertOwned(state: ServiceInspection): Promise<void> {
     if (!state.installed) return;
     const previous = await readServiceMetadata(this.definition.stateDir);
-    if (!this.manager.matches(state, previous ?? this.definition)) {
+    const owned = state.ownedDefinition;
+    if (
+      !this.manager.matches(state, this.definition) &&
+      !this.manager.matches(state, previous ?? this.definition) &&
+      !(owned && owned.configPath === this.definition.configPath && owned.stateDir === this.definition.stateDir)
+    ) {
       throw new Error(
         "The installed service does not match this Homebase installation. It was left unchanged. Run `homebase doctor` with the service's config/state directory.",
       );
@@ -42,8 +48,10 @@ export class ServiceController {
     const state = await this.manager.inspect();
     await this.#assertOwned(state);
     const previous = await readServiceMetadata(this.definition.stateDir);
+    const nativeCurrent = state.installed && this.manager.matches(state, this.definition);
     if (
       state.installed &&
+      !nativeCurrent &&
       previous &&
       (previous.configPath !== this.definition.configPath || previous.stateDir !== this.definition.stateDir)
     ) {
@@ -51,7 +59,18 @@ export class ServiceController {
         "The installed service uses another config/state directory. Use its config for service commands or uninstall it explicitly first.",
       );
     }
-    if (state.installed && state.running && !this.manager.matches(state, this.definition)) await this.stop();
+    if (nativeCurrent && state.enabled) {
+      if (
+        !previous ||
+        !definitionsEqual(previous, this.definition) ||
+        previous.manager !== this.manager.kind ||
+        previous.serviceIdentifier !== this.manager.identifier
+      )
+        await writeServiceMetadata(this.manager, this.definition);
+      return;
+    }
+    const wasRunning = state.running;
+    if (wasRunning) await this.stop();
     const healthy = await this.#health(this.#options.port);
     if (!healthy && !(await (this.#options.availablePort ?? portAvailable)(this.#options.port)))
       throw new Error(
@@ -59,6 +78,7 @@ export class ServiceController {
       );
     await this.manager.install(this.definition);
     await writeServiceMetadata(this.manager, this.definition);
+    if (wasRunning) await this.start();
   }
   async start(): Promise<void> {
     const state = await this.manager.inspect();
@@ -71,7 +91,7 @@ export class ServiceController {
     } else if (!(await (this.#options.availablePort ?? portAvailable)(this.#options.port))) {
       throw new Error(`Port ${this.#options.port} is occupied. Homebase will not stop the other application.`);
     }
-    await this.manager.start();
+    if (!state.running) await this.manager.start();
     const ready = await waitUntil(
       async () => (await this.#health(this.#options.port))?.version === this.definition.homebaseVersion,
       this.#options.timeoutMs ?? 45000,

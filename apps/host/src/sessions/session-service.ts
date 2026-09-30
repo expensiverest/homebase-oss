@@ -195,10 +195,12 @@ export class SessionService {
 
     for (let round = 0; round < rounds && collected.length < limit; round += 1) {
       let progressed = false;
-      for (const { id, adapter } of participants) {
+      for (const { id } of participants) {
         const providerState = state.providers[id];
         if (!providerState || providerState.done) continue;
         try {
+          // A prior provider/page may have awaited across runtime shutdown.
+          const adapter = this.#providers.requireAdapter(id);
           const result = await adapter.listSessions(project, {
             limit,
             ...(providerState.cursor !== null ? { cursor: providerState.cursor } : {}),
@@ -238,7 +240,8 @@ export class SessionService {
 
   /** Historical messages for one session, newest-first, using opaque cursors. */
   async listMessages(sessionId: SessionId, page: PageRequest = {}): Promise<AgentPage<AgentMessage>> {
-    const { adapter } = await this.#resolveAdapter(sessionId);
+    const { providerId } = await this.#resolveAdapter(sessionId);
+    const adapter = this.#providers.requireAdapter(providerId);
     return adapter.listMessages(sessionId, {
       limit: clampPageSize(page.limit, DEFAULT_MESSAGE_PAGE_SIZE, MAX_MESSAGE_PAGE_SIZE),
       ...(page.cursor != null ? { cursor: page.cursor } : {}),
@@ -284,7 +287,8 @@ export class SessionService {
   }
 
   async send(sessionId: SessionId, input: SendMessageInput): Promise<void> {
-    const { adapter } = await this.#resolveAdapter(sessionId);
+    const { providerId } = await this.#resolveAdapter(sessionId);
+    const adapter = this.#providers.requireAdapter(providerId);
     await adapter.send(sessionId, input);
   }
 

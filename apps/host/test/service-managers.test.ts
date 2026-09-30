@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { RunExecutableResult } from "@homebase/adapter-sdk";
@@ -8,7 +8,8 @@ import { LaunchdServiceManager } from "../src/service/launchd.js";
 import { SystemdUserServiceManager } from "../src/service/systemd.js";
 import { createServiceManager } from "../src/service/manager.js";
 import type { ServiceDefinition } from "../src/service/types.js";
-import { windowsTaskXml } from "../src/service/definitions.js";
+import { windowsTaskXml, launchdPlist, systemdUnit, serviceArguments } from "../src/service/definitions.js";
+import { ownedLaunchdDefinition, ownedSystemdDefinition } from "../src/service/ownership.js";
 let dir: string;
 beforeEach(async () => {
   dir = await mkdtemp(path.join(os.tmpdir(), "hb-manager-"));
@@ -106,6 +107,75 @@ describe("Windows manager", () => {
     expect(() => new WindowsTaskServiceManager({ identifier: "Homebase; rm" })).toThrow());
 });
 describe("launchd manager", () => {
+  function fixture(loaded = false, nativePath?: string, nativeArgs?: string[], nativeProgram?: string) {
+    const file = path.join(dir, "Library", "LaunchAgents", "com.homebase.host.plist");
+    const d = definition();
+    const run = vi.fn(async (_command: string, args: readonly string[]) => {
+      if (args[0] === "print" && args[1]?.includes("com.homebase.host"))
+        return loaded
+          ? result(
+              `path = ${nativePath ?? file}\nprogram = ${nativeProgram ?? d.nodePath}\nstate = running\narguments = {\n${(nativeArgs ?? [d.nodePath, ...serviceArguments(d)]).join("\n")}\n}`,
+            )
+          : result("", 113);
+      return result();
+    });
+    return { file, d, run, manager: new LaunchdServiceManager({ run, home: dir, uid: 501 }) };
+  }
+  it.each(["install", "uninstall", "stop", "start"] as const)(
+    "refuses %s of a loaded same-label job without our plist",
+    async (action) => {
+      const f = fixture(true);
+      await expect(action === "install" ? f.manager.install(f.d) : f.manager[action]()).rejects.toThrow(
+        "cannot verify",
+      );
+      expect(f.run.mock.calls.every((call) => ["print", "print-disabled"].includes(call[1][0]!))).toBe(true);
+      await expect(readFile(f.file)).rejects.toThrow();
+    },
+  );
+  it.each(["install", "uninstall"] as const)(
+    "refuses %s of an unrelated plist, even with an ownership marker",
+    async (action) => {
+      const f = fixture();
+      await mkdir(path.dirname(f.file), { recursive: true });
+      const source = launchdPlist(f.d, "com.homebase.host").replace("<true/>", "<false/>");
+      await writeFile(f.file, source);
+      await expect(action === "install" ? f.manager.install(f.d) : f.manager.uninstall()).rejects.toThrow("No changes");
+      expect(await readFile(f.file, "utf8")).toBe(source);
+      expect(f.run.mock.calls.every((call) => ["print", "print-disabled"].includes(call[1][0]!))).toBe(true);
+    },
+  );
+  it.each(["path", "arguments", "program"])(
+    "refuses a loaded job whose native %s differs from our plist",
+    async (field) => {
+      const f = fixture(
+        true,
+        field === "path" ? "/other.plist" : undefined,
+        field === "arguments" ? ["/other-program"] : undefined,
+        field === "program" ? "/other-program" : undefined,
+      );
+      await mkdir(path.dirname(f.file), { recursive: true });
+      await writeFile(f.file, launchdPlist(f.d, "com.homebase.host"));
+      await expect(f.manager.install(f.d)).rejects.toThrow("cannot verify");
+      expect(f.run.mock.calls.some((call) => call[1][0] === "bootout")).toBe(false);
+    },
+  );
+  it("updates a verified plist/native pair normally", async () => {
+    const f = fixture(true);
+    await mkdir(path.dirname(f.file), { recursive: true });
+    await writeFile(f.file, launchdPlist(f.d, "com.homebase.host"));
+    expect((await f.manager.inspect()).running).toBe(true);
+    await f.manager.install({ ...f.d, homebaseVersion: "0.0.2" });
+    expect(f.run.mock.calls.some((call) => call[1][0] === "bootout")).toBe(true);
+    expect(await readFile(f.file, "utf8")).toContain("0.0.2");
+  });
+  it("uninstalls a verified plist/native pair", async () => {
+    const f = fixture(true);
+    await mkdir(path.dirname(f.file), { recursive: true });
+    await writeFile(f.file, launchdPlist(f.d, "com.homebase.host"));
+    await f.manager.uninstall();
+    expect(f.run.mock.calls.some((call) => call[1][0] === "bootout")).toBe(true);
+    await expect(readFile(f.file)).rejects.toThrow();
+  });
   it("writes a per-user agent and modern enable/bootstrap argv", async () => {
     const run = vi.fn(async (_command: string, args: readonly string[]) =>
       result("", args[0] === "print" && args[1]?.includes("com.homebase.host") ? 113 : 0),
@@ -134,6 +204,79 @@ describe("launchd manager", () => {
   });
 });
 describe("systemd user manager", () => {
+  function fixture(loaded = false, nativePath?: string) {
+    const file = path.join(dir, ".config", "systemd", "user", "homebase.service");
+    const run = vi.fn(async (_command: string, _args: readonly string[]) =>
+      result(
+        `LoadState=${loaded ? "loaded" : "not-found"}\nActiveState=${loaded ? "active" : "inactive"}\nUnitFileState=${loaded ? "enabled" : ""}\nFragmentPath=${loaded ? (nativePath ?? file) : ""}\nDropInPaths=\nNeedDaemonReload=no`,
+      ),
+    );
+    return { file, run, manager: new SystemdUserServiceManager({ run, home: dir }) };
+  }
+  it.each(["install", "uninstall"] as const)(
+    "refuses %s of an unrelated file even when native state says not-found",
+    async (action) => {
+      const f = fixture();
+      await mkdir(path.dirname(f.file), { recursive: true });
+      const source = systemdUnit(definition()).replace("Restart=on-failure", "Restart=always");
+      await writeFile(f.file, source);
+      await expect(action === "install" ? f.manager.install(definition()) : f.manager.uninstall()).rejects.toThrow(
+        "No changes",
+      );
+      expect(await readFile(f.file, "utf8")).toBe(source);
+      expect(f.run.mock.calls.every((call) => call[1]?.[1] === "show")).toBe(true);
+    },
+  );
+  it.each(["install", "uninstall", "stop", "start"] as const)(
+    "refuses %s when a loaded unit has an unexpected FragmentPath",
+    async (action) => {
+      const f = fixture(true, "/other/homebase.service");
+      await mkdir(path.dirname(f.file), { recursive: true });
+      const source = systemdUnit(definition());
+      await writeFile(f.file, source);
+      await expect(action === "install" ? f.manager.install(definition()) : f.manager[action]()).rejects.toThrow(
+        "cannot verify",
+      );
+      expect(await readFile(f.file, "utf8")).toBe(source);
+      expect(f.run.mock.calls.every((call) => call[1]?.[1] === "show")).toBe(true);
+    },
+  );
+  it.each([false, true])("updates a verified %s-loaded unit safely", async (loaded) => {
+    const f = fixture(loaded);
+    await mkdir(path.dirname(f.file), { recursive: true });
+    await writeFile(f.file, systemdUnit(definition()));
+    expect((await f.manager.inspect()).installed).toBe(true);
+    await f.manager.install({ ...definition(), homebaseVersion: "0.0.2" });
+    expect(await readFile(f.file, "utf8")).toContain("0.0.2");
+    expect(f.run.mock.calls.some((call) => call[1]?.[1] === "enable")).toBe(true);
+  });
+  it("starts, stops and uninstalls a verified loaded unit", async () => {
+    const f = fixture(true);
+    await mkdir(path.dirname(f.file), { recursive: true });
+    await writeFile(f.file, systemdUnit(definition()));
+    await f.manager.start();
+    await f.manager.stop();
+    await f.manager.uninstall();
+    for (const action of ["start", "stop", "disable", "daemon-reload"])
+      expect(f.run.mock.calls.some((call) => call[1]?.[1] === action)).toBe(true);
+    await expect(readFile(f.file)).rejects.toThrow();
+  });
+  it.each(["DropInPaths=/other/override.conf", "NeedDaemonReload=yes"])(
+    "refuses a loaded unit with unverified overrides or pending reload: %s",
+    async (property) => {
+      const f = fixture(true);
+      await mkdir(path.dirname(f.file), { recursive: true });
+      await writeFile(f.file, systemdUnit(definition()));
+      f.run.mockResolvedValue(
+        result(
+          `LoadState=loaded\nActiveState=active\nUnitFileState=enabled\nFragmentPath=${f.file}\nDropInPaths=\nNeedDaemonReload=no\n${property}`,
+        ),
+      );
+      await expect(f.manager.uninstall()).rejects.toThrow("No changes");
+      expect(f.run.mock.calls.every((call) => call[1]?.[1] === "show")).toBe(true);
+      expect(await readFile(f.file, "utf8")).toBe(systemdUnit(definition()));
+    },
+  );
   it("writes temp user unit, daemon-reloads and enables with --user", async () => {
     const run = vi
       .fn()
@@ -154,6 +297,22 @@ describe("systemd user manager", () => {
   });
   it("restart is orchestrated above native manager", () =>
     expect("restart" in new SystemdUserServiceManager({ home: dir })).toBe(false));
+});
+describe("canonical ownership proof", () => {
+  it("round-trips escaped paths and rejects extra executable or policy fields", () => {
+    const d = { ...definition(), entryPath: '/space & < > " \\ %n $HOME/entry.js', path: '/tools:$tools:%x:"quoted"' };
+    const plist = launchdPlist(d, "com.homebase.host");
+    const unit = systemdUnit(d);
+    expect(ownedLaunchdDefinition(plist, "com.homebase.host")).toEqual(d);
+    expect(ownedSystemdDefinition(unit)).toEqual(d);
+    expect(
+      ownedLaunchdDefinition(
+        plist.replace("</dict></plist>", "<key>Program</key><string>/other</string></dict></plist>"),
+        "com.homebase.host",
+      ),
+    ).toBeNull();
+    expect(ownedSystemdDefinition(unit + "ExecStartPost=/other\n")).toBeNull();
+  });
 });
 describe("platform manager selection", () => {
   it.each(["win32", "darwin", "linux"] as const)("selects manager for %s", (platform) =>

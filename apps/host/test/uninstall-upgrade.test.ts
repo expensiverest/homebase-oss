@@ -6,6 +6,9 @@ import { uninstallHomebase, validatePurgeTarget } from "../src/setup/uninstall.j
 import { upgradeService } from "../src/setup/upgrade.js";
 import { fakeManager, fakePrompts, captureIo } from "./helpers/service-fixture.js";
 import type { ServiceDefinition } from "../src/service/types.js";
+import { ServiceController } from "../src/service/service.js";
+import { writeServiceMetadata, readServiceMetadata } from "../src/service/metadata.js";
+import { goodHealth } from "./helpers/service-fixture.js";
 let dir: string;
 let state: string;
 beforeEach(async () => {
@@ -104,6 +107,7 @@ describe("source upgrade handoff", () => {
     };
     const manager = fakeManager();
     manager.state.installed = true;
+    manager.state.enabled = true;
     manager.matches.mockReturnValue(true);
     return {
       current,
@@ -150,5 +154,67 @@ describe("source upgrade handoff", () => {
     await upgradeService(f);
     expect(f.service.install).not.toHaveBeenCalled();
     expect(f.io.lines.join("\n")).toContain("Fetching new source remains manual");
+  });
+  it.each([true, false])(
+    "a real controller upgrades running=%s with exactly one start and no double restart",
+    async (running) => {
+      const f = fixture();
+      const manager = fakeManager();
+      const old = { ...f.current, entryPath: path.join(dir, "old.js") };
+      await manager.install(old);
+      await writeServiceMetadata(manager, old);
+      manager.state.running = running;
+      manager.install.mockClear();
+      const shutdown = vi.fn(async () => {
+        manager.state.running = false;
+        return true;
+      });
+      const service = new ServiceController({
+        manager,
+        definition: f.current,
+        port: 49150,
+        health: async () => (manager.state.running ? { ...goodHealth, version: f.current.homebaseVersion } : null),
+        shutdown,
+        availablePort: async () => true,
+      });
+      await upgradeService({ ...f, installed: old, manager, service });
+      expect(manager.install).toHaveBeenCalledOnce();
+      expect(manager.start).toHaveBeenCalledOnce();
+      expect(shutdown).toHaveBeenCalledTimes(running ? 1 : 0);
+      expect(await readServiceMetadata(state)).toMatchObject(f.current);
+    },
+  );
+  it("refreshes an older running Host once when its native executable command is unchanged", async () => {
+    const f = fixture();
+    const manager = fakeManager();
+    const old = { ...f.current, homebaseVersion: "old" };
+    await manager.install(old);
+    await writeServiceMetadata(manager, old);
+    // Windows action ownership hashes the command, rather than package version.
+    manager.matches.mockReturnValue(true);
+    manager.state.running = true;
+    let version = "old";
+    manager.start.mockImplementation(async () => {
+      manager.state.running = true;
+      version = f.current.homebaseVersion;
+    });
+    manager.install.mockClear();
+    const shutdown = vi.fn(async () => {
+      manager.state.running = false;
+      return true;
+    });
+    const service = new ServiceController({
+      manager,
+      definition: f.current,
+      port: 49150,
+      health: async () => (manager.state.running ? { ...goodHealth, version } : null),
+      shutdown,
+      availablePort: async () => true,
+    });
+    await upgradeService({ ...f, installed: old, manager, service });
+    expect(manager.install).not.toHaveBeenCalled();
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(manager.start).toHaveBeenCalledOnce();
+    expect(version).toBe(f.current.homebaseVersion);
   });
 });

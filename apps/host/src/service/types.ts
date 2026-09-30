@@ -14,6 +14,10 @@ export interface ServiceInspection {
   installed: boolean;
   enabled: boolean;
   running: boolean;
+  /** A verified native job may be loaded even while stopped. */
+  loaded?: boolean;
+  /** Verified canonical on-disk definition, paired with native identity where loaded. */
+  ownedDefinition?: ServiceDefinition;
   /** Native definition, retained locally for comparison, never printed. */
   definition?: string;
   warning?: string;

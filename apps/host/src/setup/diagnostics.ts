@@ -10,7 +10,7 @@ import { ProjectRegistry } from "../projects/index.js";
 import { TailscaleClient, type TailscaleStatus } from "../remote/tailscale.js";
 import { readHealth, type HostHealth } from "../service/health.js";
 import { readServiceMetadata, type ServiceMetadata } from "../service/metadata.js";
-import type { ServiceDefinition, ServiceManager } from "../service/types.js";
+import type { ServiceManager } from "../service/types.js";
 import { HOST_VERSION } from "../version.js";
 
 export const diagnosticCheckSchema = z
@@ -339,8 +339,4 @@ export function formatDoctor(report: DiagnosticReport): string[] {
   const marks = { pass: "✓", warn: "!", fail: "✕" };
   return report.checks.map((check) => `${marks[check.status]} ${check.message}`);
 }
-export function definitionsEqual(a: ServiceDefinition, b: ServiceDefinition): boolean {
-  return ["nodePath", "entryPath", "configPath", "stateDir", "path", "homebaseVersion"].every(
-    (key) => a[key as keyof ServiceDefinition] === b[key as keyof ServiceDefinition],
-  );
-}
+export { definitionsEqual } from "../service/metadata.js";

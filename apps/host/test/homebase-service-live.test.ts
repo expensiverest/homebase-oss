@@ -72,6 +72,14 @@ describe.skipIf(process.env.HOMEBASE_TEST_HOMEBASE_SERVICE !== "1" || process.pl
         expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(200);
         const first = await descendants();
         expect(first.length).toBeGreaterThan(0);
+        // Exact install and metadata repair must leave the Host/providers alive.
+        await service.install();
+        expect(first.every(alive)).toBe(true);
+        expect((await readHealth(port))?.version).toBe(HOST_VERSION);
+        await rm(path.join(stateDir, "service.json"));
+        await service.install();
+        expect(first.every(alive)).toBe(true);
+        expect(await readFile(path.join(stateDir, "service.json"), "utf8")).toContain(HOST_VERSION);
         await service.restart();
         expect((await readHealth(port))?.version).toBe(HOST_VERSION);
         expect(first.every((pid) => !alive(pid))).toBe(true);

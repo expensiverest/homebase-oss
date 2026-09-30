@@ -18,6 +18,7 @@ export async function upgradeService(options: {
   }
   if (
     options.installed &&
+    state.enabled &&
     definitionsEqual(options.installed, options.current) &&
     options.manager.matches(state, options.current)
   ) {
@@ -25,7 +26,14 @@ export async function upgradeService(options: {
     return;
   }
   options.io.out("Refreshing the service to this CLI...");
+  const nativeCurrent = options.manager.matches(state, options.current) && state.enabled;
   await options.service.install();
-  await options.service.restart();
+  // Installation restores a running service only when its native definition changed.
+  // Metadata-only repair leaves a correct running Host uninterrupted.
+  if (
+    !state.running ||
+    (nativeCurrent && options.installed && options.installed.homebaseVersion !== options.current.homebaseVersion)
+  )
+    await options.service.restart();
   options.io.out("✓ Service refreshed; Host version verified.");
 }

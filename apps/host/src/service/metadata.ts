@@ -26,6 +26,11 @@ export const serviceMetadataSchema = z
   .strict();
 export type ServiceMetadata = z.infer<typeof serviceMetadataSchema>;
 export const metadataPath = (stateDir: string): string => path.join(stateDir, "service.json");
+export function definitionsEqual(a: ServiceDefinition, b: ServiceDefinition): boolean {
+  return ["nodePath", "entryPath", "configPath", "stateDir", "path", "homebaseVersion"].every(
+    (key) => a[key as keyof ServiceDefinition] === b[key as keyof ServiceDefinition],
+  );
+}
 export async function readServiceMetadata(stateDir: string): Promise<ServiceMetadata | null> {
   try {
     return serviceMetadataSchema.parse(await readJsonObjectFile(metadataPath(stateDir)));
