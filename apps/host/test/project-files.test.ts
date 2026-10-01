@@ -155,6 +155,13 @@ describe("project-scoped read-only filesystem", () => {
       expect(response.status).toBe(400);
     }
   });
+  it("does not mark names as accessible when the path validator would reject opening them", async () => {
+    await writeFile(path.join(root, "100%.txt"), "x");
+    await writeFile(path.join(root, "ok.txt"), "x");
+    const entries = (await files.list(id)).entries;
+    expect(entries.find((e) => e.name === "100%.txt")?.accessible).toBe(false);
+    expect(entries.find((e) => e.name === "ok.txt")?.accessible).toBe(true);
+  });
   it("allows contained links and rejects outside/nested directory junctions", async () => {
     const type = process.platform === "win32" ? "junction" : "dir";
     await symlink(path.join(root, "src"), path.join(root, "inside"), type);

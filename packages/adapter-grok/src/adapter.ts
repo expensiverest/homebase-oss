@@ -50,7 +50,7 @@ import {
 } from "./mapper.js";
 import { GrokPermissionBridge } from "./permissions.js";
 import { GrokSessionTracker, type GrokSessionRecord } from "./session-state.js";
-import { acpContextUsage, grokLedgerUsage } from "./usage.js";
+import { acpContextUsage, grokLedgerUsage, mergeGrokUsage } from "./usage.js";
 
 export const GROK_PROVIDER_ID = "grok";
 
@@ -359,7 +359,7 @@ export class GrokAdapter implements AgentAdapter {
       try {
         const native = await transport.requestExtension("_x.ai/session/usage", { sessionId: record.nativeId });
         const usage = grokLedgerUsage(native, sessionId);
-        if (usage) this.#usage.set(sessionId, { ...this.#usage.get(sessionId), ...usage });
+        if (usage) this.#usage.set(sessionId, mergeGrokUsage(this.#usage.get(sessionId), usage));
       } catch {
         /* Standard context updates remain usable without the extension. */
       }
@@ -532,15 +532,15 @@ export class GrokAdapter implements AgentAdapter {
           const record = this.#tracker?.get(notification.sessionId);
           const usage = record && acpContextUsage(notification.update, record.publicId);
           if (usage) {
-            const previous = this.#usage.get(record!.publicId);
-            this.#usage.set(record!.publicId, { ...previous, ...usage, tokens: previous?.tokens ?? usage.tokens });
+            const merged = mergeGrokUsage(this.#usage.get(record!.publicId), usage);
+            this.#usage.set(record!.publicId, merged);
             this.#context?.emit({
               type: "session.usage.updated",
               provider: this.id,
               sessionId: record!.publicId,
               projectId: record!.projectId,
-              data: { usage },
-              occurredAt: usage.updatedAt,
+              data: { usage: structuredClone(merged) },
+              occurredAt: merged.updatedAt,
             });
           }
           return;

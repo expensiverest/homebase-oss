@@ -53,6 +53,15 @@ export function validateRelativePath(value: string): string {
   return value;
 }
 
+function isOpenablePath(value: string): boolean {
+  try {
+    validateRelativePath(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const unavailable = () => new HostError("not_found", "This project file is unavailable.");
 export class ProjectFiles {
   constructor(readonly projects: ProjectRegistry) {}
@@ -97,7 +106,7 @@ export class ProjectFiles {
           if (isPathInsideRoot(root, canonical)) {
             const info = await stat(canonical);
             kind = info.isDirectory() ? "directory" : info.isFile() ? "file" : "other";
-            accessible = kind === "file" || kind === "directory";
+            accessible = (kind === "file" || kind === "directory") && isOpenablePath(relative);
             sizeBytes = info.isFile() ? info.size : null;
             modifiedAt = info.mtime.toISOString();
           }

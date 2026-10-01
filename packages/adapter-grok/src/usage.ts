@@ -67,3 +67,29 @@ export function acpContextUsage(value: unknown, sessionId: string): AgentSession
     updatedAt: nowTimestamp(),
   };
 }
+
+const known = <T>(next: T | null | undefined, previous: T | null | undefined): T | null | undefined => next ?? previous;
+
+/**
+ * Field-aware merge of Grok's two usage sources (ACP `usage_update` and the
+ * `_x.ai/session/usage` ledger). Each source covers different fields, so a
+ * null/absent field in a newer observation means "not reported", never
+ * "reset": it must not erase a known value from the other source.
+ */
+export function mergeGrokUsage(previous: AgentSessionUsage | undefined, next: AgentSessionUsage): AgentSessionUsage {
+  if (!previous) return next;
+  const tokens = { ...previous.tokens };
+  for (const [key, value] of Object.entries(next.tokens) as [keyof typeof tokens, number | null | undefined][]) {
+    if (value != null) tokens[key] = value;
+  }
+  return {
+    ...next,
+    tokens,
+    costUsd: known(next.costUsd, previous.costUsd),
+    contextTokens: known(next.contextTokens, previous.contextTokens),
+    contextWindow: known(next.contextWindow, previous.contextWindow),
+    // Either source being partial keeps the combined view partial.
+    partial: Boolean(previous.partial) || Boolean(next.partial),
+    updatedAt: next.updatedAt,
+  };
+}
