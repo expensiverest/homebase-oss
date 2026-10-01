@@ -8,7 +8,8 @@ import {
   agentModelSchema,
   agentModeSchema,
   agentSessionSchema,
-  agentUsageSchema,
+  agentSessionUsageSchema,
+  agentProviderUsageSchema,
   providerDetectionSchema,
   providerIdSchema,
   type AgentCapabilities,
@@ -78,7 +79,8 @@ const CAPABILITY_METHODS: Partial<Record<CapabilityKey, keyof AgentAdapter>> = {
   modelSwitching: "setModel",
   modes: "setMode",
   diffs: "getDiff",
-  usage: "getUsage",
+  providerUsage: "getProviderUsage",
+  sessionUsage: "getSessionUsage",
 };
 
 const LIVE_METHOD_CAPABILITIES: CapabilityKey[] = ["streaming", "tools", "approvals", "questions", "plans"];
@@ -319,12 +321,30 @@ export function defineAdapterComplianceSuite(options: AdapterComplianceOptions):
       expect(["interrupted", "completed", "failed"]).toContain(terminal);
     });
 
-    it("reports usage when supported", async ({ skip }) => {
-      if (!capabilities.usage) return skip("provider does not support usage");
-      const usage = await adapter.getUsage!();
+    it("explicitly declares provider limits, including unavailable observations", async () => {
+      expect(typeof adapter.getProviderUsage).toBe("function");
+      const usage = await adapter.getProviderUsage();
+      if (!capabilities.providerUsage) expect(usage).toBeNull();
       if (usage !== null) {
-        expect(agentUsageSchema.safeParse(usage).success, JSON.stringify(usage)).toBe(true);
+        expect(agentProviderUsageSchema.safeParse(usage).success, JSON.stringify(usage)).toBe(true);
         expect(usage.provider).toBe(adapter.id);
+      }
+    });
+
+    it("explicitly declares session consumption, including unavailable observations", async ({ skip }) => {
+      expect(typeof adapter.getSessionUsage).toBe("function");
+      if (!project) return skip("no project fixture supplied");
+      const session = await adapter.createSession({ provider: adapter.id, projectId: project.id }, project);
+      try {
+        const usage = await adapter.getSessionUsage(session.id);
+        if (!capabilities.sessionUsage) expect(usage).toBeNull();
+        if (usage !== null) {
+          expect(agentSessionUsageSchema.safeParse(usage).success).toBe(true);
+          expect(usage.provider).toBe(adapter.id);
+          expect(usage.sessionId).toBe(session.id);
+        }
+      } finally {
+        if (capabilities.deleteSession) await adapter.deleteSession?.(session.id);
       }
     });
 

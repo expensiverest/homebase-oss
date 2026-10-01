@@ -3,69 +3,13 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 
-import type { AgentProject } from "@homebase/protocol";
-
 import { api } from "../lib/api.js";
-import { relativeTime } from "../lib/format.js";
-import { qk, useProviders, useProjects, useSessions } from "../lib/queries.js";
-import { summarizeSessions } from "../lib/viewmodel.js";
+import { qk, useProviders, useOverview } from "../lib/queries.js";
 import { ConnectionPill, ProviderHealth, ThemeToggle, TopBar } from "../components/chrome.js";
-import { ProjectMark } from "../components/marks.js";
-import { BranchChip, EmptyState, ErrorState, Group, Pill, Skeleton } from "../components/ui.js";
-
-function ProjectRow({ project, onOpen }: { project: AgentProject; onOpen: () => void }) {
-  const sessions = useSessions(project.id);
-  const items = sessions.data?.pages.flatMap((page) => page.items) ?? [];
-  const summary = summarizeSessions(items);
-  const latest = items[0]?.updatedAt;
-  const more = sessions.hasNextPage ? "+" : "";
-
-  const activity = sessions.isLoading ? (
-    <span className="text-muted">Loading…</span>
-  ) : sessions.isError ? (
-    <span className="text-warn">Sessions unavailable</span>
-  ) : summary.working > 0 ? (
-    <span className="inline-flex items-center gap-1.5 text-accent">
-      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent" />
-      {summary.working} working
-    </span>
-  ) : summary.total > 0 ? (
-    <span>
-      {summary.total}
-      {more} {summary.total === 1 && !more ? "session" : "sessions"}
-    </span>
-  ) : (
-    <span>No sessions yet</span>
-  );
-
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      aria-label={`Open project ${project.name}`}
-      className="hairline-top flex min-h-[80px] w-full items-center gap-4 px-4 py-4 text-left transition-colors first:shadow-none active:bg-surface-2"
-    >
-      <ProjectMark name={project.name} working={summary.working > 0} />
-      <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-baseline gap-2">
-          <span className="min-w-0 flex-1 truncate text-row font-semibold text-text">{project.name}</span>
-          {summary.waiting > 0 ? (
-            <span className="self-center">
-              <Pill tone="waiting">Needs you</Pill>
-            </span>
-          ) : latest ? (
-            <span className="readout shrink-0 text-caption text-muted">{relativeTime(latest)}</span>
-          ) : null}
-        </span>
-        <span className="mt-1.5 flex min-w-0 items-center gap-2 text-callout text-muted">
-          {project.branch ? <BranchChip branch={project.branch} className="max-w-[55%] shrink" /> : null}
-          <span className="min-w-0 shrink-0 truncate">{activity}</span>
-        </span>
-      </span>
-      <ChevronRight size={18} className="-mr-1 shrink-0 text-faint" aria-hidden />
-    </button>
-  );
-}
+import { Folder } from "lucide-react";
+import { ProjectRow } from "../components/ProjectRow.js";
+import { ProviderUsageSheet } from "../components/Usage.js";
+import { EmptyState, ErrorState, Group, Skeleton } from "../components/ui.js";
 
 export function ProjectsScreen() {
   const [installHint, setInstallHint] = useState(() => {
@@ -82,13 +26,14 @@ export function ProjectsScreen() {
   const navigate = useNavigate();
   const client = useQueryClient();
   const providers = useProviders();
-  const projects = useProjects();
+  const projects = useOverview();
+  const [usageOpen, setUsageOpen] = useState(false);
   const refresh = useMutation({
     mutationFn: () => api.refreshProviders(),
     onSuccess: (list) => client.setQueryData(qk.providers, list),
   });
 
-  const list = projects.data ?? [];
+  const list = projects.data?.roots ?? [];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -113,7 +58,16 @@ export function ProjectsScreen() {
               </span>
             }
           />
-          <h1 className="mt-4 font-serif text-display text-text">Projects</h1>
+          <div className="mt-4 flex items-center justify-between gap-4">
+            <h1 className="font-serif text-display text-text">Projects</h1>
+            <button
+              type="button"
+              onClick={() => setUsageOpen(true)}
+              className="min-h-11 px-3 text-callout font-medium text-accent"
+            >
+              Usage
+            </button>
+          </div>
           <p className="mt-2 text-row text-muted">Your coding agents, on your computer.</p>
           {installHint && (
             <div className="mt-4 rounded-xl bg-surface px-4 py-3 text-callout text-muted">
@@ -169,18 +123,48 @@ export function ProjectsScreen() {
               detail="Add a repository to your Homebase config on your computer; it will show up here."
             />
           ) : (
-            <Group title="Projects" trailing={list.length}>
-              {list.map((project) => (
-                <ProjectRow
-                  key={project.id}
-                  project={project}
-                  onOpen={() => void navigate({ to: "/p/$projectId", params: { projectId: project.id } })}
-                />
-              ))}
-            </Group>
+            <div className="space-y-7">
+              {projects.data?.recent.length ? (
+                <Group title="Recent" trailing={projects.data.recent.length}>
+                  {projects.data.recent.map((project) => (
+                    <ProjectRow
+                      key={project.id}
+                      project={project}
+                      onOpen={() => void navigate({ to: "/p/$projectId", params: { projectId: project.id } })}
+                    />
+                  ))}
+                </Group>
+              ) : null}
+              <Group title="Folders" trailing={list.length}>
+                {list.map((root) => (
+                  <button
+                    key={root.id}
+                    type="button"
+                    aria-label={`Open folder ${root.name}`}
+                    onClick={() => void navigate({ to: "/r/$rootId", params: { rootId: root.id } })}
+                    className="hairline-top flex min-h-[80px] w-full items-center gap-4 px-4 py-4 text-left first:shadow-none active:bg-surface-2"
+                  >
+                    <Folder size={30} strokeWidth={1.5} className="shrink-0 text-muted" aria-hidden />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-row font-semibold">{root.name}</span>
+                      <span className="mt-1 block truncate text-callout text-muted">
+                        {root.available
+                          ? `${root.projectCount} ${root.projectCount === 1 ? "project" : "projects"}`
+                          : "Folder unavailable"}
+                      </span>
+                      {list.filter((r) => r.name === root.name).length > 1 ? (
+                        <span className="readout block truncate text-caption text-muted">{root.path}</span>
+                      ) : null}
+                    </span>
+                    <ChevronRight size={18} className="shrink-0 text-faint" aria-hidden />
+                  </button>
+                ))}
+              </Group>
+            </div>
           )}
         </div>
       </main>
+      <ProviderUsageSheet open={usageOpen} onClose={() => setUsageOpen(false)} providers={providers.data ?? []} />
     </div>
   );
 }

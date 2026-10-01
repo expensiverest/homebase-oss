@@ -1,0 +1,4 @@
+{"type":"user","uuid":"user-a","cwd":"PROJECT_PATH","timestamp":"2026-09-30T10:00:00Z","message":{"content":[{"type":"text","text":"Just testing if this works. Output this exactly: HI"}]}}
+{"type":"assistant","timestamp":"2026-09-30T10:00:00Z","message":{"id":"assistant-a","model":"example-model","content":[{"type":"text","text":"HI"}]}}
+{"type":"user","uuid":"user-b","cwd":"PROJECT_PATH","message":{"content":[{"type":"text","text":"Great, what model are you?"}]}}
+{"type":"assistant","message":{"id":"assistant-b","model":"example-model","content":[{"type":"text","text":"I'm the example model."}]}}

@@ -126,25 +126,26 @@ CLI is installed. Set `serverMode: "external"` to preserve the old never-spawn b
 
 ### Capability matrix (as declared by the adapter)
 
-| Capability               | Supported  | Notes                                                                            |
-| ------------------------ | ---------- | -------------------------------------------------------------------------------- |
-| streaming                | ✅         | `session.text.*`, `session.reasoning.*` deltas; full text on `ended`             |
-| interrupt                | ✅         | `POST /api/session/:id/interrupt`, returns `{ interrupted }`                     |
-| steer                    | ✅         | `prompt` with `delivery: "steer"` while a run is active                          |
-| queue                    | ✅         | `prompt` with `delivery: "queue"`; parked until the current execution ends       |
-| resume                   | ✅         | sessions persist server-side; list/get/create + continue by id                   |
-| deleteSession            | ✅         | `DELETE /api/session/:id`                                                        |
-| models / modelSwitching  | ✅         | `/api/model`, `session/:id/model`                                                |
-| thinkingLevels           | ✅         | model `variants` map to thinking levels; per-model availability                  |
-| modes                    | ✅         | primary, non-hidden agents (`build`, `plan`, …)                                  |
-| attachments / imageInput | ✅         | prompt `files` with `data:` URLs built from Host attachments                     |
-| tools                    | ✅         | `session.tool.*` → running/completed/failed/denied                               |
-| approvals                | ✅         | `permission.asked`/`replied` plus pending-list reconciliation                    |
-| questions                | ✅         | `form.created`/`replied`/`cancelled` plus pending-list reconciliation            |
-| diffs                    | ✅         | `GET /api/session/:id/diff`; project-relative paths                              |
-| plans                    | ❌         | no structured plan object in the 2.x API; plan mode is text                      |
-| usage                    | ❌         | no documented provider-level usage windows; session tokens/cost stay on messages |
-| slashCommands            | ⏸ deferred | command catalog/execution is not yet a neutral contract (Phase 2 Option A)       |
+| Capability               | Supported  | Notes                                                                                 |
+| ------------------------ | ---------- | ------------------------------------------------------------------------------------- |
+| streaming                | ✅         | `session.text.*`, `session.reasoning.*` deltas; full text on `ended`                  |
+| interrupt                | ✅         | `POST /api/session/:id/interrupt`, returns `{ interrupted }`                          |
+| steer                    | ✅         | `prompt` with `delivery: "steer"` while a run is active                               |
+| queue                    | ✅         | `prompt` with `delivery: "queue"`; parked until the current execution ends            |
+| resume                   | ✅         | sessions persist server-side; list/get/create + continue by id                        |
+| deleteSession            | ✅         | `DELETE /api/session/:id`                                                             |
+| models / modelSwitching  | ✅         | `/api/model`, `session/:id/model`                                                     |
+| thinkingLevels           | ✅         | model `variants` map to thinking levels; per-model availability                       |
+| modes                    | ✅         | non-hidden `primary` or `all` agents (`build`, `plan`, …), scoped to project location |
+| attachments / imageInput | ✅         | prompt `files` with `data:` URLs built from Host attachments                          |
+| tools                    | ✅         | `session.tool.*` → running/completed/failed/denied                                    |
+| approvals                | ✅         | `permission.asked`/`replied` plus pending-list reconciliation                         |
+| questions                | ✅         | `form.created`/`replied`/`cancelled` plus pending-list reconciliation                 |
+| diffs                    | ✅         | `GET /api/session/:id/diff`; project-relative paths                                   |
+| plans                    | ❌         | no structured plan object in the 2.x API; plan mode is text                           |
+| sessionUsage             | ✅         | cumulative `Session.Info` tokens/cost; message totals are never added again           |
+| providerUsage            | ❌         | no documented account quota/credit/window endpoint in OpenCode 2.0.18                 |
+| slashCommands            | ⏸ deferred | command catalog/execution is not yet a neutral contract (Phase 2 Option A)            |
 
 ### Known quirks preserved
 
@@ -258,26 +259,27 @@ normal process environment, so a user-managed `XAI_API_KEY` reaches Grok directl
 
 ### Capability matrix (as declared by the adapter)
 
-| Capability              | Supported | Notes                                                                                            |
-| ----------------------- | --------- | ------------------------------------------------------------------------------------------------ |
-| streaming               | ✅        | `session/update` text and thought chunks become normalized message/reasoning events              |
-| interrupt               | ✅        | `session/cancel`; the prompt settles with `cancelled` and pending permissions are cancelled      |
-| steer                   | ❌        | ACP exposes no documented structured steer                                                       |
-| queue                   | ❌        | No local queue is faked                                                                          |
-| resume                  | ✅        | `session/load` replays history; `session/resume` when advertised                                 |
-| deleteSession           | ✅/❌     | Only when the agent advertises `sessionCapabilities.delete` (Grok 1.0.41 does **not**)           |
-| models / modelSwitching | ✅        | From `initialize` `_meta.modelState.availableModels`; switching uses `session/set_config_option` |
-| thinkingLevels          | ✅        | `_meta.reasoningEfforts` become per-model levels; the effort option is applied per session       |
-| modes                   | ✅/❌     | Only when a mode catalog is advertised (`_meta.modes`); otherwise the picker is hidden           |
-| attachments             | ❌        | No documented non-image attachment path                                                          |
-| imageInput              | ✅/❌     | Only when `promptCapabilities.image` is advertised (Grok 1.0.41 reports `false`)                 |
-| tools                   | ✅        | `tool_call`/`tool_call_update` map to started/updated/completed/failed with safe input/output    |
-| approvals               | ✅        | `session/request_permission` becomes an approval card; all four option kinds are preserved       |
-| questions               | ❌        | No standard ACP question mechanism is surfaced in Phase 5.5                                      |
-| plans                   | ✅        | Standard ACP `plan` entries map to `AgentPlan`                                                   |
-| diffs                   | ❌        | No provider-native diff primitive                                                                |
-| usage                   | ❌        | No documented subscription-window primitive; nothing is scraped from the TUI                     |
-| slashCommands           | ❌        | Deferred with the other providers                                                                |
+| Capability              | Supported | Notes                                                                                                   |
+| ----------------------- | --------- | ------------------------------------------------------------------------------------------------------- |
+| streaming               | ✅        | `session/update` text and thought chunks become normalized message/reasoning events                     |
+| interrupt               | ✅        | `session/cancel`; the prompt settles with `cancelled` and pending permissions are cancelled             |
+| steer                   | ❌        | ACP exposes no documented structured steer                                                              |
+| queue                   | ❌        | No local queue is faked                                                                                 |
+| resume                  | ✅        | `session/load` replays history; `session/resume` when advertised                                        |
+| deleteSession           | ✅/❌     | Only when the agent advertises `sessionCapabilities.delete` (Grok 1.0.41 does **not**)                  |
+| models / modelSwitching | ✅        | From `initialize` `_meta.modelState.availableModels`; switching uses `session/set_config_option`        |
+| thinkingLevels          | ✅        | `_meta.reasoningEfforts` become per-model levels; the effort option is applied per session              |
+| modes                   | ✅/❌     | Only when a mode catalog is advertised (`_meta.modes`); otherwise the picker is hidden                  |
+| attachments             | ❌        | No documented non-image attachment path                                                                 |
+| imageInput              | ✅/❌     | Only when `promptCapabilities.image` is advertised (Grok 1.0.41 reports `false`)                        |
+| tools                   | ✅        | `tool_call`/`tool_call_update` map to started/updated/completed/failed with safe input/output           |
+| approvals               | ✅        | `session/request_permission` becomes an approval card; all four option kinds are preserved              |
+| questions               | ❌        | No standard ACP question mechanism is surfaced in Phase 5.5                                             |
+| plans                   | ✅        | Standard ACP `plan` entries map to `AgentPlan`                                                          |
+| diffs                   | ❌        | No provider-native diff primitive                                                                       |
+| sessionUsage            | ✅        | stable ACP context usage; advertised x.ai extension supplies current-process consumption when available |
+| providerUsage           | ❌        | no structured account-limit primitive; nothing is scraped from the TUI                                  |
+| slashCommands           | ❌        | Deferred with the other providers                                                                       |
 
 ### Known quirks and assumptions
 
@@ -402,7 +404,8 @@ is missing or signed out the Host still starts and the provider reports a useful
 | questions               | ✅         | `AskUserQuestion` mapped to neutral questions; answers returned as `updatedInput`                                    |
 | plans                   | ❌         | plan mode writes prose, not a structured plan object                                                                 |
 | diffs                   | ❌         | Claude exposes no provider-native session diff primitive                                                             |
-| usage                   | ✅         | `rate_limit_event.unifiedWindows` (five-hour/weekly/per-model) mapped to usage windows                               |
+| sessionUsage            | ✅         | final result tokens; cumulative process cost; partial historical input/cache snapshots                               |
+| providerUsage           | ✅         | latest observed `rate_limit_event.unifiedWindows`; unavailable before observation                                    |
 | slashCommands           | ⏸ deferred | `init.slash_commands` exists but there is no neutral command contract yet                                            |
 
 ### Modes and effort

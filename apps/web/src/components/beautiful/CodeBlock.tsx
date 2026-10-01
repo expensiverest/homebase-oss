@@ -104,7 +104,8 @@ export function CodeBlock({
 }) {
   const text = code.replace(/\n$/, "");
   const lines = text.split("\n");
-  const normalized = diff ? null : normalizeLanguage(language);
+  // Large previews stay plain rather than synchronously tokenizing megabytes.
+  const normalized = diff || text.length > 40_000 ? null : normalizeLanguage(language);
   const { tokens, settled } = useTokens(text, normalized);
   const rows = diff ? parsePatch(text) : null;
   const [copied, setCopied] = useState(false);

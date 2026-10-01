@@ -21,6 +21,7 @@ import {
   type AgentPage,
   type AgentProject,
   type AgentSession,
+  type AgentSessionUsage,
   type ApprovalResult,
   type CreateSessionInput,
   type PageRequest,
@@ -49,6 +50,7 @@ import {
 } from "./mapper.js";
 import { GrokPermissionBridge } from "./permissions.js";
 import { GrokSessionTracker, type GrokSessionRecord } from "./session-state.js";
+import { acpContextUsage, grokLedgerUsage } from "./usage.js";
 
 export const GROK_PROVIDER_ID = "grok";
 
@@ -100,6 +102,7 @@ export class GrokAdapter implements AgentAdapter {
   #modeCatalog: AgentMode[] = [];
   #disposed = false;
   readonly #activeTurns = new Map<string, ActiveTurn>();
+  readonly #usage = new Map<string, AgentSessionUsage>();
 
   /**
    * Connection lifecycle invariants (also relied on by concurrent Host probing,
@@ -254,7 +257,8 @@ export class GrokAdapter implements AgentAdapter {
       questions: false,
       plans: true,
       diffs: false,
-      usage: false,
+      sessionUsage: true,
+      providerUsage: false,
       slashCommands: false,
     });
   }
@@ -340,6 +344,27 @@ export class GrokAdapter implements AgentAdapter {
       });
     }
     return this.#tracker!.listMessages(record, page);
+  }
+
+  async getProviderUsage(): Promise<null> {
+    return null;
+  }
+
+  async getSessionUsage(sessionId: string): Promise<AgentSessionUsage | null> {
+    const record = this.#requireRecord(sessionId);
+    const transport = await this.#ensureTransport();
+    // Grok advertises its extension family through grokShell. A missing or
+    // incompatible extension is an unavailable observation, never guessed data.
+    if (this.#initializeResult?.meta?.grokShell === true) {
+      try {
+        const native = await transport.requestExtension("_x.ai/session/usage", { sessionId: record.nativeId });
+        const usage = grokLedgerUsage(native, sessionId);
+        if (usage) this.#usage.set(sessionId, { ...this.#usage.get(sessionId), ...usage });
+      } catch {
+        /* Standard context updates remain usable without the extension. */
+      }
+    }
+    return this.#usage.has(sessionId) ? structuredClone(this.#usage.get(sessionId)!) : null;
   }
 
   async send(sessionId: string, input: SendMessageInput): Promise<void> {
@@ -502,7 +527,26 @@ export class GrokAdapter implements AgentAdapter {
     if (this.#disposed) throw new AdapterError("internal", "The Grok adapter was disposed.");
     const cliVersion = await this.#detectCliVersion();
     const handlers: AcpClientHandlers = {
-      onSessionUpdate: (notification) => this.#tracker?.handleUpdate(notification),
+      onSessionUpdate: (notification) => {
+        if (notification.update.sessionUpdate === "usage_update") {
+          const record = this.#tracker?.get(notification.sessionId);
+          const usage = record && acpContextUsage(notification.update, record.publicId);
+          if (usage) {
+            const previous = this.#usage.get(record!.publicId);
+            this.#usage.set(record!.publicId, { ...previous, ...usage, tokens: previous?.tokens ?? usage.tokens });
+            this.#context?.emit({
+              type: "session.usage.updated",
+              provider: this.id,
+              sessionId: record!.publicId,
+              projectId: record!.projectId,
+              data: { usage },
+              occurredAt: usage.updatedAt,
+            });
+          }
+          return;
+        }
+        this.#tracker?.handleUpdate(notification);
+      },
       onPermissionRequest: (request) => this.#handlePermission(request),
     };
     const transport = new AcpTransport({

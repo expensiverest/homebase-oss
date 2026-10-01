@@ -1464,6 +1464,8 @@ longer needs a manually maintained server, and no Phase 5 security property regr
 
 ## Phase 6 — Installer and background service
 
+**COMPLETE / MERGED** at main `441dd79b07e4b53958c7959d7d3b91ed35283e93` (PR #5).
+
 Make the pre-alpha source installation one coherent product. Retain Phase 5 pairing/admin security and
 Phase 5.5 provider lifecycles; the desktop CLI owns setup, never the mobile PWA.
 
@@ -1492,6 +1494,26 @@ configure or receive guidance for private Tailscale Serve, pair a phone, close t
 diagnose problems with `homebase doctor`, add a project with automatic service restart, and remove the service
 with `homebase uninstall`, without editing OS service files or copying permanent auth tokens. Reboot autostart
 is defined by each user service manager; a Windows lifecycle smoke test proves the real implementation.
+
+## Phase 6.1 — Real-device product correctness
+
+### Tasks
+
+- correct Claude transcript/live message chronology, including pagination and reload
+- discover OpenCode's native selectable modes and provide honest catalog empty states
+- normalize session/turn consumption separately from provider/account usage limits
+- require every adapter to explicitly implement and declare both usage concepts
+- navigate projects through recent coding activity and configured parent folders
+- persist lightweight project activity and avoid project-list session query fanout
+- add a read-only, project-scoped file browser and safe source/Markdown/raster previews
+- verify mobile correctness, accessibility, privacy, and filesystem containment
+
+### Exit criteria
+
+A phone user sees messages in conversation order, truthful modes and usage availability, recent projects
+and their configured folders, and can browse project files without granting arbitrary filesystem access.
+Provider data is normalized without inference probes or invented usage, and file content is never executed.
+This is a product-correctness milestone; Gemini, Attention/Activity, and public release work remain later.
 
 ## Phase 7 — Gemini + ACP hardening
 

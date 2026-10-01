@@ -8,7 +8,8 @@ import type {
   AgentPage,
   AgentProject,
   AgentSession,
-  AgentUsage,
+  AgentProviderUsage,
+  AgentSessionUsage,
   ApprovalResult,
   AttachmentId,
   CreateSessionInput,
@@ -133,7 +134,10 @@ export interface AgentAdapter {
   setMode?(sessionId: SessionId, input: SetModeInput): Promise<void>;
 
   getDiff?(sessionId: SessionId): Promise<AgentDiff>;
-  getUsage?(): Promise<AgentUsage | null>;
+  /** Required even when unsupported: return null and declare the capability false.
+   * A supported provider may return null until it has trustworthy observations. */
+  getSessionUsage(sessionId: SessionId): Promise<AgentSessionUsage | null>;
+  getProviderUsage(): Promise<AgentProviderUsage | null>;
 }
 
 /**

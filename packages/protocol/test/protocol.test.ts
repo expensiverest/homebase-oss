@@ -74,6 +74,15 @@ function sampleData(type: AgentEventType): unknown {
       return { turnId: "turn_1" };
     case "turn.completed":
       return { turnId: "turn_1", usage: null };
+    case "session.usage.updated":
+      return {
+        usage: {
+          provider: "mock",
+          sessionId: "ses_1",
+          tokens: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      };
     case "turn.failed":
       return { turnId: "turn_1", error: { code: "provider_error", message: "boom" } };
     case "turn.interrupted":
@@ -263,6 +272,7 @@ describe("normalized events", () => {
       "plan.updated",
       "diff.updated",
       "usage.updated",
+      "session.usage.updated",
       "provider.event",
     ];
     expect([...AGENT_EVENT_TYPES].sort()).toEqual(required.sort());
@@ -356,7 +366,7 @@ describe("capability independence", () => {
     // The protocol only knows capability flags; nothing in the shared schema
     // branches on a provider id. This test pins the baseline record.
     expect(noCapabilities.approvals).toBe(false);
-    expect(Object.keys(noCapabilities)).toHaveLength(19);
+    expect(Object.keys(noCapabilities)).toHaveLength(20);
   });
 });
 

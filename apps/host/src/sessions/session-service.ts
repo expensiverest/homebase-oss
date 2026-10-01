@@ -1,5 +1,6 @@
 import type { AdapterLogger, AgentAdapter } from "@homebase/adapter-sdk";
 import { parsePublicId } from "@homebase/adapter-sdk";
+import { agentSessionUsageSchema, agentProviderUsageSchema, nowTimestamp } from "@homebase/protocol";
 import type {
   AgentApprovalRequest,
   AgentDiff,
@@ -7,7 +8,8 @@ import type {
   AgentPage,
   AgentQuestionRequest,
   AgentSession,
-  AgentUsage,
+  AgentProviderUsage,
+  AgentSessionUsage,
   ApprovalResult,
   CreateSessionInput,
   PageRequest,
@@ -25,6 +27,7 @@ import { HostError } from "../errors.js";
 import type { EventBus } from "../events/index.js";
 import type { ProjectRegistry } from "../projects/index.js";
 import type { ProviderRegistry } from "../providers/index.js";
+import type { ProjectActivity } from "../projects/activity.js";
 
 const DEFAULT_SESSION_PAGE_SIZE = 50;
 const MAX_SESSION_PAGE_SIZE = 100;
@@ -70,6 +73,7 @@ export interface SessionServiceOptions {
   projects: ProjectRegistry;
   bus: EventBus;
   logger: AdapterLogger;
+  activity?: ProjectActivity;
 }
 
 /**
@@ -84,6 +88,7 @@ export class SessionService {
   readonly #providers: ProviderRegistry;
   readonly #projects: ProjectRegistry;
   readonly #logger: AdapterLogger;
+  readonly #activity: ProjectActivity | undefined;
 
   readonly #sessions = new Map<SessionId, AgentSession>();
   readonly #providerBySession = new Map<SessionId, ProviderId>();
@@ -99,6 +104,7 @@ export class SessionService {
     this.#providers = options.providers;
     this.#projects = options.projects;
     this.#logger = options.logger;
+    this.#activity = options.activity;
     options.bus.subscribe((event) => this.#applyEvent(event));
   }
 
@@ -109,6 +115,7 @@ export class SessionService {
         const session = event.data.session;
         this.#sessions.set(session.id, session);
         this.#providerBySession.set(session.id, session.provider);
+        this.#recordActivity(session);
         break;
       }
       case "session.deleted":
@@ -118,6 +125,8 @@ export class SessionService {
         break;
       case "turn.started":
         this.#setState(event.sessionId, "working");
+        if (event.projectId && this.#projects.get(event.projectId))
+          this.#activity?.advance(event.projectId, event.occurredAt);
         break;
       case "turn.completed":
       case "turn.interrupted":
@@ -208,6 +217,7 @@ export class SessionService {
           for (const session of result.items) {
             this.#sessions.set(session.id, session);
             this.#providerBySession.set(session.id, id);
+            this.#recordActivity(session);
             collected.push(session);
           }
           providerState.cursor = result.nextCursor;
@@ -263,6 +273,7 @@ export class SessionService {
     const session = await adapter.getSession(sessionId);
     this.#sessions.set(session.id, session);
     this.#providerBySession.set(session.id, parsed.providerId);
+    this.#recordActivity(session);
     return { ...session };
   }
 
@@ -272,6 +283,7 @@ export class SessionService {
     const session = await adapter.createSession(input, project);
     this.#sessions.set(session.id, session);
     this.#providerBySession.set(session.id, session.provider);
+    this.#activity?.advance(project.id, nowTimestamp());
     return { ...session };
   }
 
@@ -290,6 +302,8 @@ export class SessionService {
     const { providerId } = await this.#resolveAdapter(sessionId);
     const adapter = this.#providers.requireAdapter(providerId);
     await adapter.send(sessionId, input);
+    const session = await this.get(sessionId);
+    this.#activity?.advance(session.projectId, nowTimestamp());
   }
 
   async interrupt(sessionId: SessionId): Promise<void> {
@@ -393,13 +407,35 @@ export class SessionService {
     return { approvals, questions };
   }
 
-  async getUsage(providerId: ProviderId): Promise<AgentUsage | null> {
-    this.#providers.requireCapability(providerId, "usage");
+  async getProviderUsage(providerId: ProviderId): Promise<AgentProviderUsage | null> {
+    this.#providers.requireCapability(providerId, "providerUsage");
     const adapter = this.#providers.requireAdapter(providerId);
-    if (!adapter.getUsage) {
+    if (!adapter.getProviderUsage) {
       throw new HostError("unsupported_capability", `Provider "${providerId}" does not support usage.`);
     }
-    return adapter.getUsage();
+    const value = await adapter.getProviderUsage();
+    if (value === null) return null;
+    const parsed = agentProviderUsageSchema.safeParse(value);
+    if (!parsed.success || parsed.data.provider !== providerId)
+      throw new HostError("provider_error", "Provider returned invalid usage limits.");
+    return parsed.data;
+  }
+
+  async getSessionUsage(sessionId: SessionId): Promise<AgentSessionUsage | null> {
+    const session = await this.get(sessionId);
+    const { providerId, adapter } = await this.#resolveAdapter(sessionId);
+    this.#projects.require(session.projectId);
+    if (!this.#providers.getProvider(providerId).capabilities.sessionUsage) return null;
+    const value = await adapter.getSessionUsage(sessionId);
+    if (value === null) return null;
+    const parsed = agentSessionUsageSchema.safeParse(value);
+    if (!parsed.success || parsed.data.provider !== providerId || parsed.data.sessionId !== sessionId)
+      throw new HostError("provider_error", "Provider returned invalid session usage.");
+    return parsed.data;
+  }
+
+  #recordActivity(session: AgentSession): void {
+    if (this.#projects.get(session.projectId)) this.#activity?.advance(session.projectId, session.updatedAt);
   }
 
   /** Session index snapshot, for diagnostics. */

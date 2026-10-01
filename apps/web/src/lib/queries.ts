@@ -7,6 +7,9 @@ import { api, type ListPage } from "./api.js";
 export const qk = {
   providers: ["providers"] as const,
   projects: ["projects"] as const,
+  overview: ["project-overview"] as const,
+  rootProjects: (rootId: string) => ["root-projects", rootId] as const,
+  sessionUsage: (sessionId: string) => ["session", sessionId, "usage"] as const,
   project: (projectId: string) => ["project", projectId] as const,
   sessions: (projectId: string) => ["project", projectId, "sessions"] as const,
   session: (sessionId: string) => ["session", sessionId] as const,
@@ -19,6 +22,26 @@ export const qk = {
 };
 
 const LIVE_STALE = 5_000;
+
+export function useOverview() {
+  return useQuery({ queryKey: qk.overview, queryFn: api.overview, staleTime: 15_000 });
+}
+export function useRootProjects(rootId: string) {
+  return useQuery({
+    queryKey: qk.rootProjects(rootId),
+    queryFn: () => api.rootProjects(rootId),
+    enabled: !!rootId,
+    staleTime: 15_000,
+  });
+}
+export function useSessionUsage(sessionId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.sessionUsage(sessionId),
+    queryFn: () => api.sessionUsage(sessionId),
+    enabled: !!sessionId && enabled,
+    staleTime: 30_000,
+  });
+}
 
 export function useProviders() {
   return useQuery({ queryKey: qk.providers, queryFn: () => api.providers(), staleTime: 15_000 });
@@ -148,6 +171,8 @@ export function invalidateForEvent(client: QueryClient, event: AgentEvent | { ty
     case "session.updated":
     case "session.deleted": {
       invalidate(qk.projects);
+      invalidate(qk.overview);
+      invalidate(["root-projects"]);
       const sessionId = eventSessionId(event);
       if (sessionId) invalidate(qk.session(sessionId));
       const projectId =
@@ -165,6 +190,9 @@ export function invalidateForEvent(client: QueryClient, event: AgentEvent | { ty
       invalidate(qk.messages(sessionId));
       invalidate(qk.actions(sessionId));
       invalidate(qk.diff(sessionId));
+      invalidate(qk.sessionUsage(sessionId));
+      invalidate(qk.overview);
+      invalidate(["root-projects"]);
       return;
     }
     case "approval.requested":
@@ -184,6 +212,9 @@ export function invalidateForEvent(client: QueryClient, event: AgentEvent | { ty
     }
     case "usage.updated":
       invalidate(qk.usage(event.data.usage.provider));
+      return;
+    case "session.usage.updated":
+      invalidate(qk.sessionUsage(event.data.usage.sessionId));
       return;
     case "plan.updated": {
       const sessionId = eventSessionId(event);

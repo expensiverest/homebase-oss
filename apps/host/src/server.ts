@@ -12,7 +12,8 @@ import type { Hono } from "hono";
 import { createApiApp, type ApiEnv } from "./api/index.js";
 import { createAuthenticator, DeviceState, type Authenticator } from "./auth/index.js";
 import { AttachmentStore } from "./attachments/index.js";
-import type { HostConfig } from "./config/index.js";
+import { resolveStateDir, type HostConfig } from "./config/index.js";
+import { ProjectActivity } from "./projects/activity.js";
 import { EventBus } from "./events/index.js";
 import { PathAllowlist } from "./paths.js";
 import { ProjectRegistry, type GitMetadataReader } from "./projects/index.js";
@@ -88,11 +89,14 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
     logger.warn("Configured project root is unavailable and will not be used.", { root });
   }
 
+  const activity = await ProjectActivity.open(options.stateDir ?? resolveStateDir(), logger);
   const projects = new ProjectRegistry({
     roots: allowlist.roots,
     allowlist,
     scanDepth: config.projectScanDepth,
     logger,
+    activity,
+    unavailableRoots,
     ...(options.git !== undefined ? { git: options.git } : {}),
   });
   await projects.discover();
@@ -114,7 +118,7 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
   }
   await providers.initialize();
 
-  const sessions = new SessionService({ providers, projects, bus, logger });
+  const sessions = new SessionService({ providers, projects, bus, logger, activity });
   const devices = config.auth.mode === "device" ? await DeviceState.open(options.stateDir) : undefined;
   const auth = createAuthenticator(config, devices);
   const attachments = new AttachmentStore();
@@ -162,6 +166,7 @@ export async function createHostRuntime(options: CreateHostRuntimeOptions): Prom
         } finally {
           try {
             attachments.dispose();
+            await activity.flush();
           } catch (error) {
             errors.push(error);
           } finally {

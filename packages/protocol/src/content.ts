@@ -231,25 +231,26 @@ export type AgentDiffSummary = z.infer<typeof agentDiffSummarySchema>;
 export const usageUnitSchema = z.enum(["percent", "tokens", "requests", "usd", "minutes"]);
 export type UsageUnit = z.infer<typeof usageUnitSchema>;
 
-export const agentUsageWindowSchema = z.object({
+export const agentUsageWindowSchema = z.strictObject({
   id: z.string().min(1),
   label: z.string(),
   unit: usageUnitSchema,
   usedPercent: z.number().min(0).max(100).nullable().optional(),
   used: z.number().nonnegative().nullable().optional(),
   limit: z.number().nonnegative().nullable().optional(),
+  remaining: z.number().nonnegative().nullable().optional(),
   resetsAt: timestampSchema.nullable().optional(),
   windowSeconds: z.number().int().positive().nullable().optional(),
 });
 export type AgentUsageWindow = z.infer<typeof agentUsageWindowSchema>;
 
-export const agentUsageSchema = z.object({
+export const agentProviderUsageSchema = z.strictObject({
   provider: providerIdSchema,
   planName: z.string().nullable().optional(),
   windows: z.array(agentUsageWindowSchema),
   fetchedAt: timestampSchema,
 });
-export type AgentUsage = z.infer<typeof agentUsageSchema>;
+export type AgentProviderUsage = z.infer<typeof agentProviderUsageSchema>;
 
 /** Re-exported for convenience: sessions are commonly embedded in event data. */
 export { agentSessionSchema };

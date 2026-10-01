@@ -221,6 +221,59 @@ for (const theme of ["dark", "light"] as const) {
       await settle(page);
       await page.screenshot({ path: `${OUT}/14-dev-ui-${theme}.png`, fullPage: true });
     });
+
+    test("20 configured folder", async ({ page }) => {
+      await boot(page, "normal", theme);
+      await page.getByRole("button", { name: "Open folder Development" }).click();
+      await expect(page.getByRole("heading", { name: "Development", exact: true })).toBeVisible();
+      await shot(page, "20-folder", theme);
+    });
+    test("21 provider usage", async ({ page }) => {
+      await boot(page, "normal", theme);
+      await page.getByRole("button", { name: "Usage", exact: true }).click();
+      await expect(page.getByText("43% used")).toBeVisible();
+      await shot(page, "21-provider-usage", theme);
+    });
+    test("22 session usage", async ({ page }) => {
+      await boot(page, "normal", theme);
+      await openProject(page, "aurora-api");
+      await openSession(page, "Document the gateway endpoints");
+      await page.getByRole("button", { name: /Session usage/ }).click();
+      await expect(page.getByRole("dialog", { name: "Session usage" })).toBeVisible();
+      await shot(page, "22-session-usage", theme);
+    });
+    test("23 files", async ({ page }) => {
+      await boot(page, "normal", theme);
+      await openProject(page, "aurora-api");
+      await page.getByRole("button", { name: "Files", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Open folder src" })).toBeVisible();
+      await shot(page, "23-files", theme);
+    });
+    for (const [name, file, folder] of [
+      ["24-code", "index.ts", "src"],
+      ["25-markdown", "README.md", ""],
+      ["26-unsupported", "archive.bin", ""],
+      ["27-image", "logo.png", ""],
+      ["28-too-large", "large.log", ""],
+    ] as const) {
+      test(name, async ({ page }) => {
+        await boot(page, "normal", theme);
+        await openProject(page, "aurora-api");
+        await page.getByRole("button", { name: "Files", exact: true }).click();
+        if (folder) await page.getByRole("button", { name: `Open folder ${folder}` }).click();
+        await page.getByRole("button", { name: `Open file ${file}`, exact: true }).click();
+        await expect(page.getByRole("heading", { name: file, exact: true })).toBeVisible();
+        if (file === "logo.png") await expect(page.getByAltText(file)).toBeVisible();
+        await shot(page, name, theme);
+      });
+    }
+    test("29 empty mode sheet", async ({ page }) => {
+      await boot(page, "normal", theme);
+      await page.goto("/dev/ui");
+      await page.getByRole("button", { name: "Open empty Mode sheet" }).click();
+      await expect(page.getByText(/No selectable modes/)).toBeVisible();
+      await shot(page, "29-empty-mode", theme);
+    });
   });
 }
 

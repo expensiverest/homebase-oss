@@ -48,8 +48,10 @@ export const agentCapabilitiesSchema = z.object({
 
   /** The adapter can produce a diff for a session. */
   diffs: z.boolean(),
-  /** The adapter can report usage windows through a supported interface. */
-  usage: z.boolean(),
+  /** The adapter reports session consumption when observed native data is available. */
+  sessionUsage: z.boolean(),
+  /** The adapter reports provider/account quota windows through a supported interface. */
+  providerUsage: z.boolean(),
   /** The provider exposes slash commands that Homebase can surface. */
   slashCommands: z.boolean(),
 });
@@ -79,7 +81,8 @@ export const noCapabilities: AgentCapabilities = Object.freeze({
   questions: false,
   plans: false,
   diffs: false,
-  usage: false,
+  sessionUsage: false,
+  providerUsage: false,
   slashCommands: false,
 });
 

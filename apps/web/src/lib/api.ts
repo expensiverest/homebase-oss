@@ -8,7 +8,12 @@ import {
   agentProviderSchema,
   agentQuestionRequestSchema,
   agentSessionSchema,
-  agentUsageSchema,
+  agentProviderUsageSchema,
+  agentSessionUsageSchema,
+  projectOverviewSchema,
+  projectSummarySchema,
+  projectDirectoryListingSchema,
+  projectFilePreviewSchema,
   apiErrorSchema,
   approvalResultSchema,
   createSessionInputSchema,
@@ -26,7 +31,7 @@ import {
   type AgentProject,
   type AgentQuestionRequest,
   type AgentSession,
-  type AgentUsage,
+  type AgentProviderUsage,
   type ApprovalResult,
   type CreateSessionInput,
   type QuestionAnswer,
@@ -125,7 +130,7 @@ const actionsSchema = z.object({
 const modelsSchema = z.object({ models: z.array(agentModelSchema) });
 const modesSchema = z.object({ modes: z.array(agentModeSchema) });
 const diffSchema = z.object({ diff: agentDiffSchema });
-const usageSchema = z.object({ usage: agentUsageSchema.nullable() });
+const usageSchema = z.object({ usage: agentProviderUsageSchema.nullable() });
 const acceptedSchema = z.object({ accepted: z.boolean() });
 const resolvedSchema = z.object({ resolved: z.boolean() });
 const attachmentsSchema = z.object({ attachments: z.unknown().array() });
@@ -137,6 +142,35 @@ export interface ListPage<T> {
 
 /** One typed, provider-neutral API client used by every screen. */
 export const api = {
+  overview: () => request("/api/v1/projects/overview", { schema: projectOverviewSchema }),
+  rootProjects: (rootId: string) =>
+    request(`/api/v1/project-roots/${encodeURIComponent(rootId)}/projects`, {
+      schema: z.object({ projects: z.array(projectSummarySchema) }),
+    }).then((body) => body.projects),
+  files: (projectId: string, relativePath: string, signal?: AbortSignal) =>
+    request(`/api/v1/projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(relativePath)}`, {
+      schema: projectDirectoryListingSchema,
+      signal,
+    }),
+  file: (projectId: string, relativePath: string, signal?: AbortSignal) =>
+    request(`/api/v1/projects/${encodeURIComponent(projectId)}/file?path=${encodeURIComponent(relativePath)}`, {
+      schema: projectFilePreviewSchema,
+      signal,
+    }),
+  fileImage: async (projectId: string, relativePath: string, signal: AbortSignal): Promise<Blob> => {
+    const response = await getTransport().fetch(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/file-bytes?path=${encodeURIComponent(relativePath)}`,
+      { headers: authHeaders(), signal, cache: "no-store" },
+    );
+    if (!response.ok) throw new ApiError(response.status, "file_unavailable", "Image preview is unavailable.");
+    if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(response.headers.get("content-type") ?? ""))
+      throw new ApiError(0, "invalid_response", "Unsupported image type.");
+    return response.blob();
+  },
+  sessionUsage: (sessionId: string) =>
+    request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/usage`, {
+      schema: z.object({ usage: agentSessionUsageSchema.nullable() }),
+    }).then((body) => body.usage),
   health: () => request<{ status: string; version: string; latestSequence: number }>("/api/v1/health"),
   devices: () => request<{ devices: Device[] }>("/api/v1/devices"),
   renameDevice: (id: string, name: string) =>
@@ -283,5 +317,5 @@ export type {
   AgentProject,
   AgentQuestionRequest,
   AgentSession,
-  AgentUsage,
+  AgentProviderUsage,
 };

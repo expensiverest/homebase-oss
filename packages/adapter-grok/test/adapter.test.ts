@@ -25,6 +25,86 @@ const PROJECT_ID = "prj_demo";
 const OTHER_PATH = "/home/example/projects/other";
 const OTHER_ID = "prj_other";
 
+describe("explicit consumption and account-limit support", () => {
+  it("maps stable ACP context usage without synthesizing token consumption", async () => {
+    const { adapter, context, project } = createHarness({
+      auth: "cached",
+      extraEnv: {
+        FAKE_ACP_USAGE_UPDATE: JSON.stringify({
+          sessionUpdate: "usage_update",
+          used: 42,
+          size: 100,
+          cost: { amount: 0.02, currency: "USD" },
+        }),
+      },
+    });
+    try {
+      await detectReady(adapter);
+      const session = await adapter.createSession({ provider: "grok", projectId: project.id }, project);
+      await adapter.send(session.id, { text: "fake fixture only" });
+      await context.waitForEvent("turn.completed");
+      expect(await adapter.getSessionUsage(session.id)).toMatchObject({
+        provider: "grok",
+        sessionId: session.id,
+        tokens: {},
+        contextTokens: 42,
+        contextWindow: 100,
+        costUsd: 0.02,
+        partial: true,
+      });
+      expect(eventsOf(context.events, "session.usage.updated")).toHaveLength(1);
+      expect(await adapter.getProviderUsage()).toBeNull();
+    } finally {
+      await adapter.dispose();
+    }
+  });
+
+  it.each([false, true])("queries only the advertised x.ai extension family (advertised=%s)", async (advertised) => {
+    const { adapter, project } = createHarness({
+      auth: "cached",
+      extraEnv: {
+        FAKE_ACP_META: JSON.stringify({ grokShell: advertised }),
+        FAKE_ACP_EXTENSION_METHOD: "_x.ai/session/usage",
+        FAKE_ACP_EXTENSION_RESULT: JSON.stringify({
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15, cachedReadTokens: 3, costUsdTicks: 800000000 },
+        }),
+      },
+    });
+    try {
+      await detectReady(adapter);
+      const session = await adapter.createSession({ provider: "grok", projectId: project.id }, project);
+      const usage = await adapter.getSessionUsage(session.id);
+      if (advertised)
+        expect(usage).toMatchObject({
+          tokens: { inputTokens: 10, outputTokens: 5, totalTokens: 15, cacheReadTokens: 3 },
+          costUsd: 0.08,
+          partial: true,
+        });
+      else expect(usage).toBeNull();
+    } finally {
+      await adapter.dispose();
+    }
+  });
+
+  it("ignores unknown extension shapes and reports usage unavailable", async () => {
+    const { adapter, project } = createHarness({
+      auth: "cached",
+      extraEnv: {
+        FAKE_ACP_META: '{"grokShell":true}',
+        FAKE_ACP_EXTENSION_METHOD: "_x.ai/session/usage",
+        FAKE_ACP_EXTENSION_RESULT: '{"futureShape":{"secret":"not forwarded"}}',
+      },
+    });
+    try {
+      await detectReady(adapter);
+      const session = await adapter.createSession({ provider: "grok", projectId: project.id }, project);
+      expect(await adapter.getSessionUsage(session.id)).toBeNull();
+    } finally {
+      await adapter.dispose();
+    }
+  });
+});
+
 interface HarnessOptions {
   mode?: string;
   auth?: string;
@@ -222,7 +302,7 @@ describe("Grok capabilities", () => {
       attachments: false,
       imageInput: false,
       diffs: false,
-      usage: false,
+      providerUsage: false,
       slashCommands: false,
     });
   });

@@ -38,6 +38,15 @@ tested without any paid provider runs.
 
 ## Where things run
 
+Projects opens with Recent coding activity and configured Folders instead of one long repository list.
+Open a folder to browse its projects. Each project also has a read-only **Files** view for code, safe
+Markdown, and common raster images; HTML stays source, and oversized/unsupported files show metadata.
+Pairing grants read access to files inside configured projects, including files that contain secrets.
+
+Sessions show reported token/cost details where the provider exposes them. **Usage** on Projects shows
+account quota windows where available: Claude's latest observed rate-limit events are supported;
+OpenCode and Grok currently do not expose account limits. Unavailable values remain unavailable.
+
 - **Host** (`apps/host`): a Node.js 22+ process on your computer. It owns configuration, the project registry,
   provider adapters, the normalized event bus, and the REST/SSE API.
 - **Web client** (`apps/web`): an installable PWA served by or pointed at the Host. It never talks to provider

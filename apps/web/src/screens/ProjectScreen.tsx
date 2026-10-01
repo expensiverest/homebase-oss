@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 
 import type { AgentProvider, AgentSession } from "@homebase/protocol";
 
@@ -70,6 +70,7 @@ function SessionRow({
 export function ProjectScreen() {
   const { projectId } = useParams({ strict: false }) as { projectId?: string };
   const navigate = useNavigate();
+  const { rootId } = useSearch({ strict: false }) as { rootId?: string };
   const client = useQueryClient();
   const project = useProject(projectId);
   const providers = useProviders();
@@ -100,7 +101,33 @@ export function ProjectScreen() {
     <div className="flex min-h-0 flex-1 flex-col">
       <main className="min-h-0 flex-1 overflow-y-auto px-safe pb-safe-scroll">
         <header className="pt-safe">
-          <TopBar leading={<BackButton label="Projects" onClick={() => void navigate({ to: "/" })} />} />
+          <TopBar
+            leading={
+              <BackButton
+                label={rootId ? "Folder" : "Projects"}
+                onClick={() =>
+                  rootId ? void navigate({ to: "/r/$rootId", params: { rootId } }) : void navigate({ to: "/" })
+                }
+              />
+            }
+            trailing={
+              projectId ? (
+                <button
+                  type="button"
+                  className="min-h-11 px-3 text-callout font-medium text-accent"
+                  onClick={() =>
+                    void navigate({
+                      to: "/p/$projectId/files",
+                      params: { projectId },
+                      search: { path: "", file: false, rootId },
+                    })
+                  }
+                >
+                  Files
+                </button>
+              ) : null
+            }
+          />
           {project.isLoading ? (
             <div className="mt-4 flex items-center gap-4">
               <Skeleton className="h-14 w-14 rounded-[30%]" />

@@ -19,20 +19,23 @@ paths or derive provider behavior from their shape.
 
 ## Entities
 
-| Type                             | Purpose                                    | Notable fields                                                                                             |
-| -------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `AgentProvider`                  | A registered provider and its state        | `installed`, `authenticated` (`boolean \| null` for "unknown"), `compatible`, `capabilities`, `warning`    |
-| `AgentProject`                   | A Homebase-owned project                   | `path` is always Host-canonical; `providersAvailable` is computed by the Host                              |
-| `AgentSession`                   | A session with one provider                | `provider`, `projectId`, `state`, `model`, `mode`, `thinkingLevel`, optional `parentSessionId` (sub-agent) |
-| `AgentModel`                     | A selectable model                         | `thinkingLevels`, `defaultThinkingLevel`, context/output limits, per-model `inputCapabilities`             |
-| `AgentModelRef`                  | Model selection for a session              | `provider`, `modelId`, `thinkingLevel`                                                                     |
-| `AgentMode`                      | A selectable mode (for example plan/agent) | `id`, `name`, `description`                                                                                |
-| `AgentMessage`                   | One user/assistant/system message          | `state` (`streaming`/`completed`/`failed`/`interrupted`), `parts`                                          |
-| `AgentToolCall`                  | A tool invocation                          | `status` (`running`/`completed`/`failed`/`denied`), `input`, `output`, `error`, optional `childSessionId`  |
-| `AgentApprovalRequest`           | A pending approval                         | `kind`, `title`, `detail`, `options[]` with `allow_once`/`allow_always`/`deny`/`custom`                    |
-| `AgentQuestionRequest`           | A pending structured question              | `questions[]` with `single_select`/`multi_select`/`text`/`confirm`                                         |
-| `AgentDiff` / `AgentDiffSummary` | File changes                               | `files[]` with status and line counts, optional patch                                                      |
-| `AgentUsage`                     | Usage windows                              | `windows[]` with unit (`percent`/`tokens`/`requests`/`usd`/`minutes`)                                      |
+| Type                                             | Purpose                                    | Notable fields                                                                                             |
+| ------------------------------------------------ | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `AgentProvider`                                  | A registered provider and its state        | `installed`, `authenticated` (`boolean \| null` for "unknown"), `compatible`, `capabilities`, `warning`    |
+| `AgentProject`                                   | A Homebase-owned project                   | `path` is always Host-canonical; `providersAvailable` is computed by the Host                              |
+| `AgentSession`                                   | A session with one provider                | `provider`, `projectId`, `state`, `model`, `mode`, `thinkingLevel`, optional `parentSessionId` (sub-agent) |
+| `AgentModel`                                     | A selectable model                         | `thinkingLevels`, `defaultThinkingLevel`, context/output limits, per-model `inputCapabilities`             |
+| `AgentModelRef`                                  | Model selection for a session              | `provider`, `modelId`, `thinkingLevel`                                                                     |
+| `AgentMode`                                      | A selectable mode (for example plan/agent) | `id`, `name`, `description`                                                                                |
+| `AgentMessage`                                   | One user/assistant/system message          | `state` (`streaming`/`completed`/`failed`/`interrupted`), `parts`                                          |
+| `AgentToolCall`                                  | A tool invocation                          | `status` (`running`/`completed`/`failed`/`denied`), `input`, `output`, `error`, optional `childSessionId`  |
+| `AgentApprovalRequest`                           | A pending approval                         | `kind`, `title`, `detail`, `options[]` with `allow_once`/`allow_always`/`deny`/`custom`                    |
+| `AgentQuestionRequest`                           | A pending structured question              | `questions[]` with `single_select`/`multi_select`/`text`/`confirm`                                         |
+| `AgentDiff` / `AgentDiffSummary`                 | File changes                               | `files[]` with status and line counts, optional patch                                                      |
+| `AgentSessionUsage` / `AgentTurnUsage`           | Reported coding consumption                | Token counters, cost, context, observation time, partial flag                                              |
+| `AgentProviderUsage`                             | Provider/account limits                    | Plan name, quota windows, reset times, fetched time                                                        |
+| `ProjectRoot` / `ProjectSummary`                 | Configured folder navigation               | Opaque canonical-root id, project count, last activity, known session counts                               |
+| `ProjectDirectoryListing` / `ProjectFilePreview` | Read-only project files                    | Relative paths, bounded entries, preview kind and metadata                                                 |
 
 ### Session states
 
@@ -61,7 +64,7 @@ Every part has a stable `id` so streaming deltas can address it:
 
 `resume`, `deleteSession`, `streaming`, `interrupt`, `steer`, `queue`, `models`, `modelSwitching`,
 `thinkingLevels`, `modes`, `attachments`, `imageInput`, `tools`, `approvals`, `questions`, `plans`,
-`diffs`, `usage`, `slashCommands`.
+`diffs`, `sessionUsage`, `providerUsage`, `slashCommands`.
 
 Rules:
 
@@ -71,6 +74,47 @@ Rules:
    `unsupported_capability` instead of emulating behavior.
 4. Provider-specific UI is allowed only for concepts that are genuinely provider-specific and not
    expressible as a capability.
+
+Usage methods are required even when unsupported: `getSessionUsage(sessionId)` and `getProviderUsage()`
+return `null` with the respective capability false. A true capability declares the ability to observe
+usage, not a promise that every historical session or account has an observation already.
+
+### Consumption and limits
+
+`AgentTokenUsage` has optional/nullable `inputTokens`, `outputTokens`, `reasoningTokens`,
+`cacheReadTokens`, `cacheWriteTokens`, and `totalTokens`. Input includes cache; output includes reasoning
+when the native provider accounts separately. Cache/reasoning are breakdowns, never extra totals.
+Missing counters remain unknown. Money is provider-reported USD, potentially a provider estimate;
+Homebase neither prices tokens nor converts currencies. `contextTokens`/`contextWindow` describe the
+current context, separately from cumulative consumption. `partial` marks incomplete observations.
+Session records identify provider/session and `updatedAt`; turn records also identify `turnId` and
+`observedAt`. `turn.completed.usage` is a nullable **turn consumption** record, never quota windows.
+`session.usage.updated` updates consumption; `usage.updated` updates **account limits**.
+
+Provider windows have stable `id`, `label`, `unit`, optional `usedPercent` (0–100), `used`, `limit`,
+`remaining`, `resetsAt`, and `windowSeconds`. `fetchedAt` is the observation time, not the query time.
+An expired quota observation cannot establish a fresh zero utilization. Unsupported quotas stay unavailable.
+Terminal turns invalidate session consumption; account observations are cached and explicitly refreshable.
+
+### Project navigation and files
+
+`GET /api/v1/projects/overview` returns up to five Recent summaries and configured roots.
+`GET /api/v1/project-roots/:rootId/projects` lists projects assigned to one root. Root ids derive from
+canonical paths; the most-specific configured root owns a project exactly once. Summaries use the Host's
+known session index without listing every provider's sessions. Counts may be incomplete until history is
+opened. Root records include `available` so disconnected folders are explicit.
+
+Activity comes from session creation, sends, and provider session updates/history. Versioned private
+`project-activity.json` persists only project-id → last-worked timestamp, advances monotonically, and
+ignores stale ids at navigation time. File viewing and filesystem modification times do not affect Recent.
+
+File routes are `GET /api/v1/projects/:projectId/files?path=...` (directory), `/file?path=...` (preview),
+and `/file-bytes?path=...` (verified raster bytes). `path` is a relative slash-separated path inside the
+Host-resolved project, never a root or absolute host path. Listings carry `entries` and `truncated`;
+entries identify name, relative path, kind, size, modified time, and accessibility. Previews distinguish
+`text`, `image`, `unsupported`, and `too-large`. Bytes are authenticated and no-store, never in events.
+Limits are 500 entries, 1 MiB text, and 10 MiB raster images; no recursive listing or file mutations exist.
+See [security.md](security.md) for containment and content-rendering rules.
 
 Helpers: `defineCapabilities(partial)` (everything omitted is explicitly `false`), `supports(...)`,
 `enabledCapabilities(...)`.
@@ -207,9 +251,9 @@ Host storage is ephemeral: bounded per file (20 MiB), per upload (10 files), and
 ## Host inputs (strict)
 
 `CreateSessionInput`, `SendMessageInput`, `ApprovalResult`, `QuestionAnswer`, `SetModelInput`,
-`SetModeInput` are `strictObject`s: unknown fields are rejected. There is deliberately no `path`, `cwd`,
-or `directory` field anywhere. Working directories are resolved by the Host project registry; clients can
-only reference `projectId`.
+`SetModeInput` are `strictObject`s: unknown fields are rejected. Session/agent mutations deliberately have
+no `path`, `cwd`, or `directory` field. Working directories are resolved by the Host project registry;
+clients reference `projectId`. Read-only file queries accept only the relative paths described above.
 
 ## Errors
 

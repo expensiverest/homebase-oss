@@ -166,12 +166,59 @@ describe("catalogs", () => {
     expect(modes.map((mode) => mode.id)).toEqual(["build", "plan"]);
   });
 
+  it("warms the project catalog and retries an initially empty agent response", async () => {
+    let probes = 0;
+    const { adapter, calls, project } = createAdapter(
+      baseRoutes({
+        "GET /api/agent": () =>
+          jsonResponse({ data: ++probes < 3 ? [] : [{ ...nativeAgentPrimary, mode: "all" }, nativeAgentPlan] }),
+      }),
+    );
+    expect((await adapter.listModes(project)).map((mode) => mode.id)).toEqual(["build", "plan"]);
+    expect(probes).toBe(3);
+    expect(
+      calls
+        .filter((c) => c.url.pathname === "/api/agent")
+        .every((c) => c.url.searchParams.get("location[directory]") === PROJECT_PATH),
+    ).toBe(true);
+    expect(calls.findIndex((c) => c.url.pathname === "/api/model")).toBeLessThan(
+      calls.findIndex((c) => c.url.pathname === "/api/agent"),
+    );
+  });
+
+  it("returns an honest empty catalog when only hidden or subagent modes are exposed", async () => {
+    const { adapter, project } = createAdapter(
+      baseRoutes({ "GET /api/agent": () => jsonResponse({ data: [nativeAgentHidden, nativeAgentSubagent] }) }),
+    );
+    expect(await adapter.listModes(project)).toEqual([]);
+  });
+
+  it("uses persisted cumulative session usage on reopen without adding message usage again", async () => {
+    const current = {
+      ...nativeSession,
+      cost: 0.12,
+      tokens: { input: 10, output: 5, reasoning: 2, cache: { read: 20, write: 30 } },
+    };
+    const { adapter, calls } = createAdapter(
+      baseRoutes({ [`GET /api/session/${nativeSession.id}`]: () => jsonResponse({ data: current }) }),
+    );
+    expect(await adapter.getSessionUsage(SESSION)).toMatchObject({
+      provider: "opencode",
+      sessionId: SESSION,
+      costUsd: 0.12,
+      tokens: { inputTokens: 60, outputTokens: 7, totalTokens: 67 },
+    });
+    expect(await adapter.getSessionUsage(SESSION)).toMatchObject({ tokens: { totalTokens: 67 } });
+    expect(calls.some((c) => c.url.pathname.endsWith("/message"))).toBe(false);
+    expect(await adapter.getProviderUsage()).toBeNull();
+  });
+
   it("declares slashCommands and usage unsupported honestly", async () => {
     const { adapter } = createAdapter();
     const capabilities = await adapter.getCapabilities();
     expect(capabilities.queue).toBe(true);
     expect(capabilities.slashCommands).toBe(false);
-    expect(capabilities.usage).toBe(false);
+    expect(capabilities.providerUsage).toBe(false);
     expect(capabilities.plans).toBe(false);
   });
 });

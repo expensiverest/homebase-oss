@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 import { AdapterError } from "@homebase/adapter-sdk";
-import { nowTimestamp, type AgentMessage, type AgentToolCall } from "@homebase/protocol";
+import { timestampSchema, type AgentMessage, type AgentToolCall } from "@homebase/protocol";
 
 /**
  * Claude Code transcript access.
@@ -183,12 +183,23 @@ export function readTranscriptMessages(
   const messages: AgentMessage[] = [];
   const assistants = new Map<string, MutableAssistant>();
   const toolOwners = new Map<string, string>();
+  let lastTimestamp = new Date(0).toISOString();
 
   const ensureAssistant = (id: string, createdAt: string): MutableAssistant => {
     let assistant = assistants.get(id);
     if (!assistant) {
       assistant = { id, createdAt, model: null, parts: [], toolIndex: new Map() };
       assistants.set(id, assistant);
+      // Reserve its conversation slot at first occurrence, not after all user
+      // lines. Repeated content/tool frames update the same parts in that slot.
+      messages.push({
+        id,
+        sessionId: nativeSessionId,
+        role: "assistant",
+        createdAt,
+        state: "completed",
+        parts: assistant.parts,
+      });
     }
     return assistant;
   };
@@ -204,23 +215,31 @@ export function readTranscriptMessages(
     if (entry.isSidechain === true || entry.isMeta === true) continue;
     const entrypoint = typeof entry.entrypoint === "string" ? entry.entrypoint : null;
     if (entrypoint && SKIP_ENTRYPOINTS.has(entrypoint)) continue;
+    const timestamp = timestampSchema.safeParse(entry.timestamp).success ? String(entry.timestamp) : lastTimestamp;
+    lastTimestamp = timestamp;
 
     const type = entry.type;
     if (type === "user") {
       const message = entry.message as { content?: unknown; id?: unknown } | undefined;
-      const timestamp = typeof entry.timestamp === "string" ? entry.timestamp : nowTimestamp();
       const content = message?.content;
-      if (typeof content === "string") {
-        if (content.trim().length === 0) continue;
+      const userText =
+        typeof content === "string"
+          ? content
+          : Array.isArray(content)
+            ? content
+                .filter((block) => block?.type === "text" && typeof block.text === "string")
+                .map((block) => block.text)
+                .join("\n\n")
+            : "";
+      if (userText.trim().length > 0) {
         messages.push({
           id: typeof message?.id === "string" ? `ccu_${message.id}` : `ccu_${entry.uuid ?? messages.length}`,
           sessionId: nativeSessionId,
           role: "user",
           createdAt: timestamp,
           state: "completed",
-          parts: [{ type: "text", id: `ccu_part_${messages.length}`, text: content }],
+          parts: [{ type: "text", id: `ccu_part_${messages.length}`, text: userText }],
         });
-        continue;
       }
       if (Array.isArray(content)) {
         for (const block of content as Array<Record<string, unknown>>) {
@@ -249,7 +268,6 @@ export function readTranscriptMessages(
 
     if (type === "assistant") {
       const message = entry.message as { id?: unknown; model?: unknown; content?: unknown } | undefined;
-      const timestamp = typeof entry.timestamp === "string" ? entry.timestamp : nowTimestamp();
       const model = typeof message?.model === "string" ? message.model : null;
       // `<synthetic>` entries are provider-generated noise (login prompts,
       // notifications), never user-visible conversation.
@@ -290,19 +308,8 @@ export function readTranscriptMessages(
     }
   }
 
-  for (const assistant of assistants.values()) {
-    messages.push({
-      id: assistant.id,
-      sessionId: nativeSessionId,
-      role: "assistant",
-      createdAt: assistant.createdAt,
-      updatedAt: nowTimestamp(),
-      state: "completed",
-      parts: assistant.parts,
-    });
-  }
-
-  return messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  // Transcript order is authoritative, including equal/missing timestamps.
+  return messages;
 }
 
 function toolResultText(content: unknown): string {

@@ -31,7 +31,8 @@ import {
   type AgentPage,
   type AgentProject,
   type AgentSession,
-  type AgentUsage,
+  type AgentProviderUsage,
+  type AgentSessionUsage,
   type AgentUsageWindow,
   type ApprovalResult,
   type CreateSessionInput,
@@ -60,6 +61,7 @@ import { matchesRule, resourcesOf, savePatterns } from "./permissions/policy.js"
 import { ClaudeProcessController } from "./process/controller.js";
 import { classifyResultFrame, ClaudeStreamNormalizer } from "./stream/normalizer.js";
 import type { NativeInitFrame, NativeResultFrame } from "./native.js";
+import { ClaudeUsageLedger } from "./usage.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -134,7 +136,8 @@ export class ClaudeAdapter implements AgentAdapter {
   #mcpConfigPath: string | null = null;
 
   #modelsCache: { at: number; models: AgentModel[] } | null = null;
-  #usage: AgentUsage | null = null;
+  #usage: AgentProviderUsage | null = null;
+  readonly #consumption = new Map<string, ClaudeUsageLedger>();
 
   constructor(options: ClaudeAdapterOptions = {}) {
     this.#config = parseClaudeConfig(options.config ?? {});
@@ -164,7 +167,9 @@ export class ClaudeAdapter implements AgentAdapter {
         session.session.model = { provider: this.id, modelId: model, thinkingLevel: session.effort };
         this.#emitSessionUpdated(session);
       },
-      onUsage: () => undefined,
+      onUsage: (id, usage, messageId) => {
+        if (messageId) this.#ledger(id).observe(messageId, usage);
+      },
       onRateLimit: (nativeSessionId, info) => this.#onRateLimit(nativeSessionId, info),
       onInit: (nativeSessionId, frame) => this.#onInit(nativeSessionId, frame as unknown as NativeInitFrame),
       logDebug: (message, fields) => this.#logger.debug(message, fields),
@@ -261,7 +266,8 @@ export class ClaudeAdapter implements AgentAdapter {
       plans: false,
       // No provider-native session diff primitive.
       diffs: false,
-      usage: true,
+      providerUsage: true,
+      sessionUsage: true,
       // Command normalization is deferred (no neutral contract yet).
       slashCommands: false,
     });
@@ -517,8 +523,33 @@ export class ClaudeAdapter implements AgentAdapter {
     this.#emitSessionUpdated(session);
   }
 
-  async getUsage(): Promise<AgentUsage | null> {
-    return this.#usage ? { ...this.#usage, windows: [...this.#usage.windows] } : null;
+  async getProviderUsage(): Promise<AgentProviderUsage | null> {
+    if (!this.#usage) return null;
+    // An expired observation is stale, not evidence of a freshly empty quota.
+    return {
+      ...this.#usage,
+      windows: this.#usage.windows
+        .filter((w) => !w.resetsAt || Date.parse(w.resetsAt) > Date.now())
+        .map((w) => ({ ...w })),
+    };
+  }
+
+  #ledger(nativeId: string): ClaudeUsageLedger {
+    let ledger = this.#consumption.get(nativeId);
+    if (!ledger) {
+      ledger = new ClaudeUsageLedger();
+      this.#consumption.set(nativeId, ledger);
+    }
+    return ledger;
+  }
+  async getSessionUsage(sessionId: string): Promise<AgentSessionUsage | null> {
+    const state = await this.#requireSession(sessionId);
+    const ledger = this.#ledger(state.nativeId);
+    const file =
+      state.transcriptPath ??
+      locateTranscript(resolveClaudeConfigDir(this.#config.configDir), state.nativeId)?.filePath;
+    if (file) ledger.readHistory(file);
+    return ledger.snapshot(sessionId);
   }
 
   // --- internals -----------------------------------------------------------------
@@ -840,6 +871,25 @@ export class ClaudeAdapter implements AgentAdapter {
     if (!session.controller?.writeUserMessage(message)) {
       throw new AdapterError("provider_error", "Claude Code is not accepting input.");
     }
+    this.#emit("message.completed", session, {
+      message: {
+        id: `ccu_${message.uuid}`,
+        sessionId: session.publicId,
+        role: "user",
+        createdAt: nowTimestamp(),
+        state: "completed",
+        parts: [
+          { type: "text", id: `ccu_part_${message.uuid}`, text: input.text },
+          ...(input.attachments ?? []).map((ref) => ({
+            type: "image" as const,
+            id: `ccu_${message.uuid}_${ref.id}`,
+            attachmentId: ref.id,
+            name: ref.name,
+            mimeType: ref.mimeType,
+          })),
+        ],
+      },
+    });
     if (session.session.state !== "working") {
       session.session.state = "working";
       this.#emitSessionUpdated(session);
@@ -935,6 +985,7 @@ export class ClaudeAdapter implements AgentAdapter {
         onStderrLine: (line) => this.#logger.debug("Claude stderr", { line: line.slice(0, 300) }),
       },
     });
+    this.#ledger(session.nativeId).beginProcess();
     session.controller = controller;
 
     await new Promise<void>((resolve, reject) => {
@@ -977,6 +1028,7 @@ export class ClaudeAdapter implements AgentAdapter {
   #onInit(nativeSessionId: string, frame: NativeInitFrame): void {
     const session = this.#byNative(nativeSessionId);
     if (!session) return;
+    this.#ledger(nativeSessionId).setVersion(frame.claude_code_version);
     session.capabilities = Array.isArray(frame.capabilities) ? frame.capabilities : [];
     if (typeof frame.model === "string" && frame.model.length > 0 && !frame.model.startsWith("<")) {
       session.model = frame.model;
@@ -996,6 +1048,17 @@ export class ClaudeAdapter implements AgentAdapter {
     const terminal = classifyResultFrame(frame);
     const turnId = this.#normalizer?.endTurn(nativeSessionId) ?? null;
     if (turnId) {
+      const tokens = this.#ledger(nativeSessionId).finish(
+        turnId,
+        frame.usage,
+        frame.total_cost_usd,
+        terminal !== "completed",
+      );
+      const usage = tokens
+        ? { provider: this.id, sessionId: session.publicId, turnId, tokens, partial: true, observedAt: nowTimestamp() }
+        : null;
+      const sessionUsage = this.#ledger(nativeSessionId).snapshot(session.publicId);
+      if (sessionUsage) this.#emit("session.usage.updated", session, { usage: sessionUsage });
       if (terminal === "interrupted") {
         this.#emit("turn.interrupted", session, { turnId });
       } else if (terminal === "failed") {
@@ -1008,7 +1071,7 @@ export class ClaudeAdapter implements AgentAdapter {
           },
         });
       } else {
-        this.#emit("turn.completed", session, { turnId });
+        this.#emit("turn.completed", session, { turnId, usage });
       }
     }
     session.session.state = terminal === "failed" ? "failed" : session.pending.size > 0 ? "waiting" : "idle";
@@ -1035,19 +1098,29 @@ export class ClaudeAdapter implements AgentAdapter {
         label: labels[key] ?? key.replace(/_/g, " "),
         unit: "percent",
         usedPercent: Math.max(0, Math.min(100, Math.round(window.utilization * 1000) / 10)),
-        resetsAt: typeof window.resetsAt === "number" ? new Date(window.resetsAt * 1000).toISOString() : null,
+        resetsAt:
+          typeof window.resetsAt === "number" &&
+          Number.isFinite(window.resetsAt) &&
+          window.resetsAt > 0 &&
+          window.resetsAt < 8640000000000
+            ? new Date(window.resetsAt * 1000).toISOString()
+            : null,
       });
     }
     if (windows.length === 0) return;
     const now = Date.now();
-    // A window whose reset has passed is back to zero.
-    for (const window of windows) {
-      if (window.resetsAt && Date.parse(window.resetsAt) <= now) {
-        window.usedPercent = 0;
-        window.resetsAt = null;
-      }
-    }
-    this.#usage = { provider: this.id, windows, fetchedAt: nowTimestamp() };
+    this.#usage = {
+      provider: this.id,
+      windows: windows.filter((w) => !w.resetsAt || Date.parse(w.resetsAt) > now),
+      fetchedAt: nowTimestamp(),
+    };
+    this.#context?.emit({
+      type: "usage.updated",
+      provider: this.id,
+      projectId: null,
+      sessionId: null,
+      data: { usage: this.#usage },
+    });
   }
 
   #armIdleTimer(session: ClaudeSessionState): void {

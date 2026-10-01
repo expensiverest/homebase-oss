@@ -87,7 +87,8 @@ Assets worth protecting, in order:
 - **T1/T2 (local process and file boundaries):** the durable configuration is user-scoped and written atomically with
   private POSIX permissions; project roots are only mutable through the local `homebase projects` CLI and are
   canonicalized, validated, and persisted through the same schema/security invariants the Host enforces at startup.
-  No browser route accepts a path, so the project allowlist boundary is unchanged.
+  No browser route accepts a root/absolute path. Phase 6.1's read-only browser paths are relative to a
+  registered project and checked against that project's canonical boundary.
 - **T4 (provider process execution):** a Homebase-managed OpenCode server binds `127.0.0.1` only and authenticates
   with a random in-memory password; it is never exposed through Tailscale and Homebase never modifies, restarts, or
   kills the user's shared OpenCode service. ACP agents are value-configured (no credential fields accepted) and
@@ -120,6 +121,22 @@ Assets worth protecting, in order:
   Alternate-state commands refuse to operate on another installation. Corrupt metadata does not trigger deletion.
 - **Credentials/update supply chain:** no provider/device/admin secrets or full environment in definitions.
   Bounded/redacted operational logs; no network updater or unsigned archive installation.
+
+## Phase 6.1 file-read reassessment
+
+- **Traversal/arbitrary paths:** opaque project ids resolve on the Host; absolute, drive/UNC, NUL,
+  encoded traversal and malformed relative paths fail before filesystem access. No path creates a project.
+- **Symlink/junction escape:** canonicalize targets, enforce project containment, recheck opened identity,
+  and refuse special files. Outside links are unavailable. This is not protection against same-user
+  compromise or all hostile concurrent namespace mutations on operating systems without openat-style APIs.
+- **Resource exhaustion:** nonrecursive 500-entry listings, 1 MiB text/10 MiB raster reads, no special-file
+  reads; the mobile viewer bounds rendering/highlighting. Very large image dimensions remain a browser
+  decoder concern even when compressed bytes fit the limit.
+- **Executable content:** HTML is source; SVG/PDF are unsupported; Markdown keeps existing sanitization,
+  link/image policies and CSP. No project iframe, script execution, terminal or file write endpoint.
+- **Secret files and caching:** pairing now authorizes project file reads, including secret-bearing source.
+  No filename blacklist promises safety. No file content logs/diagnostics, service-worker cache, or browser
+  persistence; auth loss purges query/highlight state and object URLs are revoked on unmount.
 
 ## 6. Open items before public alpha
 
