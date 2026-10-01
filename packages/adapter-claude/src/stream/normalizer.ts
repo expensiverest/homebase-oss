@@ -20,7 +20,7 @@ export interface NormalizerDeps {
   onResult(nativeSessionId: string, frame: NativeResultFrame): void;
   /** Model reported by an assistant frame (used for snapshot fidelity). */
   onModelSeen(nativeSessionId: string, model: string): void;
-  onUsage(nativeSessionId: string, usage: NativeUsage): void;
+  onUsage(nativeSessionId: string, usage: NativeUsage, messageId?: string): void;
   onRateLimit(nativeSessionId: string, info: NonNullable<NativeFrame["rate_limit_info"]>): void;
   onInit(nativeSessionId: string, frame: NativeFrame): void;
   logDebug(message: string, fields?: Record<string, unknown>): void;
@@ -302,7 +302,7 @@ export class ClaudeStreamNormalizer {
         return;
       }
       case "message_delta": {
-        if (event.usage) this.#deps.onUsage(nativeSessionId, event.usage);
+        // Partial stream counters are not a complete model-call snapshot.
         return;
       }
       case "message_stop": {
@@ -317,6 +317,7 @@ export class ClaudeStreamNormalizer {
   #onAssistant(frame: NativeAssistantFrame, runtime: Runtime, nativeSessionId: string): void {
     const messageId = frame.message?.id;
     if (!messageId) return;
+    if (frame.message?.usage) this.#deps.onUsage(nativeSessionId, frame.message.usage, messageId);
 
     // Late assistant frames can arrive after the message was completed (for
     // example a tool_use block following the streamed text); merge into the
@@ -334,8 +335,6 @@ export class ClaudeStreamNormalizer {
       assembly.model = model;
       this.#deps.onModelSeen(nativeSessionId, model);
     }
-    if (frame.message?.usage) this.#deps.onUsage(nativeSessionId, frame.message.usage);
-
     this.#mergeAssistantBlocks(
       assembly.parts,
       messageId,

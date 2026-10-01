@@ -5,7 +5,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import type { AdapterLogger } from "@homebase/adapter-sdk";
-import type { AgentProject, ProjectId } from "@homebase/protocol";
+import type { AgentProject, AgentSession, ProjectId, ProjectRoot, ProjectSummary } from "@homebase/protocol";
+import type { ProjectActivity } from "./activity.js";
 
 import { HostError } from "../errors.js";
 import { canonicalizeExistingPath, isPathInsideRoot, pathComparisonKey, type PathAllowlist } from "../paths.js";
@@ -29,6 +30,10 @@ export interface GitMetadataReader {
 export function projectIdForPath(canonicalPath: string): ProjectId {
   const digest = createHash("sha256").update(pathComparisonKey(canonicalPath)).digest("hex");
   return `prj_${digest.slice(0, 12)}`;
+}
+
+export function rootIdForPath(canonicalPath: string): string {
+  return `root_${createHash("sha256").update(pathComparisonKey(canonicalPath)).digest("hex").slice(0, 12)}`;
 }
 
 /** Reads branch/remote with the local git binary; failures degrade gracefully. */
@@ -64,6 +69,8 @@ export interface ProjectRegistryOptions {
   scanDepth?: number;
   logger?: AdapterLogger;
   git?: GitMetadataReader;
+  unavailableRoots?: readonly string[];
+  activity?: ProjectActivity;
 }
 
 /**
@@ -78,6 +85,8 @@ export class ProjectRegistry {
   readonly #scanDepth: number;
   readonly #logger: AdapterLogger | undefined;
   readonly #git: GitMetadataReader;
+  readonly #unavailableRoots: readonly string[];
+  readonly #activity: ProjectActivity | undefined;
 
   #projects = new Map<ProjectId, AgentProject>();
 
@@ -87,10 +96,76 @@ export class ProjectRegistry {
     this.#scanDepth = options.scanDepth ?? 3;
     this.#logger = options.logger;
     this.#git = options.git ?? defaultGitMetadataReader;
+    this.#unavailableRoots = options.unavailableRoots ?? [];
+    this.#activity = options.activity;
   }
 
   get roots(): readonly string[] {
     return this.#roots;
+  }
+
+  rootForProject(project: AgentProject): string {
+    const root = [...this.#roots]
+      .filter((root) => isPathInsideRoot(root, project.path))
+      .sort((a, b) => b.length - a.length || a.localeCompare(b))[0];
+    if (!root) throw new HostError("project_not_allowed", "Project no longer belongs to a configured folder.");
+    return rootIdForPath(root);
+  }
+
+  summaries(sessions: readonly AgentSession[]): ProjectSummary[] {
+    const grouped = new Map<string, AgentSession[]>();
+    for (const session of sessions) {
+      const group = grouped.get(session.projectId) ?? [];
+      group.push(session);
+      grouped.set(session.projectId, group);
+    }
+    return this.list()
+      .map((project) => {
+        const known = grouped.get(project.id) ?? [];
+        return {
+          ...project,
+          rootId: this.rootForProject(project),
+          lastActivityAt: this.#activity?.get(project.id) ?? null,
+          knownSessionCount: known.length,
+          workingCount: known.filter((s) => s.state === "working").length,
+          waitingCount: known.filter((s) => s.state === "waiting").length,
+        };
+      })
+      .sort(
+        (a, b) =>
+          (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? "") ||
+          a.name.localeCompare(b.name) ||
+          a.id.localeCompare(b.id),
+      );
+  }
+
+  listRoots(): ProjectRoot[] {
+    const projects = this.summaries([]);
+    return [...this.#roots, ...this.#unavailableRoots]
+      .map((root) => {
+        const id = rootIdForPath(root),
+          children = projects.filter((p) => p.rootId === id);
+        return {
+          id,
+          name: path.basename(root) || root,
+          path: root,
+          available: this.#roots.includes(root),
+          projectCount: children.length,
+          lastActivityAt:
+            children
+              .map((p) => p.lastActivityAt)
+              .filter((t): t is string => !!t)
+              .sort()
+              .at(-1) ?? null,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
+  }
+
+  projectsForRoot(rootId: string, sessions: readonly AgentSession[]): ProjectSummary[] {
+    if (!this.listRoots().some((root) => root.id === rootId))
+      throw new HostError("not_found", "Configured folder not found.");
+    return this.summaries(sessions).filter((p) => p.rootId === rootId);
   }
 
   /** Scans every configured root for git repositories. */
@@ -178,7 +253,9 @@ export class ProjectRegistry {
     for (const project of this.#projects.values()) {
       if (pathComparisonKey(project.path) === key) return { ...project };
     }
-    for (const project of this.#projects.values()) {
+    for (const project of [...this.#projects.values()].sort(
+      (a, b) => b.path.length - a.path.length || a.id.localeCompare(b.id),
+    )) {
       if (isPathInsideRoot(project.path, canonical)) return { ...project };
     }
     return undefined;

@@ -28,6 +28,9 @@ import { ProjectScreen } from "./screens/ProjectScreen.js";
 import { ProjectsScreen } from "./screens/ProjectsScreen.js";
 import { PairScreen } from "./screens/PairScreen.js";
 import { DevicesScreen } from "./screens/DevicesScreen.js";
+import { RootScreen } from "./screens/RootScreen.js";
+import { FilesScreen } from "./screens/FilesScreen.js";
+import { clearHighlightCache } from "./lib/highlight.js";
 
 /**
  * Server state lives in TanStack Query. Nothing here persists the cache: the
@@ -67,6 +70,7 @@ function AppShell() {
       stopLiveStream();
       clearLastSequence();
       queryClient.clear();
+      clearHighlightCache();
       useLive.getState().resetOverlay();
       useLive.getState().setConnection("auth-required");
       setAuth({ mode: "device", authenticated: false });
@@ -141,13 +145,40 @@ function AppShell() {
 
 const rootRoute = createRootRoute({ component: AppShell });
 const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: ProjectsScreen });
-const projectRoute = createRoute({ getParentRoute: () => rootRoute, path: "/p/$projectId", component: ProjectScreen });
+const projectRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/p/$projectId",
+  component: ProjectScreen,
+  validateSearch: (s: Record<string, unknown>): { rootId?: string } => ({
+    rootId: typeof s.rootId === "string" ? s.rootId : undefined,
+  }),
+});
+const folderRoute = createRoute({ getParentRoute: () => rootRoute, path: "/r/$rootId", component: RootScreen });
+const filesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/p/$projectId/files",
+  component: FilesScreen,
+  validateSearch: (s: Record<string, unknown>): { path: string; file: boolean; rootId?: string } => ({
+    path: typeof s.path === "string" ? s.path : "",
+    file: s.file === true || s.file === "true",
+    rootId: typeof s.rootId === "string" ? s.rootId : undefined,
+  }),
+});
 const chatRoute = createRoute({ getParentRoute: () => rootRoute, path: "/s/$sessionId", component: ChatScreen });
 const devUiRoute = createRoute({ getParentRoute: () => rootRoute, path: "/dev/ui", component: DevUI });
 const pairRoute = createRoute({ getParentRoute: () => rootRoute, path: "/pair", component: PairScreen });
 const devicesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/devices", component: DevicesScreen });
 
-const routeTree = rootRoute.addChildren([indexRoute, projectRoute, chatRoute, devUiRoute, pairRoute, devicesRoute]);
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  projectRoute,
+  folderRoute,
+  filesRoute,
+  chatRoute,
+  devUiRoute,
+  pairRoute,
+  devicesRoute,
+]);
 
 export const router = createRouter({ routeTree, defaultPreload: false });
 

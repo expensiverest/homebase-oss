@@ -9,7 +9,7 @@ import {
   agentQuestionRequestSchema,
   agentQuestionResolutionSchema,
   agentToolCallSchema,
-  agentUsageSchema,
+  agentProviderUsageSchema,
   jsonValueSchema,
 } from "./content.js";
 import { agentProviderSchema, agentSessionSchema, timestampSchema } from "./entities.js";
@@ -22,6 +22,7 @@ import {
   sessionIdSchema,
 } from "./ids.js";
 import { agentErrorSchema } from "./errors.js";
+import { agentTurnUsageSchema, agentSessionUsageSchema } from "./usage.js";
 
 /**
  * Every provider feeds this single normalized event vocabulary. Adapters emit
@@ -54,7 +55,7 @@ export const agentEventSchema = z.discriminatedUnion("type", [
   event("session.deleted", z.object({ sessionId: sessionIdSchema })),
 
   event("turn.started", z.object({ turnId: z.string().min(1), messageId: messageIdSchema.nullable().optional() })),
-  event("turn.completed", z.object({ turnId: z.string().min(1), usage: agentUsageSchema.nullable().optional() })),
+  event("turn.completed", z.object({ turnId: z.string().min(1), usage: agentTurnUsageSchema.nullable().optional() })),
   event("turn.failed", z.object({ turnId: z.string().min(1), error: agentErrorSchema })),
   event("turn.interrupted", z.object({ turnId: z.string().min(1) })),
 
@@ -91,7 +92,8 @@ export const agentEventSchema = z.discriminatedUnion("type", [
 
   event("plan.updated", z.object({ plan: agentPlanSchema, messageId: messageIdSchema.nullable().optional() })),
   event("diff.updated", z.object({ diff: agentDiffSummarySchema })),
-  event("usage.updated", z.object({ usage: agentUsageSchema })),
+  event("usage.updated", z.object({ usage: agentProviderUsageSchema })),
+  event("session.usage.updated", z.object({ usage: agentSessionUsageSchema })),
 
   /** Escape hatch. Normal UI code should rarely consume this. */
   event(

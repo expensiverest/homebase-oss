@@ -11,6 +11,7 @@ const OWNED = new Set([
   "security.json",
   "admin-key",
   "service.json",
+  "project-activity.json",
   "state-owner.json",
   "logs",
   "cache",

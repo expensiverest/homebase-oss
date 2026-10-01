@@ -14,6 +14,10 @@ import {
   sendMessageInputSchema,
   setModeInputSchema,
   setModelInputSchema,
+  projectOverviewSchema,
+  projectSummarySchema,
+  projectDirectoryListingSchema,
+  projectFilePreviewSchema,
   type AgentProject,
   type JsonValue,
 } from "@homebase/protocol";
@@ -37,6 +41,7 @@ import type { SessionService } from "../sessions/index.js";
 import { createStaticWebHandler } from "../static.js";
 import { sseEventsHandler } from "./sse.js";
 import { isLoopbackAddress, resolveRequestOrigin } from "./request-origin.js";
+import { ProjectFiles } from "../projects/files.js";
 
 export interface ApiDependencies {
   version: string;
@@ -75,6 +80,7 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
  */
 export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
+  const files = new ProjectFiles(deps.projects);
 
   app.use("*", async (c, next) => {
     await next();
@@ -333,7 +339,48 @@ export function createApiApp(deps: ApiDependencies): Hono<ApiEnv> {
   );
 
   app.get("/api/v1/providers/:providerId/usage", async (c) =>
-    c.json({ usage: await deps.sessions.getUsage(c.req.param("providerId")) }),
+    c.json({ usage: await deps.sessions.getProviderUsage(c.req.param("providerId")) }),
+  );
+
+  app.get("/api/v1/projects/overview", (c) =>
+    c.json(
+      projectOverviewSchema.parse({
+        roots: deps.projects.listRoots(),
+        recent: deps.projects
+          .summaries(deps.sessions.listKnown())
+          .filter((p) => p.lastActivityAt)
+          .slice(0, 5)
+          .map((p) => withAvailability(p, deps)),
+      }),
+    ),
+  );
+  app.get("/api/v1/project-roots/:rootId/projects", (c) =>
+    c.json({
+      projects: deps.projects
+        .projectsForRoot(c.req.param("rootId"), deps.sessions.listKnown())
+        .map((p) => projectSummarySchema.parse(withAvailability(p, deps))),
+    }),
+  );
+  app.get("/api/v1/projects/:projectId/files", async (c) =>
+    c.json(projectDirectoryListingSchema.parse(await files.list(c.req.param("projectId"), c.req.query("path") ?? ""))),
+  );
+  app.get("/api/v1/projects/:projectId/file", async (c) =>
+    c.json(
+      projectFilePreviewSchema.parse(
+        (await files.preview(c.req.param("projectId"), c.req.query("path") ?? "")).preview,
+      ),
+    ),
+  );
+  app.get("/api/v1/projects/:projectId/file-bytes", async (c) => {
+    const { preview, bytes } = await files.preview(c.req.param("projectId"), c.req.query("path") ?? "");
+    if (!bytes || preview.kind !== "image")
+      throw new HostError("invalid_request", "Only supported raster images have a byte preview.");
+    c.header("content-type", preview.mimeType!);
+    c.header("content-disposition", "inline");
+    return c.body(new Uint8Array(bytes).buffer);
+  });
+  app.get("/api/v1/sessions/:sessionId/usage", async (c) =>
+    c.json({ usage: await deps.sessions.getSessionUsage(c.req.param("sessionId")) }),
   );
 
   app.get("/api/v1/projects", (c) =>

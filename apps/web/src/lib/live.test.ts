@@ -130,6 +130,9 @@ describe("live store helpers", () => {
       state: "completed",
       parts: [{ type: "text", id: "up1", text: "hello world" }],
     });
+    // Identity-bearing accepted echo anchors the pending user; text alone in
+    // unrelated old history cannot safely deduplicate a repeated prompt.
+    useLive.getState().apply(base(1, "message.completed", { message: fetchedUser }));
     useLive.getState().prune("ses_1", [fetchedUser]);
     const remaining = useLive.getState().sessions.ses_1?.messages ?? [];
     expect(remaining).toHaveLength(1);

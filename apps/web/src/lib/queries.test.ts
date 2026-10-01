@@ -41,9 +41,30 @@ describe("event-driven invalidation", () => {
   it("refreshes history, session, actions, and diff on a terminal turn", () => {
     const { client, spy } = spyClient();
     invalidateForEvent(client, event("turn.completed", { turnId: "t" }));
-    for (const key of [qk.session(sessionId), qk.messages(sessionId), qk.actions(sessionId), qk.diff(sessionId)]) {
+    for (const key of [
+      qk.session(sessionId),
+      qk.messages(sessionId),
+      qk.actions(sessionId),
+      qk.diff(sessionId),
+      qk.sessionUsage(sessionId),
+      qk.overview,
+    ]) {
       expect(spy).toHaveBeenCalledWith({ queryKey: key });
     }
+  });
+
+  it("refreshes consumption separately from account quota windows", () => {
+    const { client, spy } = spyClient();
+    invalidateForEvent(client, event("session.usage.updated", { usage: { sessionId } }));
+    expect(spy).toHaveBeenCalledWith({ queryKey: qk.sessionUsage(sessionId) });
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: qk.usage("mock") });
+    spy.mockClear();
+    invalidateForEvent(
+      client,
+      event("usage.updated", { usage: { provider: "mock", windows: [] } }, { sessionId: null }),
+    );
+    expect(spy).toHaveBeenCalledWith({ queryKey: qk.usage("mock") });
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: qk.messages(sessionId) });
   });
 
   it("refreshes provider data but not conversations on provider updates", () => {

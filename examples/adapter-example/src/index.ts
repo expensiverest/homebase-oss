@@ -15,7 +15,7 @@ import {
   type AgentPage,
   type AgentProject,
   type AgentSession,
-  type AgentUsage,
+  type AgentProviderUsage,
   type CreateSessionInput,
   type PageRequest,
   type ProviderDetection,
@@ -195,7 +195,11 @@ export class ExampleAdapter implements AgentAdapter {
     throw new AdapterError("unsupported_capability", "The example adapter does not support diffs.");
   }
 
-  async getUsage(): Promise<AgentUsage | null> {
+  async getProviderUsage(): Promise<AgentProviderUsage | null> {
+    return null;
+  }
+
+  async getSessionUsage(_sessionId: string): Promise<null> {
     return null;
   }
 

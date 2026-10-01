@@ -216,6 +216,12 @@ describe("provider refresh", () => {
       async send(): Promise<void> {
         throw new AdapterError("provider_error", "unavailable");
       },
+      async getSessionUsage() {
+        return null;
+      },
+      async getProviderUsage() {
+        return null;
+      },
       init(_context: AdapterContext): void {
         // no-op
       },

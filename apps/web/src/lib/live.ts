@@ -10,6 +10,7 @@ import {
 import { create } from "zustand";
 
 import { openEventStream, type SseMessage } from "./sse.js";
+import { mergeMessages } from "./messages.js";
 import { authHeaders } from "./transport.js";
 
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline" | "auth-required";
@@ -240,14 +241,6 @@ export interface LiveStore extends OverlayState {
   resetOverlay(sessionId?: string): void;
 }
 
-function messageText(message: AgentMessage): string {
-  return message.parts
-    .filter((part) => part.type === "text")
-    .map((part) => (part.type === "text" ? part.text : ""))
-    .join("\n\n")
-    .trim();
-}
-
 export const useLive = create<LiveStore>((set, get) => ({
   ...createOverlayState(),
   connection: "connecting",
@@ -301,12 +294,12 @@ export const useLive = create<LiveStore>((set, get) => ({
     const overlay = get().sessions[sessionId];
     if (!overlay) return;
     const fetchedIds = new Set(fetched.map((message) => message.id));
-    const fetchedUserText = new Set(fetched.filter((message) => message.role === "user").map(messageText));
+    const mergedIds = new Set(mergeMessages(fetched, overlay.messages).map((message) => message.id));
     const messages = overlay.messages.filter((message) => {
       // Optimistic user messages are replaced as soon as history contains them,
       // even mid-run; id-matched messages wait until the run ends so an older
       // fetched snapshot never clobbers a streaming one.
-      if (message.role === "user" && fetchedUserText.has(messageText(message))) return false;
+      if (message.role === "user" && !mergedIds.has(message.id)) return false;
       if (!overlay.running && fetchedIds.has(message.id)) return false;
       return true;
     });

@@ -46,7 +46,8 @@ interface AgentAdapter {
   setMode?(sessionId: SessionId, input: SetModeInput): Promise<void>;
 
   getDiff?(sessionId: SessionId): Promise<AgentDiff>;
-  getUsage?(): Promise<AgentUsage | null>;
+  getSessionUsage(sessionId: SessionId): Promise<AgentSessionUsage | null>;
+  getProviderUsage(): Promise<AgentProviderUsage | null>;
 }
 ```
 
@@ -54,6 +55,13 @@ Rules:
 
 - **Optional methods are capability-gated.** If `interrupt` is declared, `interrupt()` must exist and
   work. If not, the Host returns `unsupported_capability` and the UI hides the affordance.
+- **Every adapter must explicitly address usage.** The two usage methods are required at compile time,
+  including examples/mocks. Unsupported features declare `sessionUsage`/`providerUsage` false and return
+  null. Supported methods may return null until trustworthy observations exist. Compliance validates
+  schemas, provider/session identity, nonnegative finite counters, bounded percentages, and timestamps.
+  Do not estimate tokens/cost, copy credentials, scrape account pages, or run inference to obtain usage.
+  Consume final authoritative results rather than summing repeated cumulative frames; document native
+  scopes and historical limitations. Future adapters, including Phase 7, have the same requirement.
 - **Send, steer, and queue are distinct operations.** `send` begins a turn when appropriate (it must
   not hijack an active run); `steer` injects into the active turn; `queue` parks a message for delivery
   behind the active turn (or runs it immediately when idle).

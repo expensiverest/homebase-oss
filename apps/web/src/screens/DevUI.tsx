@@ -24,6 +24,10 @@ import { ToolChips } from "../components/beautiful/ToolChips.js";
 import { Timeline, toolChipItem, toolTaskRow } from "../components/ChatTimeline.js";
 import { Markdown } from "../components/Markdown.js";
 import { Composer } from "../components/Composer.js";
+import { ModeSheet } from "../components/Sheets.js";
+import { ProviderUsageDetail, SessionUsageDetail } from "../components/Usage.js";
+import { ProjectRow } from "../components/ProjectRow.js";
+import { FileContent } from "./FilesScreen.js";
 import { ProjectMark, ProviderMark } from "../components/marks.js";
 import {
   BranchChip,
@@ -341,6 +345,7 @@ const COMPOSER_CONTROLS = (
 export function DevUI() {
   const { theme, setTheme } = useTheme();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [emptyModeOpen, setEmptyModeOpen] = useState(false);
   const [provider, setProvider] = useState("opencode");
   const [mode, setMode] = useState("build");
   // Seed the running composer's draft before it mounts (dev page only).
@@ -697,6 +702,137 @@ export function DevUI() {
           <Button onClick={() => setSheetOpen(true)}>Open sheet</Button>
         </div>
       </Section>
+
+      <Section title="Recent & configured folders">
+        <p className="eyebrow mb-2">Recent</p>
+        <div className="surface">
+          <ProjectRow
+            project={{
+              id: "prj_sample",
+              name: "example-api",
+              path: "/home/example/projects/example-api",
+              branch: "main",
+              providersAvailable: [],
+              rootId: "root_111111111111",
+              lastActivityAt: iso(5),
+              knownSessionCount: 3,
+              workingCount: 1,
+              waitingCount: 0,
+            }}
+            onOpen={() => undefined}
+          />
+        </div>
+        <p className="eyebrow mb-2 mt-4">Folders</p>
+        <Group>
+          <Row title="Development" subtitle="24 projects" onClick={() => undefined} />
+        </Group>
+        <p className="eyebrow mb-2 mt-4">Development</p>
+        <div className="surface">
+          <ProjectRow
+            project={{
+              id: "prj_sample_2",
+              name: "a-long-project-name-for-mobile-layout",
+              path: "/home/example/projects/example-web",
+              branch: "feature/mobile",
+              providersAvailable: [],
+              rootId: "root_111111111111",
+              lastActivityAt: null,
+              knownSessionCount: 0,
+              workingCount: 0,
+              waitingCount: 0,
+            }}
+            onOpen={() => undefined}
+          />
+        </div>
+      </Section>
+      <Section title="Provider usage">
+        <ProviderUsageDetail
+          usage={{
+            provider: "mock",
+            windows: [
+              { id: "five-hour", label: "5 hour", unit: "percent", usedPercent: 43, resetsAt: iso(-120) },
+              { id: "week", label: "Week", unit: "percent", usedPercent: 18, resetsAt: iso(-1440) },
+            ],
+            fetchedAt: iso(2),
+          }}
+        />
+        <p className="mt-4 text-callout text-muted">This provider does not expose account usage limits.</p>
+      </Section>
+      <Section title="Session usage">
+        <SessionUsageDetail
+          usage={{
+            provider: "mock",
+            sessionId: "dev_session",
+            tokens: {
+              inputTokens: 10000,
+              outputTokens: 2400,
+              totalTokens: 12400,
+              cacheReadTokens: 2000,
+              cacheWriteTokens: 300,
+              reasoningTokens: 400,
+            },
+            costUsd: 0.08,
+            updatedAt: iso(1),
+          }}
+        />
+      </Section>
+      <Section title="Project files · read only">
+        <Group>
+          <Row title="src" subtitle="Folder" onClick={() => undefined} />
+          <Row title="README.md" subtitle="1.2 KB" onClick={() => undefined} />
+        </Group>
+        <div className="mt-4">
+          <FileContent
+            preview={{
+              projectId: "dev",
+              relativePath: "src/index.ts",
+              name: "index.ts",
+              sizeBytes: 400,
+              kind: "text",
+              language: "typescript",
+              mimeType: "text/plain",
+              text: SAMPLE_TS,
+            }}
+          />
+        </div>
+        <div className="mt-4">
+          <FileContent
+            preview={{
+              projectId: "dev",
+              relativePath: "README.md",
+              name: "README.md",
+              sizeBytes: 50,
+              kind: "text",
+              language: "markdown",
+              mimeType: "text/plain",
+              text: "# Project notes\n\nA read-only Markdown preview.",
+            }}
+          />
+        </div>
+        <FileContent
+          preview={{
+            projectId: "dev",
+            relativePath: "archive.bin",
+            name: "archive.bin",
+            sizeBytes: 2048,
+            kind: "unsupported",
+            language: null,
+            mimeType: null,
+          }}
+        />
+      </Section>
+      <Section title="Empty mode catalog">
+        <Button onClick={() => setEmptyModeOpen(true)}>Open empty Mode sheet</Button>
+      </Section>
+      <ModeSheet
+        open={emptyModeOpen}
+        onClose={() => setEmptyModeOpen(false)}
+        modes={[]}
+        loading={false}
+        currentMode={null}
+        busy={false}
+        onApply={() => undefined}
+      />
 
       <Section title="Loading">
         <div className="flex flex-col gap-2">

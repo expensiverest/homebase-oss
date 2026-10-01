@@ -3,10 +3,11 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowDown, ArrowUpLeft, FileDiff, SlidersHorizontal, Trash2, Users } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { AgentApprovalRequest, AgentAttachmentRef, AgentMessage, AgentQuestionRequest } from "@homebase/protocol";
+import type { AgentApprovalRequest, AgentAttachmentRef, AgentQuestionRequest } from "@homebase/protocol";
 
 import { api } from "../lib/api.js";
 import { useChatScroll } from "../lib/chatScroll.js";
+import { mergeMessages } from "../lib/messages.js";
 import { useLive } from "../lib/live.js";
 import {
   qk,
@@ -18,6 +19,7 @@ import {
   useProject,
   useProviders,
   useSession,
+  useSessionUsage,
 } from "../lib/queries.js";
 import { currentSubagents, foldTimeline, levelLabel, modelDisplayName, sessionStatus } from "../lib/viewmodel.js";
 import { ApprovalCard, QuestionCard } from "../components/ActionCards.js";
@@ -28,6 +30,7 @@ import { ProviderGlyph } from "../components/marks.js";
 import { AgentsSheet, AgentsStrip, useAgentsStripVisible } from "../components/AgentsStatus.js";
 import { ConfirmSheet, DiffSheet, ModelSheet, ModeSheet } from "../components/Sheets.js";
 import { EmptyState, ErrorState, IconButton, Pill, PickerButton, Skeleton } from "../components/ui.js";
+import { SessionUsageSheet, sessionUsageLabel } from "../components/Usage.js";
 
 export function ChatScreen() {
   const { sessionId } = useParams({ strict: false }) as { sessionId?: string };
@@ -58,6 +61,8 @@ export function ChatScreen() {
 
   const [modelOpen, setModelOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
+  const usage = useSessionUsage(id, provider?.capabilities.sessionUsage === true);
   const [diffOpen, setDiffOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
@@ -74,19 +79,7 @@ export function ChatScreen() {
     [messages.data],
   );
 
-  const merged = useMemo(() => {
-    const map = new Map<string, AgentMessage>();
-    const order: string[] = [];
-    for (const message of [...fetched].reverse()) {
-      if (!map.has(message.id)) order.push(message.id);
-      map.set(message.id, message);
-    }
-    for (const message of overlay?.messages ?? []) {
-      if (!map.has(message.id)) order.push(message.id);
-      map.set(message.id, message);
-    }
-    return order.map((key) => map.get(key)).filter((message): message is AgentMessage => Boolean(message));
-  }, [fetched, overlay?.messages]);
+  const merged = useMemo(() => mergeMessages(fetched, overlay?.messages ?? []), [fetched, overlay?.messages]);
 
   const timeline = useMemo(() => foldTimeline(merged), [merged]);
   const agents = useMemo(() => currentSubagents(timeline), [timeline]);
@@ -127,6 +120,10 @@ export function ChatScreen() {
     if (fetched.length === 0) return;
     useLive.getState().prune(id, fetched);
   }, [fetched, id]);
+
+  useEffect(() => {
+    if (messages.dataUpdatedAt) void client.invalidateQueries({ queryKey: qk.sessionUsage(id) });
+  }, [messages.dataUpdatedAt, id, client]);
 
   const loadOlder = () => {
     prependAnchor.current = captureHeight();
@@ -377,6 +374,17 @@ export function ChatScreen() {
               ) : null}
               <ConnectionPill hideWhenConnected />
             </div>
+            {usage.data && sessionUsageLabel(usage.data) ? (
+              <button
+                type="button"
+                aria-label="Session usage"
+                className="readout -ml-1 mt-1 min-h-11 px-1 text-callout text-muted"
+                onClick={() => setUsageOpen(true)}
+              >
+                {sessionUsageLabel(usage.data)}
+                {usage.data.partial ? " · partial" : ""}
+              </button>
+            ) : null}
           </header>
 
           {bannerError ? (
@@ -511,7 +519,7 @@ export function ChatScreen() {
                     className="min-w-0 flex-1"
                   />
                 ) : null}
-                {provider?.capabilities.modes ? (
+                {provider?.capabilities.modes && (!modes.isSuccess || modes.data.length > 0) ? (
                   <PickerButton
                     value={modeLabel}
                     icon={<SlidersHorizontal size={16} aria-hidden />}
@@ -547,6 +555,7 @@ export function ChatScreen() {
           onClose={() => setModeOpen(false)}
           modes={modes.data ?? []}
           loading={modes.isLoading}
+          error={modes.isError ? "Modes are unavailable right now." : null}
           currentMode={sessionRow.mode ?? null}
           busy={sheetBusy}
           onApply={(mode) => void applyMode(mode)}
@@ -558,6 +567,12 @@ export function ChatScreen() {
         diff={diff.data ?? null}
         loading={diff.isLoading}
         error={diff.isError ? "The diff is unavailable right now." : null}
+      />
+      <SessionUsageSheet
+        open={usageOpen}
+        onClose={() => setUsageOpen(false)}
+        usage={usage.data ?? null}
+        onRefresh={() => void usage.refetch()}
       />
       <ConfirmSheet
         open={confirmOpen}

@@ -178,7 +178,7 @@ describe.skipIf(!LIVE)("live Claude integration", { timeout: 300_000 }, () => {
   });
 
   it("reports subscription usage windows from structured rate-limit data", async () => {
-    const usage = await adapter.getUsage();
+    const usage = await adapter.getProviderUsage();
     expect(usage).not.toBeNull();
     expect(usage?.provider).toBe("claude");
     expect(usage?.windows.length ?? 0).toBeGreaterThan(0);

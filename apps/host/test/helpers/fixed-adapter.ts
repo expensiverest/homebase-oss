@@ -11,7 +11,7 @@ import {
   type AgentPage,
   type AgentProject,
   type AgentSession,
-  type AgentUsage,
+  type AgentProviderUsage,
   type ApprovalResult,
   type CreateSessionInput,
   type PageRequest,
@@ -309,7 +309,11 @@ export class FixedAdapter implements AgentAdapter {
     return { provider: this.id, sessionId, files: [] };
   }
 
-  async getUsage(): Promise<AgentUsage | null> {
+  async getProviderUsage(): Promise<AgentProviderUsage | null> {
+    return null;
+  }
+
+  async getSessionUsage(_sessionId: string): Promise<null> {
     return null;
   }
 

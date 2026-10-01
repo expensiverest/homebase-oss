@@ -14,7 +14,7 @@ import {
   type AgentProject,
   type AgentSession,
   type AgentToolCall,
-  type AgentUsage,
+  type AgentProviderUsage,
   type ApprovalResult,
   type CreateSessionInput,
   type PageRequest,
@@ -107,7 +107,7 @@ export class MockAdapter implements AgentAdapter {
       questions: true,
       plans: true,
       diffs: true,
-      usage: true,
+      providerUsage: true,
       // Deliberately unsupported: proves shared code can gate features per provider.
       slashCommands: false,
       ...options.capabilities,
@@ -301,7 +301,8 @@ export class MockAdapter implements AgentAdapter {
     };
   }
 
-  async getUsage(): Promise<AgentUsage | null> {
+  async getProviderUsage(): Promise<AgentProviderUsage | null> {
+    if (!this.#capabilities.providerUsage) return null;
     return {
       provider: this.id,
       planName: "Mock Plan",
@@ -311,6 +312,11 @@ export class MockAdapter implements AgentAdapter {
       ],
       fetchedAt: nowTimestamp(),
     };
+  }
+
+  async getSessionUsage(sessionId: string): Promise<null> {
+    this.#require(sessionId);
+    return null;
   }
 
   #require(sessionId: string): MockSessionState {

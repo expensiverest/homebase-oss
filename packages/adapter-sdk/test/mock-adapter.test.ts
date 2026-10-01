@@ -183,7 +183,7 @@ describe("MockAdapter", () => {
     expect(diff.files.length).toBeGreaterThan(0);
     expect(diff.sessionId).toBe(session.id);
 
-    const usage = await adapter.getUsage();
+    const usage = await adapter.getProviderUsage();
     expect(usage?.provider).toBe("mock");
   });
 

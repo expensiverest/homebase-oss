@@ -170,6 +170,7 @@ export function ModeSheet({
   onClose,
   modes,
   loading,
+  error = null,
   currentMode,
   busy,
   onApply,
@@ -178,6 +179,7 @@ export function ModeSheet({
   onClose: () => void;
   modes: AgentMode[];
   loading: boolean;
+  error?: string | null;
   currentMode: string | null;
   busy: boolean;
   onApply: (mode: string) => void;
@@ -194,8 +196,8 @@ export function ModeSheet({
           size="lg"
           className="w-full"
           loading={busy}
-          disabled={!selected}
-          onClick={() => selected && onApply(selected)}
+          disabled={loading || !!error || !modes.some((mode) => mode.id === selected)}
+          onClick={() => selected && modes.some((mode) => mode.id === selected) && onApply(selected)}
         >
           Use this mode
         </Button>
@@ -205,6 +207,12 @@ export function ModeSheet({
         <div className="flex justify-center py-8">
           <Spinner label="Loading modes" />
         </div>
+      ) : error ? (
+        <p role="alert" className="py-6 text-center text-callout text-bad">
+          {error}
+        </p>
+      ) : modes.length === 0 ? (
+        <p className="py-6 text-center text-callout text-muted">No selectable modes are available for this session.</p>
       ) : (
         <ul role="radiogroup" aria-label="Modes" className="surface overflow-hidden">
           {modes.map((mode) => (

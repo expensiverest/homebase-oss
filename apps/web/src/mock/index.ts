@@ -12,7 +12,7 @@ import {
   type AgentQuestionRequest,
   type AgentSession,
   type AgentToolCall,
-  type AgentUsage,
+  type AgentProviderUsage,
   type SequencedAgentEvent,
 } from "@homebase/protocol";
 
@@ -52,6 +52,9 @@ export const SCENARIOS = [
   "agents",
   "long-stream",
   "auth-unpaired",
+  "mode-empty",
+  "mode-error",
+  "usage",
 ] as const;
 
 export type Scenario = (typeof SCENARIOS)[number];
@@ -368,6 +371,7 @@ function buildState(scenario: Scenario): MockState {
       authenticated: true,
       compatible: true,
       capabilities: defineCapabilities({
+        sessionUsage: true,
         resume: true,
         deleteSession: true,
         streaming: true,
@@ -395,6 +399,7 @@ function buildState(scenario: Scenario): MockState {
       authenticated: scenario === "signed-out" ? false : true,
       compatible: true,
       capabilities: defineCapabilities({
+        sessionUsage: true,
         resume: true,
         streaming: true,
         interrupt: true,
@@ -408,7 +413,7 @@ function buildState(scenario: Scenario): MockState {
         tools: true,
         approvals: true,
         questions: true,
-        usage: true,
+        providerUsage: true,
       }),
       warning:
         scenario === "signed-out" ? "Claude Code is not signed in; run `claude` on this machine to sign in." : null,
@@ -421,6 +426,7 @@ function buildState(scenario: Scenario): MockState {
       authenticated: true,
       compatible: true,
       capabilities: defineCapabilities({
+        sessionUsage: true,
         resume: true,
         streaming: true,
         interrupt: true,
@@ -1093,6 +1099,162 @@ async function handleRequest(input: string, init?: RequestInit): Promise<Respons
   if (path === "/api/v1/providers") return json({ providers: state.providers });
   if (path === "/api/v1/providers/refresh") return json({ providers: state.providers });
   if (path === "/api/v1/projects") return json({ projects: state.projects });
+  const rootId = "root_111111111111",
+    clientRoot = "root_222222222222";
+  const summaries = state.projects
+    .map((project) => {
+      const sessions = state.sessions.filter((s) => s.projectId === project.id && !s.parentSessionId);
+      return {
+        ...project,
+        rootId: project.id === "prj_northwind" ? clientRoot : rootId,
+        lastActivityAt:
+          sessions
+            .map((s) => s.updatedAt)
+            .sort()
+            .at(-1) ?? null,
+        knownSessionCount: sessions.length,
+        workingCount: sessions.filter((s) => s.state === "working").length,
+        waitingCount: sessions.filter((s) => s.state === "waiting").length,
+      };
+    })
+    .sort((a, b) => (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? "") || a.name.localeCompare(b.name));
+  if (path === "/api/v1/projects/overview")
+    return json({
+      recent: summaries.filter((p) => p.lastActivityAt).slice(0, 5),
+      roots: state.projects.length
+        ? [
+            {
+              id: rootId,
+              name: "Development",
+              path: "/home/example/projects",
+              available: true,
+              projectCount: summaries.filter((p) => p.rootId === rootId).length,
+              lastActivityAt: summaries[0]?.lastActivityAt ?? null,
+            },
+            {
+              id: clientRoot,
+              name: "Clients",
+              path: "/home/example/work/clients",
+              available: true,
+              projectCount: 1,
+              lastActivityAt: null,
+            },
+          ]
+        : [],
+    });
+  const rootMatch = /^\/api\/v1\/project-roots\/([^/]+)\/projects$/.exec(path);
+  if (rootMatch) return json({ projects: summaries.filter((p) => p.rootId === rootMatch[1]) });
+  const sessionUsageMatch = /^\/api\/v1\/sessions\/([^/]+)\/usage$/.exec(path);
+  if (sessionUsageMatch) {
+    const session = state.sessions.find((s) => s.id === decodeURIComponent(sessionUsageMatch[1]!));
+    return json({
+      usage: session
+        ? {
+            provider: session.provider,
+            sessionId: session.id,
+            tokens: {
+              inputTokens: 10000,
+              outputTokens: 2400,
+              totalTokens: 12400,
+              cacheReadTokens: 2000,
+              cacheWriteTokens: 300,
+              reasoningTokens: 400,
+            },
+            costUsd: 0.08,
+            updatedAt: session.updatedAt,
+          }
+        : null,
+    });
+  }
+  const fileMatch = /^\/api\/v1\/projects\/([^/]+)\/(files|file|file-bytes)$/.exec(path);
+  if (fileMatch) {
+    const relativePath = url.searchParams.get("path") ?? "";
+    const projectId = decodeURIComponent(fileMatch[1]!);
+    const data: Record<
+      string,
+      { kind: "text" | "image" | "unsupported" | "too-large"; text?: string; language?: string; sizeBytes: number }
+    > = {
+      "README.md": {
+        kind: "text",
+        language: "markdown",
+        text: "# Project notes\n\nA calm read-only preview.\n\n[unsafe](javascript:alert(1))\n<script>alert(1)</script>\n![blocked](https://example.com/private.png)",
+        sizeBytes: 180,
+      },
+      "src/index.ts": {
+        kind: "text",
+        language: "typescript",
+        text: "export function hello(name: string) {\n  return `Hello, ${name}`;\n}\n",
+        sizeBytes: 80,
+      },
+      "src/index.html": {
+        kind: "text",
+        language: "html",
+        text: "<script>window.projectExecuted = true</script>",
+        sizeBytes: 48,
+      },
+      "src/a-very-long-component-filename-for-mobile-layout-testing.tsx": {
+        kind: "text",
+        language: "tsx",
+        text: "export const Example = () => <div>Example</div>;",
+        sizeBytes: 49,
+      },
+      "logo.png": { kind: "image", sizeBytes: 70 },
+      "archive.bin": { kind: "unsupported", sizeBytes: 512 },
+      "large.log": { kind: "too-large", sizeBytes: 2097152 },
+      "unsafe.svg": { kind: "unsupported", sizeBytes: 200 },
+    };
+    if (fileMatch[2] === "files") {
+      const folders = ["src", "empty"];
+      const entries =
+        relativePath === "empty"
+          ? []
+          : Object.entries(data)
+              .filter(([key]) => key.split("/").slice(0, -1).join("/") === relativePath)
+              .map(([key, value]) => ({
+                name: key.split("/").at(-1)!,
+                relativePath: key,
+                kind: "file",
+                sizeBytes: value.sizeBytes,
+                modifiedAt: null,
+                accessible: true,
+              }));
+      if (!relativePath)
+        entries.unshift(
+          ...folders.map((name) => ({
+            name,
+            relativePath: name,
+            kind: "directory",
+            sizeBytes: 0,
+            modifiedAt: null,
+            accessible: true,
+          })),
+        );
+      entries.sort((a, b) => {
+        const foldersFirst = Number(b.kind === "directory") - Number(a.kind === "directory");
+        return foldersFirst || a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      });
+      return json({ projectId, relativePath, entries, truncated: false });
+    }
+    if (fileMatch[2] === "file-bytes")
+      return new Response(
+        Uint8Array.from(
+          atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jK1sAAAAASUVORK5CYII="),
+          (c) => c.charCodeAt(0),
+        ),
+        { headers: { "content-type": "image/png" } },
+      );
+    const value = data[relativePath];
+    return value
+      ? json({
+          projectId,
+          relativePath,
+          name: relativePath.split("/").at(-1),
+          language: value.language ?? null,
+          mimeType: value.kind === "image" ? "image/png" : null,
+          ...value,
+        })
+      : errorResponse(404, "not_found", "File unavailable");
+  }
 
   const projectMatch = /^\/api\/v1\/projects\/([^/]+)$/.exec(path);
   if (projectMatch) {
@@ -1125,6 +1287,8 @@ async function handleRequest(input: string, init?: RequestInit): Promise<Respons
   const modesMatch = /^\/api\/v1\/projects\/([^/]+)\/providers\/([^/]+)\/modes$/.exec(path);
   if (modesMatch) {
     const providerId = decodeURIComponent(modesMatch[2] ?? "");
+    if (state.scenario === "mode-error") return errorResponse(503, "provider_unavailable", "Catalog unavailable");
+    if (state.scenario === "mode-empty") return json({ modes: [] });
     return json({ modes: providerId === "claude" ? CLAUDE_MODES : providerId === "grok" ? GROK_MODES : MODES });
   }
 
@@ -1321,9 +1485,8 @@ async function handleRequest(input: string, init?: RequestInit): Promise<Respons
   const usageMatch = /^\/api\/v1\/providers\/([^/]+)\/usage$/.exec(path);
   if (usageMatch) {
     const providerId = decodeURIComponent(usageMatch[1] ?? "");
-    if (providerId !== "claude" && providerId !== "opencode")
-      return errorResponse(409, "unsupported_capability", "No usage");
-    const usage: AgentUsage = {
+    if (providerId !== "claude") return errorResponse(409, "unsupported_capability", "No usage");
+    const usage: AgentProviderUsage = {
       provider: providerId,
       windows: [
         { id: "five_hour", label: "5 hour", unit: "percent", usedPercent: 21.5 },

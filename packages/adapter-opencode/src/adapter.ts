@@ -24,7 +24,8 @@ import {
   type AgentProject,
   type AgentSession,
   type AgentSessionState,
-  type AgentUsage,
+  type AgentProviderUsage,
+  type AgentSessionUsage,
   type ApprovalResult,
   type CreateSessionInput,
   type PageRequest,
@@ -38,6 +39,7 @@ import {
 import { parseOpenCodeConfig, type OpenCodeConfig } from "./config.js";
 import { toAdapterError, versionCompatibility } from "./errors.js";
 import { SessionEventTracker } from "./events.js";
+import { toSessionUsage } from "./usage.js";
 import { OpenCodeSupervisor, OpenCodeConnectionClient } from "./supervisor.js";
 import {
   OPENCODE_PROVIDER_ID,
@@ -242,8 +244,9 @@ export class OpenCodeAdapter implements AgentAdapter {
       // OpenCode has no structured plan object surfaced through its API yet.
       plans: false,
       diffs: true,
-      // No documented provider-level usage windows; session tokens stay on messages.
-      usage: false,
+      // No provider/account quota API; session consumption is queried separately.
+      providerUsage: false,
+      sessionUsage: true,
       // Slash commands are deferred to a later phase (see docs/compatibility.md).
       slashCommands: false,
     });
@@ -256,10 +259,21 @@ export class OpenCodeAdapter implements AgentAdapter {
 
   async listModes(project: AgentProject): Promise<AgentMode[]> {
     try {
-      const response = await this.#client.get<{ data?: NativeAgent[] }>("/api/agent", { location: project.path });
-      return (response.data ?? [])
-        .filter((agent) => agent.mode === "primary" && agent.hidden !== true)
-        .map((agent) => toAgentMode(agent));
+      // Location initialization is asynchronous in 2.0.18: its first agent
+      // response can be empty. Catalog warmup waits for that location.
+      await this.#modelsWithWarmupRetry(project.path);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const response = await this.#client.get<{ data?: NativeAgent[] }>("/api/agent", { location: project.path });
+        const data = response.data ?? [];
+        // Only an entirely empty native response is retried. A genuine catalog
+        // containing solely hidden/subagents is honestly an empty picker.
+        if (data.length || attempt === 2)
+          return data
+            .filter((agent) => (agent.mode === "primary" || agent.mode === "all") && agent.hidden !== true)
+            .map(toAgentMode);
+        await sleep(WARMUP_RETRY_MS);
+      }
+      return [];
     } catch (error) {
       throw toAdapterError(error);
     }
@@ -519,8 +533,15 @@ export class OpenCodeAdapter implements AgentAdapter {
     }
   }
 
-  async getUsage(): Promise<AgentUsage | null> {
+  async getProviderUsage(): Promise<AgentProviderUsage | null> {
     return null;
+  }
+
+  async getSessionUsage(sessionId: string): Promise<AgentSessionUsage | null> {
+    const nativeId = this.#toNativeId(sessionId);
+    await this.#ensureScopedSession(sessionId);
+    const response = await this.#client.get<{ data: NativeSession }>(`/api/session/${encodeURIComponent(nativeId)}`);
+    return toSessionUsage(response.data, sessionId);
   }
 
   // --- internals -----------------------------------------------------------------

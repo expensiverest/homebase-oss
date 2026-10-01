@@ -25,7 +25,7 @@ describe("capability model", () => {
     expect(capabilities.tools).toBe(true);
     // Omitted capabilities stay explicitly unsupported.
     expect(capabilities.approvals).toBe(false);
-    expect(capabilities.usage).toBe(false);
+    expect(capabilities.providerUsage).toBe(false);
     expect(Object.keys(capabilities).sort()).toEqual([...capabilityKeys].sort());
   });
 
@@ -34,7 +34,7 @@ describe("capability model", () => {
 
     expect(supports(capabilities, "approvals")).toBe(true);
     expect(supports(capabilities, "questions")).toBe(true);
-    expect(supports(capabilities, "usage")).toBe(false);
+    expect(supports(capabilities, "providerUsage")).toBe(false);
     expect(enabledCapabilities(capabilities)).toEqual(["approvals", "questions"]);
   });
 });

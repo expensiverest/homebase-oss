@@ -4,7 +4,7 @@ import type {
   AgentProvider,
   AgentProject,
   AgentSession,
-  AgentUsage,
+  AgentProviderUsage,
   ApiErrorBody,
 } from "@homebase/protocol";
 import { afterEach, describe, expect, it } from "vitest";
@@ -83,12 +83,12 @@ describe("providers", () => {
     const host = await setup();
     const response = await host.runtime.app.request("/api/v1/providers/mock/usage");
     expect(response.status).toBe(200);
-    const { usage } = await jsonBody<{ usage: AgentUsage | null }>(response);
+    const { usage } = await jsonBody<{ usage: AgentProviderUsage | null }>(response);
     expect(usage?.provider).toBe("mock");
   });
 
   it("rejects usage when the provider does not support it", async () => {
-    const host = await setup({ registrations: [defaultMockRegistration({ capabilities: { usage: false } })] });
+    const host = await setup({ registrations: [defaultMockRegistration({ capabilities: { providerUsage: false } })] });
     const response = await host.runtime.app.request("/api/v1/providers/mock/usage");
     expect(response.status).toBe(409);
 

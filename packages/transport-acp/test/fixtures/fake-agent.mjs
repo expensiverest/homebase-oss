@@ -118,6 +118,7 @@ app.onRequest(methods.agent.initialize, () => {
     authMethods,
     agentInfo: { name: "fake-acp", version: "1.2.3" },
     _meta: {
+      ...(env.FAKE_ACP_META ? JSON.parse(env.FAKE_ACP_META) : {}),
       agentVersion: "1.2.3",
       modelState: {
         models: [
@@ -132,6 +133,16 @@ app.onRequest(methods.agent.initialize, () => {
     },
   };
 });
+
+// Arbitrary extension fixtures remain adapter-neutral. Adapters supply their
+// own method/shape; the transport does not interpret it.
+if (env.FAKE_ACP_EXTENSION_METHOD) {
+  app.onRequest(
+    env.FAKE_ACP_EXTENSION_METHOD,
+    (value) => value,
+    () => JSON.parse(env.FAKE_ACP_EXTENSION_RESULT ?? "{}"),
+  );
+}
 
 app.onRequest(methods.agent.authenticate, (context) => {
   const methodId = context.params.methodId;
@@ -459,6 +470,7 @@ app.onRequest(methods.agent.session.prompt, async (context) => {
     return { stopReason: "cancelled" };
   }
   await send(textChunk("msg_1", " Done."));
+  if (env.FAKE_ACP_USAGE_UPDATE) await send(JSON.parse(env.FAKE_ACP_USAGE_UPDATE));
   return { stopReason: "end_turn" };
 });
 

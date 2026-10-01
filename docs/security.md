@@ -40,7 +40,8 @@ Security is architecture, not polish; unsafe defaults are bugs.
 - Project roots can only be changed by the local `homebase projects add/remove` CLI, which canonicalizes with
   `realpath`, requires an existing directory, de-duplicates with platform case rules, validates the complete
   resulting configuration, and persists atomically. There is no REST endpoint or web field that accepts a
-  filesystem path; `AgentProject.path` still comes only from the Host registry.
+  root filesystem path; `AgentProject.path` still comes only from the Host registry. File browsing accepts
+  only a relative path inside an existing project id.
 - Project-root changes apply at the next Host start; they are not hot-swapped under active sessions.
 
 ### Project paths
@@ -99,7 +100,32 @@ This is the most important boundary in the product:
 - **Provider crashes cannot leave a session "Working".** Transport exit rejects outstanding requests, cancels pending
   permission bridges, and fails active turns; provider refresh can reconnect.
 
-### Attachments
+### Read-only project files (Phase 6.1)
+
+**Pairing grants read access to files inside configured projects through the Homebase UI.** Projects may
+contain credentials or other sensitive files. Homebase does not hide arbitrary secret filenames or claim
+that its preview limit is a confidentiality filter. Select roots and pair devices accordingly.
+
+File APIs resolve a registered project id on the Host, reject absolute/drive/UNC/NUL/traversal/encoded
+paths and malformed separators, and compare the final realpath against that specific canonical project.
+Symlinks and Windows junctions/reparse aliases cannot expand the boundary. Escaped/broken entries are
+unavailable without disclosing their targets. The reader re-resolves after opening, compares file identity,
+uses no-follow/nonblocking flags where supported, and reads only regular files. Same-OS-user filesystem
+replacement is outside Homebase's protection model; arbitrary concurrent hostile filesystem writes are
+not a sandboxed capability. The project allowlist remains authoritative.
+
+Listings iterate at most 500 entries without recursion and hide `.git` metadata. Text previews are bounded
+at 1 MiB and raster images at 10 MiB. Devices, pipes, sockets, binary/invalid UTF-8, SVG and PDF are not
+previewed. Verified PNG/JPEG/WebP/GIF bytes use authenticated object URLs revoked on unmount. HTML is
+escaped source; Markdown uses the existing safe renderer with raw HTML disabled, unsafe links blocked,
+and remote images not fetched. Project content is never loaded in an iframe or executed.
+
+Normal device authentication, shutdown guards, and `Cache-Control: no-store` apply to all file routes.
+The service worker never caches `/api/*`. Contents are not logged, persisted in browser storage, included
+in diagnostics, or put into project activity metadata. In-memory query/highlight state clears on auth loss;
+the phone also limits displayed lines/characters and skips highlighting large source blocks.
+
+### Attachment storage
 
 - Bytes are uploaded to the Host (`POST /api/v1/attachments`), stored in memory only, and addressed by
   random ids. Clients never send or receive filesystem paths.

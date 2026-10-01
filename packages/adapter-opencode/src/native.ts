@@ -45,10 +45,10 @@ export interface NativeAgent {
 }
 
 export interface NativeTokens {
-  input: number;
-  output: number;
-  reasoning: number;
-  cache: { read: number; write: number };
+  input?: number;
+  output?: number;
+  reasoning?: number;
+  cache?: { read?: number; write?: number };
 }
 
 export interface NativeSession {

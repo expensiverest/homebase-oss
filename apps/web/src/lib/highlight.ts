@@ -20,6 +20,14 @@ const LANGS = [
   "html",
   "markdown",
   "yaml",
+  "toml",
+  "rust",
+  "go",
+  "java",
+  "c",
+  "cpp",
+  "sql",
+  "powershell",
 ] as const;
 // Not "diff": Shiki's web bundle does not include it, and asking for it makes
 // createHighlighter reject (which silently disabled all highlighting before
@@ -49,7 +57,13 @@ export function loadHighlighter(): Promise<Highlighter> {
         (shiki) =>
           shiki.createHighlighter({
             themes: [THEMES.light, THEMES.dark],
-            langs: [...LANGS],
+            langs: [
+              ...LANGS.filter((language) => language in shiki.bundledLanguages),
+              import("shiki/langs/toml.mjs"),
+              import("shiki/langs/rust.mjs"),
+              import("shiki/langs/go.mjs"),
+              import("shiki/langs/powershell.mjs"),
+            ],
           }) as unknown as Promise<Highlighter>,
       )
       .then((instance) => {
@@ -82,6 +96,11 @@ export type TokenLines = ThemedToken[][];
 
 const cache = new Map<string, TokenLines>();
 const MAX_CACHE = 200;
+let cacheGeneration = 0;
+export function clearHighlightCache(): void {
+  cacheGeneration++;
+  cache.clear();
+}
 
 function cacheKey(code: string, language: string): string {
   return `${language}\u0000${code}`;
@@ -108,8 +127,10 @@ export function tokensNow(code: string, language: string | null): TokenLines | n
 }
 
 export async function tokensLater(code: string, language: string): Promise<TokenLines | null> {
+  const generation = cacheGeneration;
   try {
     const instance = await loadHighlighter();
+    if (generation !== cacheGeneration) return null;
     return tokensNow(code, language) ?? tokenize(instance, code, language);
   } catch {
     return null;

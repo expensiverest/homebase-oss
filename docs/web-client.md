@@ -217,7 +217,11 @@ is a centered, naturally expanded version of the same product.
 - Device pairing, a cookie-backed auth gate, and Devices management are implemented in Phase 5. Dev-token injection remains for explicit testing.
 - Attention and Activity screens are later phases; the connection pill and provider warnings are the only global
   status surfaces.
-- Usage (`capabilities.usage`) is fetched by the API client but not yet rendered.
+- Phase 6.1 separates session consumption (`sessionUsage`) from account limits (`providerUsage`).
+  Projects has an account Usage sheet; sessions show compact reported consumption and a detail sheet.
+  Unavailable observations stay absent, and unsupported account limits are explained explicitly.
+- Projects shows Recent activity and configured folders using a Host summary instead of one session query per row.
+  Files is a complementary read-only surface with bounded source, sanitized Markdown, and authenticated raster previews.
 - Thinking shows "Thought process" rather than a duration: the protocol has no per-part reasoning timing.
 - Steer is an explicit secondary button beside Queue; the private client's press-and-hold gesture was not ported.
 - Diffs are read-only; there is no git command execution from the browser.

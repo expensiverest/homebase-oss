@@ -81,7 +81,7 @@ export async function createTestHost(options: TestHostOptions = {}): Promise<Tes
     git: fakeGitReader,
     eventBufferSize: options.eventBufferSize ?? 200,
     webDistPath: options.webDistPath ?? null,
-    ...(options.stateDir ? { stateDir: options.stateDir } : {}),
+    stateDir: options.stateDir ?? path.join(rootDir, ".homebase-test-state"),
     logger: createConsoleLogger("host-test", { level: "error", sink: silentSink }),
   });
 

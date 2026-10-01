@@ -70,9 +70,54 @@ describe("Claude adapter against the fake CLI", () => {
     expect(JSON.stringify(history.items)).toContain("fake reply to: hello there");
     expect(history.items.every((message) => message.sessionId === session.id)).toBe(true);
 
+    const usage = await adapter.getSessionUsage(session.id);
+    expect(usage).toMatchObject({
+      provider: "claude",
+      sessionId: session.id,
+      tokens: {
+        inputTokens: 10,
+        outputTokens: 7,
+        reasoningTokens: 2,
+        cacheReadTokens: 3,
+        cacheWriteTokens: 2,
+        totalTokens: 17,
+      },
+    });
+    const terminal = context.events.find((event) => event.type === "turn.completed");
+    expect(terminal?.data).toMatchObject({ usage: { tokens: { totalTokens: 17 } } });
+    expect(await adapter.getProviderUsage()).toMatchObject({
+      windows: [
+        { id: "five_hour", usedPercent: 21, resetsAt: new Date(4_000_000_000_000).toISOString() },
+        { id: "seven_day", usedPercent: 42 },
+      ],
+    });
+
     const listed = await adapter.listSessions(project, { limit: 10 });
     expect(listed.items.some((entry) => entry.id === session.id)).toBe(true);
     await adapter.dispose();
+  });
+
+  it("drops expired quota observations instead of inventing fresh zero utilization", async () => {
+    const { adapter, configDir } = createFakeAdapter();
+    const context = createTestAdapterContext({ projectPath: projectDir, projectId: project.id });
+    adapter.init(context);
+    try {
+      const session = await adapter.createSession({ provider: "claude", projectId: project.id }, project);
+      await adapter.send(session.id, { text: "usage fixture" });
+      await context.waitForEvent("turn.completed");
+      const reported = await adapter.getProviderUsage();
+      expect(reported?.windows).toHaveLength(2);
+      const original = Date.now;
+      try {
+        Date.now = () => 4_000_000_000_001;
+        expect(await adapter.getProviderUsage()).toMatchObject({ windows: [], fetchedAt: reported?.fetchedAt });
+      } finally {
+        Date.now = original;
+      }
+    } finally {
+      await adapter.dispose();
+      rmSync(configDir, { recursive: true, force: true });
+    }
   });
 
   it("interrupts a slow run and keeps the session resumable", async () => {

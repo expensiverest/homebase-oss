@@ -94,14 +94,14 @@ function appendTranscript(entry) {
   }
 }
 
-function runTurn(text, delayMs) {
+function runTurn(text, delayMs, userUuid = randomUUID()) {
   runningTurn = true;
   interrupted = false;
   const messageId = `msg_${Math.random().toString(36).slice(2, 10)}`;
   const timestamp = new Date().toISOString();
   appendTranscript({
     type: "user",
-    uuid: randomUUID(),
+    uuid: userUuid,
     sessionId,
     cwd,
     entrypoint: "sdk-cli",
@@ -146,7 +146,7 @@ function runTurn(text, delayMs) {
         id: messageId,
         model,
         content: [{ type: "text", text: reply }],
-        usage: { input_tokens: 5, output_tokens: 7 },
+        usage: { input_tokens: 5, output_tokens: 1, cache_read_input_tokens: 3, cache_creation_input_tokens: 2 },
       },
     });
     appendTranscript({
@@ -161,7 +161,7 @@ function runTurn(text, delayMs) {
         id: messageId,
         model,
         content: [{ type: "text", text: reply }],
-        usage: { input_tokens: 5, output_tokens: 7 },
+        usage: { input_tokens: 5, output_tokens: 1, cache_read_input_tokens: 3, cache_creation_input_tokens: 2 },
       },
     });
     runningTurn = false;
@@ -175,11 +175,17 @@ function runTurn(text, delayMs) {
       result: failed ? "simulated failure" : reply,
       num_turns: 1,
       total_cost_usd: 0,
-      usage: { input_tokens: 5, output_tokens: 7 },
+      usage: {
+        input_tokens: 5,
+        output_tokens: 7,
+        cache_read_input_tokens: 3,
+        cache_creation_input_tokens: 2,
+        output_tokens_details: { thinking_tokens: 2 },
+      },
       permission_denials: [],
     });
     const next = queued.shift();
-    if (next !== undefined) runTurn(next, delayMs);
+    if (next !== undefined) runTurn(next.text, delayMs, next.uuid);
   };
   setTimeout(tick, delayMs);
 }
@@ -217,7 +223,11 @@ lines.on("line", (line) => {
       }
       send({
         type: "control_response",
-        response: { subtype: "success", request_id: requestId, response: { still_queued: queued, cancelled: [] } },
+        response: {
+          subtype: "success",
+          request_id: requestId,
+          response: { still_queued: queued.map((entry) => entry.text), cancelled: [] },
+        },
       });
       return;
     }
@@ -266,11 +276,11 @@ lines.on("line", (line) => {
   if (message.type === "user") {
     const text = textOf(message);
     if (runningTurn) {
-      queued.push(text);
+      queued.push({ text, uuid: message.uuid });
       return;
     }
     const slow = text.includes("slow");
-    runTurn(text, slow ? 60 : 2);
+    runTurn(text, slow ? 60 : 2, message.uuid);
   }
 });
 
