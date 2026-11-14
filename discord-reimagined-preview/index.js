@@ -1,14 +1,14 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.7 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.8 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.7", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.8", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
-    showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, accounts: {} };
+    showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, blueprint: false, accounts: {} };
   const PALETTES = {
     blurple: { name: "Blurple", bg: "#17181f", surface: "#20222b", elevated: "#2b2d38", line: "#3a3d4b", ink: "#f2f3f8", muted: "#b0b4c4", faint: "#9296a9", accent: "#b4bcff", accentInk: "#1d2160", accentSoft: "#30346a", danger: "#f5a9b3", clear: "transparent", shade: "rgba(8,9,14,0.62)" },
     midnight: { name: "Midnight", bg: "#141918", surface: "#1c2320", elevated: "#27302b", line: "#39443d", ink: "#f0f2e9", muted: "#a8b5aa", faint: "#8a9b8e", accent: "#bdd7b7", accentInk: "#203323", accentSoft: "#2d3b2e", danger: "#f3b9ad", clear: "transparent", shade: "rgba(10,15,12,0.6)" },
@@ -326,9 +326,9 @@
     else if (action === "drawer-close") { state.drawer = false; emit(); }
     else if (action === "expand") { state = { ...state, drawer: false, tab: "servers", screen: "main", search: "", filter: "all" }; emit(); }
     else if (action === "pin") pin(value.kind, value.id, value.guildId);
-    else if (action === "setting") { api.storage[value.key] = value.value; if (value.key === "layout" && !value.value) presenter.dismiss(null, true); if (["palette", "nativePalette"].includes(value.key)) syncTheme(); if (value.key === "nativeSkin" || value.key === "nativeSkinRows") patchNativeSkin(); emit(); }
+    else if (action === "setting") { api.storage[value.key] = value.value; if (value.key === "layout" && !value.value) presenter.dismiss(null, true); if (["palette", "nativePalette"].includes(value.key)) syncTheme(); if (value.key === "nativeSkin" || value.key === "nativeSkinRows" || value.key === "blueprint") patchNativeSkin(); emit(); }
     else if (action === "media") push({ screen: "media", media: value });
-    else if (action === "report") copyReport();
+    else if (action === "report") copyReport(); else if (action === "blueprint") copyBlueprint();
     else if (action === "close") { presenter.dismiss(null, true); }
     else if (action === "restore") restoreOriginal();
     else if (action === "more") { state.limit += 60; emit(); }
@@ -539,7 +539,7 @@
       h(RN.View, { style: { flexDirection: "row", justifyContent: "space-between" } }, ...Object.entries(PALETTES).map(([id, p]) => h(Control, { key: id, id: "palette-" + id, label: p.name, action: "setting", value: { key: "palette", value: id }, selected: cfg("palette") === id, style: { flex: 1, marginRight: id === "slate" ? 0 : SPACE.sm, padding: SPACE.md, borderRadius: RAD.medium, borderWidth: cfg("palette") === id ? 2 : 1, borderColor: cfg("palette") === id ? c.accent : c.line, backgroundColor: p.bg } }, h(RN.View, { style: { flexDirection: "row", marginBottom: SPACE.sm } }, ...[p.surface, p.accent, p.ink].map((color, i) => h(RN.View, { key: i, style: { width: 16, height: 16, borderRadius: 8, marginRight: 3, backgroundColor: color } }))), t(p.name, { color: p.ink, fontSize: TYPE.small, fontWeight: "600" }, { numberOfLines: 1 })))),
       h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }), h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }),
       button(cfg("density") === "compact" ? "Comfortable" : "Compact", "setting", { key: "density", value: cfg("density") === "compact" ? "comfortable" : "compact" }, { marginTop: SPACE.lg }, "density"),
-      h(Section, { title: "Diagnostics" }), h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"),
+      h(Section, { title: "Diagnostics" }), h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"), h(Toggle, { name: "blueprint", label: "Record settings blueprint" }), button("Copy settings blueprint", "blueprint", null, { marginTop: SPACE.sm }, "copy-blueprint"),
       t(VERSION, { fontSize: TYPE.small, color: c.muted, marginTop: SPACE.xl }), health.issues.length ? t(health.issues.join("\n"), { color: c.danger, marginTop: SPACE.md, fontSize: TYPE.small }) : null); }
     function Profile(p) {
       const id = p.id || accountId, u = user(id) || (id === accountId ? me() : null), data = profileFor(id), own = id === accountId;
@@ -752,10 +752,52 @@
   function patch(raw, name, mode) { const target = safe(() => renderTarget(raw, name), null); if (!live || !target) return false; const [object, method] = target, seen = targets.get(object) || new Set(); if (seen.has(method)) return true;
     try { api.patcher.after(method, object, (_args, output) => { if (!live || output == null || !me() || (mode === "launcher" && health.hooks.YouBar === "patched")) return output; return h(DockHost, { original: output, mode }); }); seen.add(method); targets.set(object, seen); health.hooks[name] = "patched"; return true; } catch (_) { issue("hook-failed:" + name); return false; } }
   let SkinFrame;
+  const blueprint = { hub: null, routes: {}, samples: 0 };
+  const TEXTY = /title|label|text|children|description|subtitle|placeholder|accessibilityLabel/i;
+  function typeName(t) { return typeof t === "string" ? t : t?.displayName || t?.name || t?.type?.displayName || t?.type?.name || t?.render?.displayName || t?.render?.name || (t ? "anonymous" : "null"); }
+  function flat(style, out = {}, depth = 0) {
+    if (Array.isArray(style) && depth < 4) { style.forEach(x => flat(x, out, depth + 1)); return out; }
+    if (style && typeof style === "object") for (const k of Object.keys(style)) { const v = style[k]; if (typeof v === "number" || typeof v === "boolean" || (typeof v === "string" && v.length < 24)) out[k] = v; else if (v && typeof v === "object" && !Array.isArray(v) && v.constructor === Object) out[k] = "{" + Object.keys(v).slice(0, 6).join(",") + "}"; else if (Array.isArray(v)) out[k] = "[" + v.length + "]"; else out[k] = typeof v; }
+    return out;
+  }
+  function describe(node, depth, budget) {
+    if (node == null || typeof node === "boolean") return null;
+    if (typeof node === "string" || typeof node === "number") return "text(" + String(node).length + ")";
+    if (Array.isArray(node)) return node.slice(0, 8).map(x => describe(x, depth, budget)).filter(x => x != null);
+    if (typeof node !== "object" || !node.props && !node.type) return typeof node;
+    if (budget.n-- <= 0 || depth > 9) return "…";
+    const props = node.props || {}, p = {};
+    for (const k of Object.keys(props)) {
+      if (k === "children") continue;
+      const v = props[k];
+      if (k === "style" || /Style$/.test(k)) p[k] = flat(v);
+      else if (typeof v === "function") p[k] = "fn";
+      else if (typeof v === "string") p[k] = TEXTY.test(k) ? "text(" + v.length + ")" : v.slice(0, 24);
+      else if (typeof v === "number" || typeof v === "boolean") p[k] = v;
+      else if (v && typeof v === "object" && (v.type || v.props)) p[k] = describe(v, depth + 1, budget);
+      else p[k] = v == null ? null : Array.isArray(v) ? "[" + v.length + "]" : typeof v;
+    }
+    const out = { t: typeName(node.type), p };
+    const kids = props.children !== undefined ? describe(props.children, depth + 1, budget) : null;
+    if (kids != null && !(Array.isArray(kids) && !kids.length)) out.c = kids;
+    return out;
+  }
+  function record(name, args, output) {
+    const route = currentRouteName() || "unknown", bucket = blueprint.routes[route] || (blueprint.routes[route] = { TableRowGroup: [], TableRow: [] });
+    const list = bucket[name]; if (list.length >= (name === "TableRow" ? 5 : 3) || blueprint.samples > 400) return;
+    const sig = Object.keys(args?.[0] || {}).sort().join(",") + "|" + typeName(output?.type); if (list.some(x => x.sig === sig)) return;
+    blueprint.samples++;
+    list.push({ sig, props: describe({ type: name, props: { ...(args?.[0] || {}), children: undefined } }, 0, { n: 20 })?.p, output: describe(output, 0, { n: 60 }) });
+  }
+  function copyBlueprint() {
+    const c = safe(() => unwrap(api.common.clipboard), null), hub = mod("TableRowGroup", "TableRow");
+    const data = { product: "Discord: Reimagined", version: VERSION, kind: "settings-blueprint", hubExports: hub ? Object.keys(hub).slice(0, 120) : null, route: currentRouteName(), routes: blueprint.routes, patched: { group: health.hooks.NativeSkinTableRowGroup, row: health.hooks.NativeSkinTableRow } };
+    if (c?.setString) { c.setString(JSON.stringify(data)); toast("Settings blueprint copied"); }
+  }
   function patchNativeSkin() {
     if (!live) return;
     const pass = (name, flag, wrap) => {
-      if (!cfg(flag)) return;
+      if (!cfg(flag) && !cfg("blueprint")) return;
       const hubs = [mod("TableRowGroup", "TableRow"), ...(safe(() => api.metro.findByPropsAll(name), []) || [])].map(unwrap).filter(Boolean);
       let patched = 0;
       for (const hub of new Set(hubs)) {
@@ -764,7 +806,7 @@
         const [object, method] = target, seen = targets.get(object) || new Set();
         if (seen.has("skin:" + name)) { patched++; continue; }
         try {
-          api.patcher.after(method, object, (_args, output) => (!live || !cfg(flag) || output == null) ? output : safe(() => wrap(output), output));
+          api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint") && output != null) safe(() => record(name, _args, output)); return (!live || !cfg(flag) || output == null) ? output : safe(() => wrap(output), output); });
           seen.add("skin:" + name); targets.set(object, seen); patched++;
         } catch (_) { issue("hook-failed:NativeSkin" + name); }
       }

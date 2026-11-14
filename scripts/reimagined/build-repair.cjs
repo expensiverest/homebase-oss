@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.7');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.8');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -241,7 +241,7 @@ swap('  function present(tab) {\n    if (!live || !me()) return;', '  function p
 swap('  function restoreOriginal() {\n    api.storage.layout = false;', '  function restoreOriginal() {\n    stopReturnWatch(); api.storage.layout = false;');
 swap('async function stop() { presenter?.stop();', 'async function stop() { stopReturnWatch(); presenter?.stop();');
 // Native skin (beta): restyle Discord's own settings lists in place by patching the design-system TableRowGroup. Off by default; any failure turns it off.
-swap('showPreviews: true, grid: true, accounts: {} };', 'showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, accounts: {} };');
+swap('showPreviews: true, grid: true, accounts: {} };', 'showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, blueprint: false, accounts: {} };');
 swap('h(Toggle, { name: "layout", label: "Navigation dock" }),', 'h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }), h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }),');
 swap('if (["palette", "nativePalette"].includes(value.key)) syncTheme();', 'if (["palette", "nativePalette"].includes(value.key)) syncTheme(); if (value.key === "nativeSkin" || value.key === "nativeSkinRows") patchNativeSkin();');
 swap('    Boundary = class extends React.Component {', `    SkinFrame = class extends React.Component {
@@ -258,7 +258,7 @@ swap('  function scan() {', `  let SkinFrame;
   function patchNativeSkin() {
     if (!live) return;
     const pass = (name, flag, wrap) => {
-      if (!cfg(flag)) return;
+      if (!cfg(flag) && !cfg("blueprint")) return;
       const hubs = [mod("TableRowGroup", "TableRow"), ...(safe(() => api.metro.findByPropsAll(name), []) || [])].map(unwrap).filter(Boolean);
       let patched = 0;
       for (const hub of new Set(hubs)) {
@@ -267,7 +267,7 @@ swap('  function scan() {', `  let SkinFrame;
         const [object, method] = target, seen = targets.get(object) || new Set();
         if (seen.has("skin:" + name)) { patched++; continue; }
         try {
-          api.patcher.after(method, object, (_args, output) => (!live || !cfg(flag) || output == null) ? output : safe(() => wrap(output), output));
+          api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint") && output != null) safe(() => record(name, _args, output)); return (!live || !cfg(flag) || output == null) ? output : safe(() => wrap(output), output); });
           seen.add("skin:" + name); targets.set(object, seen); patched++;
         } catch (_) { issue("hook-failed:NativeSkin" + name); }
       }
@@ -278,15 +278,62 @@ swap('  function scan() {', `  let SkinFrame;
   }
   function scan() {`);
 swap('    scan(); syncTheme();', '    scan(); syncTheme(); patchNativeSkin();');
+// Settings blueprint: records a compact structural sample (component names, prop keys, numeric styles; text lengths only) of the native rows and groups so the skin can be designed from real data.
+swap('h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"),', 'h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"), h(Toggle, { name: "blueprint", label: "Record settings blueprint" }), button("Copy settings blueprint", "blueprint", null, { marginTop: SPACE.sm }, "copy-blueprint"),');
+swap('else if (action === "report") copyReport();', 'else if (action === "report") copyReport(); else if (action === "blueprint") copyBlueprint();');
+swap('if (value.key === "nativeSkin" || value.key === "nativeSkinRows") patchNativeSkin();', 'if (value.key === "nativeSkin" || value.key === "nativeSkinRows" || value.key === "blueprint") patchNativeSkin();');
+swap('  let SkinFrame;', `  let SkinFrame;
+  const blueprint = { hub: null, routes: {}, samples: 0 };
+  const TEXTY = /title|label|text|children|description|subtitle|placeholder|accessibilityLabel/i;
+  function typeName(t) { return typeof t === "string" ? t : t?.displayName || t?.name || t?.type?.displayName || t?.type?.name || t?.render?.displayName || t?.render?.name || (t ? "anonymous" : "null"); }
+  function flat(style, out = {}, depth = 0) {
+    if (Array.isArray(style) && depth < 4) { style.forEach(x => flat(x, out, depth + 1)); return out; }
+    if (style && typeof style === "object") for (const k of Object.keys(style)) { const v = style[k]; if (typeof v === "number" || typeof v === "boolean" || (typeof v === "string" && v.length < 24)) out[k] = v; else if (v && typeof v === "object" && !Array.isArray(v) && v.constructor === Object) out[k] = "{" + Object.keys(v).slice(0, 6).join(",") + "}"; else if (Array.isArray(v)) out[k] = "[" + v.length + "]"; else out[k] = typeof v; }
+    return out;
+  }
+  function describe(node, depth, budget) {
+    if (node == null || typeof node === "boolean") return null;
+    if (typeof node === "string" || typeof node === "number") return "text(" + String(node).length + ")";
+    if (Array.isArray(node)) return node.slice(0, 8).map(x => describe(x, depth, budget)).filter(x => x != null);
+    if (typeof node !== "object" || !node.props && !node.type) return typeof node;
+    if (budget.n-- <= 0 || depth > 9) return "…";
+    const props = node.props || {}, p = {};
+    for (const k of Object.keys(props)) {
+      if (k === "children") continue;
+      const v = props[k];
+      if (k === "style" || /Style$/.test(k)) p[k] = flat(v);
+      else if (typeof v === "function") p[k] = "fn";
+      else if (typeof v === "string") p[k] = TEXTY.test(k) ? "text(" + v.length + ")" : v.slice(0, 24);
+      else if (typeof v === "number" || typeof v === "boolean") p[k] = v;
+      else if (v && typeof v === "object" && (v.type || v.props)) p[k] = describe(v, depth + 1, budget);
+      else p[k] = v == null ? null : Array.isArray(v) ? "[" + v.length + "]" : typeof v;
+    }
+    const out = { t: typeName(node.type), p };
+    const kids = props.children !== undefined ? describe(props.children, depth + 1, budget) : null;
+    if (kids != null && !(Array.isArray(kids) && !kids.length)) out.c = kids;
+    return out;
+  }
+  function record(name, args, output) {
+    const route = currentRouteName() || "unknown", bucket = blueprint.routes[route] || (blueprint.routes[route] = { TableRowGroup: [], TableRow: [] });
+    const list = bucket[name]; if (list.length >= (name === "TableRow" ? 5 : 3) || blueprint.samples > 400) return;
+    const sig = Object.keys(args?.[0] || {}).sort().join(",") + "|" + typeName(output?.type); if (list.some(x => x.sig === sig)) return;
+    blueprint.samples++;
+    list.push({ sig, props: describe({ type: name, props: { ...(args?.[0] || {}), children: undefined } }, 0, { n: 20 })?.p, output: describe(output, 0, { n: 60 }) });
+  }
+  function copyBlueprint() {
+    const c = safe(() => unwrap(api.common.clipboard), null), hub = mod("TableRowGroup", "TableRow");
+    const data = { product: "Discord: Reimagined", version: VERSION, kind: "settings-blueprint", hubExports: hub ? Object.keys(hub).slice(0, 120) : null, route: currentRouteName(), routes: blueprint.routes, patched: { group: health.hooks.NativeSkinTableRowGroup, row: health.hooks.NativeSkinTableRow } };
+    if (c?.setString) { c.setString(JSON.stringify(data)); toast("Settings blueprint copied"); }
+  }`);
 fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.7',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.8',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.7
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.8
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -324,7 +371,7 @@ When Reimagined hands off to a Discord screen (a forum, Settings under the fallb
 
 ## Native skin (beta)
 
-Appearance > Restyle Discord settings (beta) restyles Discord's own settings lists in place (a fade-and-rise entrance; Discord's own card styling is left untouched) by patching the design-system TableRowGroup. It is off by default, needs no tweak, and switches itself off if a restyled list fails to render. Appearance > Roomier settings rows (beta) separately gives each TableRow more height. Check the compatibility report for NativeSkinTableRowGroup and NativeSkinTableRow.
+Appearance > Restyle Discord settings (beta) restyles Discord's own settings lists in place (a fade-and-rise entrance; Discord's own card styling is left untouched) by patching the design-system TableRowGroup. It is off by default, needs no tweak, and switches itself off if a restyled list fails to render. Appearance > Roomier settings rows (beta) separately gives each TableRow more height. Appearance > Record settings blueprint, then Copy settings blueprint, captures a text-free structural sample (component names, prop keys, numeric styles) of the rows and groups on each screen you visit so the skin can be designed from real data. Check the compatibility report for NativeSkinTableRowGroup and NativeSkinTableRow.
 
 ## Validation
 
@@ -332,4 +379,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.7', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.8', sourceSHA256: digest(code), output: out }));
