@@ -1,14 +1,14 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.6 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.7 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.6", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.7", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
-    showPreviews: true, grid: true, nativeSkin: false, accounts: {} };
+    showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, accounts: {} };
   const PALETTES = {
     blurple: { name: "Blurple", bg: "#17181f", surface: "#20222b", elevated: "#2b2d38", line: "#3a3d4b", ink: "#f2f3f8", muted: "#b0b4c4", faint: "#9296a9", accent: "#b4bcff", accentInk: "#1d2160", accentSoft: "#30346a", danger: "#f5a9b3", clear: "transparent", shade: "rgba(8,9,14,0.62)" },
     midnight: { name: "Midnight", bg: "#141918", surface: "#1c2320", elevated: "#27302b", line: "#39443d", ink: "#f0f2e9", muted: "#a8b5aa", faint: "#8a9b8e", accent: "#bdd7b7", accentInk: "#203323", accentSoft: "#2d3b2e", danger: "#f3b9ad", clear: "transparent", shade: "rgba(10,15,12,0.6)" },
@@ -326,7 +326,7 @@
     else if (action === "drawer-close") { state.drawer = false; emit(); }
     else if (action === "expand") { state = { ...state, drawer: false, tab: "servers", screen: "main", search: "", filter: "all" }; emit(); }
     else if (action === "pin") pin(value.kind, value.id, value.guildId);
-    else if (action === "setting") { api.storage[value.key] = value.value; if (value.key === "layout" && !value.value) presenter.dismiss(null, true); if (["palette", "nativePalette"].includes(value.key)) syncTheme(); if (value.key === "nativeSkin") patchNativeSkin(); emit(); }
+    else if (action === "setting") { api.storage[value.key] = value.value; if (value.key === "layout" && !value.value) presenter.dismiss(null, true); if (["palette", "nativePalette"].includes(value.key)) syncTheme(); if (value.key === "nativeSkin" || value.key === "nativeSkinRows") patchNativeSkin(); emit(); }
     else if (action === "media") push({ screen: "media", media: value });
     else if (action === "report") copyReport();
     else if (action === "close") { presenter.dismiss(null, true); }
@@ -537,7 +537,7 @@
     function Toggle(p) { return h(RN.View, { style: { flexDirection: "row", alignItems: "center", paddingVertical: SPACE.md, borderBottomWidth: 1, borderBottomColor: colors().line } }, t(p.label, { flex: 1, minWidth: 0, paddingRight: SPACE.lg, fontWeight: "500" }), h(RN.Switch, { testID: "setting-" + p.name, accessibilityLabel: p.label, value: !!cfg(p.name), trackColor: { false: colors().line, true: colors().accent }, thumbColor: colors().surface, onValueChange: value => send("setting", { key: p.name, value: !!value }) })); }
     function Preferences() { const c = colors(); return h(Page, { title: "Appearance", back: true },
       h(RN.View, { style: { flexDirection: "row", justifyContent: "space-between" } }, ...Object.entries(PALETTES).map(([id, p]) => h(Control, { key: id, id: "palette-" + id, label: p.name, action: "setting", value: { key: "palette", value: id }, selected: cfg("palette") === id, style: { flex: 1, marginRight: id === "slate" ? 0 : SPACE.sm, padding: SPACE.md, borderRadius: RAD.medium, borderWidth: cfg("palette") === id ? 2 : 1, borderColor: cfg("palette") === id ? c.accent : c.line, backgroundColor: p.bg } }, h(RN.View, { style: { flexDirection: "row", marginBottom: SPACE.sm } }, ...[p.surface, p.accent, p.ink].map((color, i) => h(RN.View, { key: i, style: { width: 16, height: 16, borderRadius: 8, marginRight: 3, backgroundColor: color } }))), t(p.name, { color: p.ink, fontSize: TYPE.small, fontWeight: "600" }, { numberOfLines: 1 })))),
-      h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }),
+      h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }), h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }),
       button(cfg("density") === "compact" ? "Comfortable" : "Compact", "setting", { key: "density", value: cfg("density") === "compact" ? "comfortable" : "compact" }, { marginTop: SPACE.lg }, "density"),
       h(Section, { title: "Diagnostics" }), h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"),
       t(VERSION, { fontSize: TYPE.small, color: c.muted, marginTop: SPACE.xl }), health.issues.length ? t(health.issues.join("\n"), { color: c.danger, marginTop: SPACE.md, fontSize: TYPE.small }) : null); }
@@ -753,21 +753,25 @@
     try { api.patcher.after(method, object, (_args, output) => { if (!live || output == null || !me() || (mode === "launcher" && health.hooks.YouBar === "patched")) return output; return h(DockHost, { original: output, mode }); }); seen.add(method); targets.set(object, seen); health.hooks[name] = "patched"; return true; } catch (_) { issue("hook-failed:" + name); return false; } }
   let SkinFrame;
   function patchNativeSkin() {
-    if (!live || !cfg("nativeSkin")) return;
-    const hubs = [mod("TableRowGroup", "TableRow"), ...(safe(() => api.metro.findByPropsAll("TableRowGroup"), []) || [])].map(unwrap).filter(Boolean);
-    let patched = 0;
-    for (const hub of new Set(hubs)) {
-      const target = safe(() => renderTarget(hub, "TableRowGroup"), null);
-      if (!target) continue;
-      const [object, method] = target, seen = targets.get(object) || new Set();
-      if (seen.has("skin:" + method)) { patched++; continue; }
-      try {
-        api.patcher.after(method, object, (_args, output) => (!live || !cfg("nativeSkin") || output == null || !SkinFrame) ? output : h(SkinFrame, null, output));
-        seen.add("skin:" + method); targets.set(object, seen); patched++;
-      } catch (_) { issue("hook-failed:NativeSkinGroup"); }
-    }
-    if (!patched) { health.hooks.NativeSkinGroup = hubs.length ? "no patchable group" : "not found"; return; }
-    health.hooks.NativeSkinGroup = "patched x" + patched;
+    if (!live) return;
+    const pass = (name, flag, wrap) => {
+      if (!cfg(flag)) return;
+      const hubs = [mod("TableRowGroup", "TableRow"), ...(safe(() => api.metro.findByPropsAll(name), []) || [])].map(unwrap).filter(Boolean);
+      let patched = 0;
+      for (const hub of new Set(hubs)) {
+        const target = safe(() => renderTarget(hub, name), null);
+        if (!target) continue;
+        const [object, method] = target, seen = targets.get(object) || new Set();
+        if (seen.has("skin:" + name)) { patched++; continue; }
+        try {
+          api.patcher.after(method, object, (_args, output) => (!live || !cfg(flag) || output == null) ? output : safe(() => wrap(output), output));
+          seen.add("skin:" + name); targets.set(object, seen); patched++;
+        } catch (_) { issue("hook-failed:NativeSkin" + name); }
+      }
+      health.hooks["NativeSkin" + name] = patched ? "patched x" + patched : hubs.length ? "no patchable " + name : "not found";
+    };
+    pass("TableRowGroup", "nativeSkin", output => SkinFrame ? h(SkinFrame, null, output) : output);
+    pass("TableRow", "nativeSkinRows", output => React.isValidElement(output) ? React.cloneElement(output, { style: [output.props.style, { minHeight: 60, paddingVertical: SPACE.xs }] }) : output);
   }
   function scan() { [["YouBar", "dock"], ["YouBarNotificationsButton", "launcher"]].forEach(([name, mode]) => { if (health.hooks[name] === "patched") return; const raw = safe(() => api.metro.findByFileName(name, false), null) || safe(() => api.metro.findByTypeName(name, false), null); if (!patch(raw, name, mode)) health.hooks[name] = "settings entry required"; }); }
   function start(pluginApi) {
