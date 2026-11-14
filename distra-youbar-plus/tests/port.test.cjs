@@ -108,21 +108,14 @@ test('patches a loaded YouBar once, preserves Notifications and exposes DM / Set
 
   const { target, callback } = model.patches[0];
   const render = callback([{}], target.type);
-  const containers = render.props.children;
-  assert.equal(containers.length, 4);
-  assert.equal(containers[3].type, 'Container');
-  const dm = containers[0].props.children;
-  const settings = containers[1].props.children;
-  const favorites = containers[2].props.children;
-  assert.equal(Object.hasOwn(containers[0].props, 'onPress'), false);
-  assert.equal(Object.hasOwn(containers[1].props, 'onPress'), false);
-  assert.equal(Object.hasOwn(containers[2].props, 'onPress'), false);
-  assert.equal(containers[3].props.testOriginal, true);
-  assert.equal(dm.props.accessibilityLabel, 'Direct Messages');
-  assert.equal(settings.props.accessibilityLabel, 'Settings');
-  assert.equal(favorites.props.accessibilityLabel, 'Favorites');
-  dm.props.onPress();
-  settings.props.onPress();
+  const controls = render.props.children;
+  assert.equal(controls.length, 4);
+  assert.equal(controls[3].type, 'Container');
+  assert.deepEqual(controls.slice(0, 3).map(c => c.type), ['Pressable','Pressable','Pressable']);
+  assert.deepEqual(controls.slice(0, 3).map(c => c.props.accessibilityLabel), ['Direct Messages','Settings','Favorites']);
+  assert.equal(controls[3].props.testOriginal, true);
+  controls[0].props.onPress();
+  controls[1].props.onPress();
   assert.deepEqual(model.navigation, ['@me', 'settings']);
   model.plugin.stop();
 });
@@ -144,12 +137,12 @@ test('settings switches immediately affect rendered shortcuts', () => {
   model.plugin.start(model.api);
   const settingsPage = model.plugin.SettingsComponent();
   const switches = flatten(settingsPage).filter(node => typeName(node) === 'TableSwitchRow');
-  assert.equal(switches.length, 3);
+  assert.equal(switches.length, 4);
   switches.find(x => x.props.label === 'Favorites').props.onValueChange(true);
   switches.find(x => x.props.label === 'Direct Messages').props.onValueChange(false);
   const { target, callback } = model.patches[0];
   const tree = callback([{}], target.type);
-  const buttons = flatten(tree).filter(x => x.type === 'IconButton');
+  const buttons = flatten(tree).filter(x => x.type === 'Pressable');
   assert.deepEqual(buttons.map(x => x.props.accessibilityLabel).filter(Boolean), ['Settings', 'Favorites']);
   buttons.find(x => x.props.accessibilityLabel === 'Favorites').props.onPress();
   assert.equal(model.navigation.at(-1), '@favorites');
@@ -199,9 +192,9 @@ test('settings resolves memo components without callable lazy wrappers', () => {
   model.plugin.start(model.api);
   const page = model.plugin.SettingsComponent();
   const rows = flatten(page).filter(x => typeName(x) === 'TableRowGroup');
-  assert.equal(rows.length, 2);
+  assert.equal(rows.length, 3);
   assert.equal(rows[0].type.$$typeof, Symbol.for('react.memo'));
-  assert.equal(flatten(page).filter(x => typeName(x) === 'TableSwitchRow').length, 3);
+  assert.equal(flatten(page).filter(x => typeName(x) === 'TableSwitchRow').length, 4);
   model.plugin.stop();
 });
 
@@ -210,22 +203,32 @@ test('settings uses safe React Native fallback when design components are missin
   model.plugin.start(model.api);
   const page = model.plugin.SettingsComponent();
   const switches = flatten(page).filter(x => x.type === 'Switch');
-  assert.equal(switches.length, 3);
+  assert.equal(switches.length, 4);
   switches.find(x => x.props.accessibilityLabel === 'Settings').props.onValueChange(false);
   assert.equal(model.settings.showSettingsButton, false);
   model.plugin.stop();
 });
 
-test('new button containers never inherit original pointer handlers', () => {
+test('independent 40px Pressables block child hit testing and never reuse original wrapper', () => {
   const model = mockClient(notificationComponent());
   model.plugin.start(model.api);
   const { target, callback } = model.patches[0];
   const tree = callback([{}], target.type);
-  for (const container of tree.props.children.slice(0,-1)) {
-    assert.deepEqual(Object.keys(container.props).sort(), ['children','key']);
-    assert.equal(typeof container.props.children.props.onPress, 'function');
+  const buttons = tree.props.children.slice(0, -1);
+  for (const button of buttons) {
+    assert.equal(button.type, 'Pressable');
+    assert.equal(button.props.style.width, 40);
+    assert.equal(button.props.style.minWidth, 40);
+    assert.equal(button.props.style.height, 40);
+    assert.equal(button.props.style.overflow, 'hidden');
+    assert.equal(button.props.hitSlop, 0);
+    assert.equal(button.props.children.type, 'View');
+    assert.equal(button.props.children.props.pointerEvents, 'none');
+    assert.equal(button.props.children.props.children.type, 'IconButton');
+    assert.equal(typeof button.props.onPress, 'function');
+    assert.equal(typeof button.props.children.props.children.props.onPress, 'function');
   }
-  assert.equal(typeof tree.props.children.at(-1).props.onPress, 'function');
+  assert.ok(tree.props.children.at(-1).props.onPress);
   model.plugin.stop();
 });
 
@@ -234,8 +237,54 @@ test('all three shortcuts reach distinct destinations', () => {
   model.plugin.start(model.api);
   const { target, callback } = model.patches[0];
   const tree = callback([{}], target.type);
-  const extra = tree.props.children.slice(0,-1).map(x => x.props.children);
+  const extra = tree.props.children.slice(0,-1);
   extra.forEach(x => x.props.onPress());
   assert.deepEqual(model.navigation, ['@me','settings','@favorites']);
+  model.plugin.stop();
+});
+
+test('diagnostic mode identifies actual button hit without navigating', () => {
+  const model = mockClient(notificationComponent());
+  model.plugin.start(model.api);
+  const settings = model.plugin.SettingsComponent();
+  const toggle = flatten(settings).find(node => typeName(node) === 'TableSwitchRow' && node.props.label === 'Tap diagnostics (no navigation)');
+  assert.ok(toggle);
+  toggle.props.onValueChange(true);
+  const { target, callback } = model.patches[0];
+  const buttons = callback([{}], target.type).props.children.slice(0, -1);
+  for (const button of buttons) button.props.onPress();
+  assert.deepEqual(model.navigation, []);
+  assert.deepEqual(model.toasts, [
+    'YouBar+ tapped: Direct Messages', 'YouBar+ tapped: Settings', 'YouBar+ tapped: Favorites',
+  ]);
+  model.plugin.stop();
+});
+
+test('each simulated 40px hit box maps to one button (no shared native wrapper)', () => {
+  const model = mockClient(notificationComponent());
+  model.plugin.start(model.api);
+  const { target, callback } = model.patches[0];
+  const items = callback([{}], target.type).props.children.slice(0, -1);
+  const clicks = [20, 60, 100];
+  for (const x of clicks) {
+    const idx = Math.floor(x / 40);
+    assert.equal(x >= idx * 40 && x < idx * 40 + items[idx].props.style.width, true);
+    items[idx].props.onPress();
+  }
+  assert.deepEqual(model.navigation, ['@me', 'settings', '@favorites']);
+  model.plugin.stop();
+});
+
+test('enabling and disabling tap diagnostics preserves configured shortcuts', () => {
+  const settings = { showDMButton: true, showSettingsButton: true, showFavoritesButton: false, __youbarPortV2Migration: true };
+  const model = mockClient(notificationComponent(), settings);
+  model.plugin.start(model.api);
+  assert.equal(settings.diagnostics, false);
+  const settingsPage = model.plugin.SettingsComponent();
+  const toggle = flatten(settingsPage).find(node => typeName(node) === 'TableSwitchRow' && node.props.label === 'Tap diagnostics (no navigation)');
+  toggle.props.onValueChange(true);
+  toggle.props.onValueChange(false);
+  assert.equal(settings.showFavoritesButton, false);
+  assert.equal(settings.diagnostics, false);
   model.plugin.stop();
 });
