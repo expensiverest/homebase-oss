@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.27');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.28');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -403,9 +403,17 @@ swap('  let SkinFrame;', `  let SkinFrame;
   // Walks the mounted React tree from a class instance we own (its _reactInternals is a fiber) and copies an indented outline of composite components, so native screens can be targeted without guessing.
   let treeHost = null;
   function copyTree() {
-    const c = safe(() => unwrap(api.common.clipboard), null), start = treeHost && (treeHost._reactInternals || treeHost._reactInternalFiber);
-    if (!start) { toast("Tree unavailable: no mounted dock"); return; }
-    let root = start; while (root.return) root = root.return;
+    const c = safe(() => unwrap(api.common.clipboard), null);
+    // Hosts that were unmounted keep a detached fiber, so only accept one that climbs to a HostRoot, then read its current tree.
+    let root = null;
+    for (const host of [...presentationHosts, treeHost]) {
+      for (let f of [host?._reactInternals || host?._reactInternalFiber, host?._reactInternals?.alternate]) {
+        let top = f; while (top?.return) top = top.return;
+        if (top && top.tag === 3) { root = top.stateNode?.current || top; break; }
+      }
+      if (root) break;
+    }
+    if (!root) { toast("Tree unavailable: no mounted dock"); return; }
     const nameOf = f => { const t = f.type; if (!t || typeof t === "string") return null; if (f.tag === 5 || f.tag === 6) return null; const n = t.displayName || t.name || t.render?.displayName || t.render?.name || t.type?.displayName || t.type?.name; return (f.tag === 14 || f.tag === 15 ? "memo:" : f.tag === 11 ? "fwd:" : "") + (n || "anonymous"); };
     const lines = [], stack = [[root, 0]]; let count = 0;
     while (stack.length && lines.length < 3500) {
@@ -576,11 +584,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.27',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.28',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.27
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.28
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -626,4 +634,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.27', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.28', sourceSHA256: digest(code), output: out }));
