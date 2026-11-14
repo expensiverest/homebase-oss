@@ -120,6 +120,21 @@ test('Restore Discord stays accessible and disables automatic replacement', asyn
   const f = fixture({ noRoute: true }); f.launch(); const scene = f.mountModalScene(); f.press(find(scene.render(), 'restore-discord'));
   assert.equal(f.api.storage.layout, false); assert.equal(f.modal().props.visible, false); assert.equal(f.host.render().props.children[0], f.original); await f.stop();
 });
+test('after Restore Discord a launcher returns to Reimagined', async () => {
+  const f = fixture({ noRoute: true }); f.launch(); const scene = f.mountModalScene(); f.press(find(scene.render(), 'restore-discord'));
+  assert.equal(find(f.host.render(), 'reimagined-launcher'), undefined);
+  f.press(find(f.host.render(), 'reimagined-return'));
+  assert.equal(f.api.storage.layout, true); assert.equal(f.modal().props.visible, true); await f.stop();
+});
+test('Home renders the glance summary and the Mentions filter exists', async () => {
+  const f = fixture({ noRoute: true }); f.launch(); const scene = f.mountModalScene();
+  assert.ok(controlInScene(scene, 'search'));
+  const glance = [];
+  (function visit(el, d = 0) { if (!el || d > 30) return; if (Array.isArray(el)) return el.forEach(x => visit(x, d)); if (typeof el !== 'object') { if (el === 'All caught up') glance.push(el); return; }
+    if (typeof el.type === 'function') visit(el.type.prototype?.render ? new el.type(el.props).render() : el.type(el.props), d + 1); else visit(el.props?.children, d + 1); })(scene.render());
+  assert.equal(glance.length, 1);
+  f.press(controlInScene(scene, 'tab-messages')); assert.ok(controlInScene(scene, 'filter-mentions')); await f.stop();
+});
 test('teardown preserves the original component rather than leaving a dead custom dock', async () => {
   const f = fixture(); f.launch(); await f.stop(); assert.equal(f.host.render(), f.original); f.advance(5000); assert.equal(f.plugin.diagnostics().presentation.mode, 'stopped');
 });
