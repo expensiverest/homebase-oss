@@ -38,7 +38,7 @@ function fixture(options = {}) {
     storage: { startHome: !!options.autoStart, nativePalette: false, nativeSkin: !!options.hub, nativeSkinRows: !!options.rows, blueprint: !!options.blueprint, nativeScreens: !!options.screens, accounts: {} },
     common: { React, ReactNative: RN, tabsNavigationRef: { getRootNavigationRef: () => options.noRoot ? null : nav }, NavigationNative: { useNavigation: () => scoped }, constants: { Permissions: {} } },
     metro: { findByStoreName: name => stores[name] || {}, findByProps: (...keys) => keys[0] === 'TableRowGroup' ? options.hub : keys[0] === 'openUserSettings' && !options.noSettingsAction ? { openUserSettings: () => settingsOpened++ } : undefined,
-      findByFileName: name => name === 'YouBar' ? target : null, findByTypeName: () => null },
+      findByFilePath: file => options.files?.[file], findByFileName: name => name === 'YouBar' ? target : null, findByTypeName: () => null },
     patcher: { after(method, object, cb) { const orig = object[method]; object[method] = (...args) => cb(args, orig(...args)); cleanups.push(() => object[method] = orig); }, before(method, object, cb) { const orig = object[method]; object[method] = (...args) => { const r = cb(args); return orig(...(r || args)); }; cleanups.push(() => object[method] = orig); } },
     logger: { warn: s => issues.push(s) }, toasts: { showToast() {} }
   };
@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.29');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.30');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -186,6 +186,19 @@ test('native screens wrap conversation rows in cards by props and fail open', as
   assert.equal(create(Row, { channelId: '1', extra: 1 }).type, Row);
   assert.equal(create(Row, { channelId: '1', __reimaginedRaw: true }).type, Row);
   f.api.storage.nativeScreens = false; assert.equal(create(Row, { channelId: '1' }).type, Row); await f.stop();
+});
+test('native screen modules are re-laid out in place and fail open', async () => {
+  const out = { type: 'native-out' };
+  const mk = () => ({ default: () => out });
+  const files = { 'modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx': mk(), 'modules/main_tabs_v2/native/tabs/you/YouScreen.tsx': mk() };
+  const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} }, screens: true, files });
+  await f.advance(2000);
+  const hooks = f.plugin.diagnostics().hooks;
+  assert.equal(hooks.NativeHome, 'not found');
+  assert.ok(/patched|layout/.test(hooks.NativeNotifications) && /patched|layout/.test(hooks.NativeYou));
+  const res = files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default();
+  assert.notEqual(res, out); assert.equal(res.props.route.name, 'you'); assert.equal(res.props.__out, out);
+  f.api.storage.nativeScreens = false; assert.equal(files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default(), out); await f.stop();
 });
 test('app tour visits declared routes, skips risky ones and returns', async () => {
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} } });

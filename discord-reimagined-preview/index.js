@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.29 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.30 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.29", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.30", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
@@ -1021,6 +1021,27 @@
     const data = { product: "Discord: Reimagined", version: VERSION, kind: "settings-blueprint", hubExports: hub ? Object.keys(hub).slice(0, 120) : null, route: currentRouteName(), routes: blueprint.routes, census: blueprint.census, screens: blueprint.screens, screenRoots: blueprint.screenRoots, tabBars: blueprint.tabBars, tour: blueprint.tour, search: blueprint.search, searchProbes: blueprint.probes, hubSearchExports: blueprint.hubSearch, patched: { group: health.hooks.NativeSkinTableRowGroup, row: health.hooks.NativeSkinTableRow } };
     if (c?.setString) { c.setString(JSON.stringify(data)); toast("Settings blueprint copied"); }
   }
+  // Rewrites the native screen components themselves (found by Discord's module file paths, which survive minification) so the Reimagined layout renders in place of their output, inside the native navigator and header.
+  const LAYOUT_TARGETS = [["NativeHome", "modules/main_tabs_v2/native/tabs/messages/Messages.tsx", "guilds", false], ["NativeNotifications", "modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx", "notifications", true], ["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true]];
+  const passthrough = p => p.__out == null ? null : p.__out;
+  function patchLayouts() {
+    if (!live) return;
+    for (const [label, file, route, pushed] of LAYOUT_TARGETS) {
+      const raw = safe(() => api.metro.findByFilePath(file), null);
+      const target = raw && safe(() => renderTarget(raw, "default"), null);
+      if (!target) { health.hooks[label] = "not found"; continue; }
+      const [object, method] = target, seen = targets.get(object) || new Set();
+      if (seen.has("layout:" + route)) { health.hooks[label] = "patched"; continue; }
+      try {
+        api.patcher.after(method, object, (_args, output) => {
+          if (!live || !cfg("nativeScreens") || output == null || !NativeHost) return output;
+          health.hooks[label] = "layout";
+          return h(NativeHost, { route: { name: route }, navigation: safe(() => root(), null), overlay: pushed, __out: output, __reimaginedOrig: passthrough });
+        });
+        seen.add("layout:" + route); targets.set(object, seen); health.hooks[label] = "patched";
+      } catch (_) { issue("hook-failed:" + label); }
+    }
+  }
   function patchNativeSkin() {
     if (!live) return;
     const pass = (name, flag, wrap, before, only) => {
@@ -1070,7 +1091,7 @@
     if (flux?.subscribe) [["MESSAGE_CREATE", "create"], ["MESSAGE_UPDATE", "update"], ["MESSAGE_DELETE", "delete"]].forEach(([name, kind]) => { const f = e => messageEvent(e, kind); flux.subscribe(name, f); stops.push(() => flux.unsubscribe?.(name, f)); });
     [["YouBar", "dock"], ["YouBarNotificationsButton", "launcher"]].forEach(([name, mode]) => [api.metro.byFileName, api.metro.byTypeName].filter(f => typeof f === "function").forEach(make => { const cancel = safe(() => api.metro.waitFor(make(name), raw => patch(raw, name, mode), { raw: true }), null); if (typeof cancel === "function") stops.push(cancel); }));
     health.capabilities.nativeRoute = !!root()?.navigate; health.capabilities.messageActions = !!mod("sendMessage", "editMessage"); health.capabilities.voice = !!mod("selectVoiceChannel"); health.capabilities.webView = !!mod("WebView")?.WebView;
-    scan(); syncTheme(); patchNativeSkin();
+    scan(); syncTheme(); patchNativeSkin(); patchLayouts();
   }
   async function stop() { stopTour(); stopReturnWatch(); presenter?.stop(); live = false; epoch++; clearTimeout(storeTimer); storeTimer = null; stops.splice(0).forEach(f => safe(f)); Array.from(listeners).forEach(f => safe(f)); listeners.clear(); conversations.clear(); drafts.clear(); profiles.clear(); await themeQueue; await restoreTheme(); Object.keys(stores).forEach(k => delete stores[k]); Object.keys(modules).forEach(k => delete modules[k]); assets.clear(); }
   return definePlugin({ start, stop, SettingsComponent: () => live && buildUI.Settings ? h(DockHost, { mode: "settings", original: h(buildUI.Settings) }) : null, diagnostics: report, scanApp: startTour });
