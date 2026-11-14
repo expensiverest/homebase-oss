@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.17 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.18 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.17", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.18", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
@@ -773,9 +773,14 @@
     const type = args?.[0], props = args?.[1];
     if (props && props.__reimaginedRaw) { const { __reimaginedRaw, ...rest } = props; return [type, rest, ...args.slice(2)]; }
     if (!live || !cfg("nativeScreens") || !NativeHost || typeof type === "string" || type === NativeHost || !props || !props.route || !props.navigation) return undefined;
-    const name = props.route.name;
-    if (typeof name !== "string" || !SCREEN_TAB[name] || Object.keys(props).some(k => k !== "route" && k !== "navigation")) return undefined;
-    if (typeof type !== "function" && !(type && typeof type === "object" && (type.$$typeof || type.render))) return undefined;
+    const name = props.route.name, keys = Object.keys(props);
+    if (typeof name !== "string") return undefined;
+    const kind = typeof type === "function" ? "fn" : type && typeof type === "object" ? (type.$$typeof ? "memo/forward" : type.render ? "render" : "object") : typeof type;
+    // Report what each candidate looked like so a miss can be diagnosed from the compatibility report alone.
+    const why = !SCREEN_TAB[name] ? "unmapped" : keys.some(k => ["screen", "routeState", "getState", "setState", "options", "children"].includes(k)) ? "navigator-internal" : kind === "string" || kind === "undefined" ? "bad-type" : "";
+    const seenKey = "Screen:" + name;
+    if (!health.hooks[seenKey] || health.hooks[seenKey].length < 140) health.hooks[seenKey] = (health.hooks[seenKey] ? health.hooks[seenKey] + " ; " : "") + typeName(type) + "/" + kind + " {" + keys.slice(0, 8).join(",") + "} " + (why || "swap");
+    if (why) return undefined;
     health.hooks.NativeScreens = "swapped " + name;
     return [NativeHost, { ...props, __reimaginedOrig: type }, ...args.slice(2)];
   }
