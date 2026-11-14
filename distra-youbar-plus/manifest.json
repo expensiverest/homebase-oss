@@ -1,6 +1,6 @@
 {
   "name": "YouBar+ for Distra",
-  "description": "Add Direct Messages, Settings and Favorites shortcuts to Discord's You Bar.",
+  "description": "Configurable DMs, Settings, Favorites You Bar buttons; safe rendering and independent navigation.",
   "authors": [
     {
       "name": "Purple_Ξye™ (original)"
@@ -12,9 +12,9 @@
       "name": "Rosie (startup-race research)"
     }
   ],
-  "version": "0.1.0",
+  "version": "0.2.0",
   "main": "index.js",
-  "hash": "da832582f332d9400599f856192d3a07facc5802e1a7ee54bb21fdf4273e7bb6",
+  "hash": "7af87d4f07c23477427b62ed814a346adaf501ae81ab8ad7d964432d87c3f3a7",
   "distra": {
     "spec": 1
   }
