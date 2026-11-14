@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.5 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.6 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.5", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.6", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, accounts: {} };
@@ -698,9 +698,8 @@
       componentDidMount() { if (this.enter) safe(() => RN.Animated.timing(this.enter, { toValue: 1, duration: 260, useNativeDriver: true }).start()); }
       componentDidCatch() { issue("skin-render-failed"); api.storage.nativeSkin = false; this.setState({ failed: true }); }
       render() {
-        if (this.state.failed) return null;
-        const c = colors();
-        return h(RN.Animated && this.enter ? RN.Animated.View : RN.View, { style: { borderRadius: RAD.large, borderWidth: 1, borderColor: c.line, overflow: "hidden", backgroundColor: c.surface, marginBottom: SPACE.sm, opacity: this.enter || 1 } }, this.props.children);
+        if (this.state.failed || !this.enter) return this.props.children;
+        return h(RN.Animated.View, { style: { opacity: this.enter, transform: [{ translateY: this.enter.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] } }, this.props.children);
       }
     };
     Boundary = class extends React.Component { constructor(p) { super(p); this.state = { failed: false }; } componentDidCatch() { issue("surface-render-failed"); this.setState({ failed: true }); } render() { return this.state.failed ? h(RN.View, { style: { backgroundColor: colors().bg, padding: SPACE.xl } }, t("This screen could not be displayed."), button("Back", "back", null, { marginTop: SPACE.lg }), button("Settings", "settings", null, { marginTop: SPACE.md }), button("Copy compatibility report", "report", null, { marginTop: SPACE.md }), button("Restore Discord", "restore", null, { marginTop: SPACE.md }, "render-error-restore")) : this.props.children; } };
