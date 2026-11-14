@@ -17,7 +17,7 @@ function fixture(options = {}) {
   const timers = new Map(), navigations = [], issues = [], cleanups = [];
   let settingsOpened = 0, getUser = () => ({ id: '100000000000000001', username: 'fixture', globalName: 'Fixture' });
   class Component { constructor(props) { this.props = props; this.state = {}; } setState(next) { Object.assign(this.state, typeof next === 'function' ? next(this.state) : next); } }
-  const React = { Component, Fragment: 'Fragment', createElement: element };
+  const React = { Component, Fragment: 'Fragment', createElement: element, isValidElement: v => !!v && typeof v === 'object' && 'props' in v && 'type' in v, cloneElement: (el, props, ...kids) => ({ ...el, props: { ...el.props, ...(props || {}), ...(kids.length ? { children: kids.length === 1 ? kids[0] : kids } : {}) } }), Children: { toArray: c => c == null ? [] : [].concat(c) } };
   const RN = Object.fromEntries(['View','Text','Pressable','TouchableOpacity','ScrollView','SafeAreaView','TextInput','Switch','Image','Modal','KeyboardAvoidingView','FlatList'].map(n => [n,n]));
   RN.Dimensions = { get: () => ({ width: 390, height: 844 }), addEventListener: () => ({ remove() {} }) };
   RN.Platform = { OS: 'ios' };
@@ -35,7 +35,7 @@ function fixture(options = {}) {
   const scoped = { isFocused: () => focusedRoute.name === 'DISTRA_CUSTOM_PAGE', getState: () => ({ routes: [focusedRoute], index: 0 }), canGoBack: () => true, goBack: () => nav.goBack(), addListener: () => () => {} };
   const stores = { UserStore: { getCurrentUser: () => getUser(), getUser: () => getUser() }, UserProfileStore: { getUserProfile: () => ({ bio: 'fixture' }) } };
   const api = {
-    storage: { startHome: !!options.autoStart, nativePalette: false, nativeSkin: !!options.hub, accounts: {} },
+    storage: { startHome: !!options.autoStart, nativePalette: false, nativeSkin: !!options.hub, nativeSkinRows: !!options.rows, accounts: {} },
     common: { React, ReactNative: RN, tabsNavigationRef: { getRootNavigationRef: () => options.noRoot ? null : nav }, NavigationNative: { useNavigation: () => scoped }, constants: { Permissions: {} } },
     metro: { findByStoreName: name => stores[name] || {}, findByProps: (...keys) => keys[0] === 'TableRowGroup' ? options.hub : keys[0] === 'openUserSettings' && !options.noSettingsAction ? { openUserSettings: () => settingsOpened++ } : undefined,
       findByFileName: name => name === 'YouBar' ? target : null, findByTypeName: () => null },
@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.8');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.9');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -148,6 +148,17 @@ test('native skin wraps design-system groups and is inert when disabled', async 
   assert.equal(f.plugin.diagnostics().hooks.NativeSkinTableRowGroup, 'patched x1');
   const wrapped = group.default.type(); assert.equal(typeof wrapped.type, 'function'); assert.equal(wrapped.props.children.type, 'RowGroup');
   f.api.storage.nativeSkin = false; assert.equal(group.default.type().type, 'RowGroup'); await f.stop();
+});
+test('native skin restyles group titles, containers, rows and selected radios', async () => {
+  const card = { type: 'Card', props: { style: { padding: 0 }, children: { type: 'TableRowInner', props: { trailing: { type: 'FormRadio', props: { selected: true } } } } } };
+  const group = { type: 'Provider', props: { children: { type: 'View', props: { style: { flexShrink: 0 }, children: [{ type: 'TableRowGroupTitle', props: { title: 'Devices' } }, { type: 'View', props: { style: { borderRadius: 12, overflow: 'hidden' }, children: card } }] } } } };
+  const hub = { TableRowGroup: { type: () => group }, TableRow: { type: () => card } };
+  const f = fixture({ hub, rows: true });
+  const g = hub.TableRowGroup.type();
+  const flatText = JSON.stringify(g);
+  assert.ok(flatText.includes('DEVICES')); assert.ok(flatText.includes('"borderRadius":18'));
+  const r = hub.TableRow.type(); assert.ok(JSON.stringify(r).includes('"minHeight":56') && JSON.stringify(r).includes('backgroundColor'));
+  await f.stop();
 });
 test('blueprint recording observes rows without altering them', async () => {
   const row = { default: { type: () => ({ type: 'Row', props: { style: { height: 40 } } }) } };
