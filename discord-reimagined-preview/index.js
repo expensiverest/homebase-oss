@@ -18,6 +18,7 @@
   const SPACE = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32, xxxl: 40 };
   const TYPE = { small: 12, caption: 14, body: 16, title: 20, section: 24, display: 34 };
   const RAD = { small: 12, medium: 18, large: 24, sheet: 30, round: 999 };
+  const animated = () => !!RN.Animated && !cfg("reduceMotion");
   const NAV = [ { id: "home", label: "Home", icon: "HomeIcon" }, { id: "servers", label: "Servers", icon: "SquaresIcon" },
     { id: "messages", label: "Messages", icon: "ChatIcon" }, { id: "you", label: "You", icon: "UserCircleIcon" } ];
   const GLYPHS = { HomeIcon: "\u2302", SquaresIcon: "\u25a6", ChatIcon: "\u25a1", UserCircleIcon: "\u25cb", SearchIcon: "\u2315", StarIcon: "\u2606", BackIcon: "\u2039", CloseIcon: "\u00d7", SettingsIcon: "\u2699", HashIcon: "#", VoiceIcon: "\u266a", SendIcon: "\u2191", MoreIcon: "\u2026", PlusIcon: "+", ImageIcon: "\u25a7", MuteIcon: "M", DeafIcon: "D", VideoIcon: "\u25b7" };
@@ -283,13 +284,13 @@
     const c = channel(id); if (!permission("VIEW_CHANNEL", c)) return toast("You cannot view this channel.");
     if (c.nsfw) return toast("Use Discord to complete this channel's access check.");
     if ([2, 13].includes(c.type)) { push({ screen: "call", channel: id }); return; }
-    if ([15, 16].includes(c.type)) { toast("Forum and media-channel layouts are not replaced in this build."); return; }
+    if ([15, 16].includes(c.type)) { toast("Opening this forum in Discord. Use Return to Reimagined to come back."); nativeConversation(id); return; }
     remember(isPrivate(c) ? "dm" : "channel", id, c.guild_id);
     push({ screen: "conversation", channel: id }); loadMessages(id);
   }
   function send(action, value) {
     if (!live) return;
-    if (action === "tab") { if (!NAV.some(n => n.id === value)) return; state = { ...state, tab: value, screen: "main", guild: null, channel: null, search: "", filter: "all", history: [], drawer: false, menu: null }; present(); emit(); }
+    if (action === "tab") { if (!NAV.some(n => n.id === value)) return; if (animated()) safe(() => RN.LayoutAnimation.configureNext(RN.LayoutAnimation.Presets.easeInEaseOut)); state = { ...state, tab: value, screen: "main", guild: null, channel: null, search: "", filter: "all", history: [], drawer: false, menu: null }; present(); emit(); }
     else if (action === "server") { remember("guild", value); state.drawer = false; push({ screen: "channels", tab: "servers", guild: value, search: "" }); }
     else if (action === "channel") openChannel(value);
     else if (action === "back") back();
@@ -438,12 +439,13 @@
     const t = (value, style, props) => h(RN.Text, { style: [{ color: colors().ink, fontSize: TYPE.body, lineHeight: 22 }, style], ...(props || {}) }, value);
     function Icon(p) { const id = asset(p.name), size = p.size || 22, color = p.color || colors().muted; return id != null ? h(RN.Image, { source: id, resizeMode: "contain", accessible: false, style: { width: size, height: size, tintColor: color } }) : t(GLYPHS[p.name] || "\u2022", { fontSize: size, lineHeight: size + 4, width: size + 2, textAlign: "center", color }, { accessible: false }); }
     Control = class extends React.Component {
-      constructor(p) { super(p); this.state = { pressed: false }; this.press = this.press.bind(this); }
+      constructor(p) { super(p); this.state = { pressed: false }; this.press = this.press.bind(this); this.scale = RN.Animated ? new RN.Animated.Value(1) : null; }
+      spring(to) { if (this.scale && !cfg("reduceMotion")) safe(() => RN.Animated.spring(this.scale, { toValue: to, speed: 40, bounciness: 6, useNativeDriver: true }).start()); }
       press() { const p = this.props; if (!live || p.disabled) return; recordTap(p.id || p.action || "control"); if (p.run) p.run(); else send(p.action, p.value); }
-      render() { const p = this.props; return h(RN.Pressable || RN.TouchableOpacity, { testID: p.id, accessibilityLabel: p.label, accessibilityRole: p.role || "button", accessibilityState: { disabled: !!p.disabled, selected: !!p.selected }, disabled: !!p.disabled,
-        onPress: this.press, onLongPress: p.longPress, hitSlop: 0, onPressIn: () => this.setState({ pressed: true }), onPressOut: () => this.setState({ pressed: false }),
+      render() { const p = this.props; return h(RN.Animated && RN.Pressable ? (Control.animatedPressable || (Control.animatedPressable = RN.Animated.createAnimatedComponent(RN.Pressable))) : (RN.Pressable || RN.TouchableOpacity), { testID: p.id, accessibilityLabel: p.label, accessibilityRole: p.role || "button", accessibilityState: { disabled: !!p.disabled, selected: !!p.selected }, disabled: !!p.disabled,
+        onPress: this.press, onLongPress: p.longPress, hitSlop: 0, onPressIn: () => { this.spring(0.95); this.setState({ pressed: true }); }, onPressOut: () => { this.spring(1); this.setState({ pressed: false }); },
         onLayout: p.measure ? e => { const f = e?.nativeEvent?.layout; if (f) health.frames[p.id] = { x: f.x, y: f.y, width: f.width, height: f.height }; } : undefined,
-        style: [{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center", opacity: p.disabled ? 0.4 : this.state.pressed ? 0.65 : 1 }, p.style] }, p.children); }
+        style: [{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center", opacity: p.disabled ? 0.4 : this.state.pressed ? 0.8 : 1, ...(this.scale && RN.Pressable ? { transform: [{ scale: this.scale }] } : null) }, p.style] }, p.children); }
     };
     const button = (label, action, value, style, id, run, disabled) => h(Control, { label, action, value, id: id || action, run, disabled, style: [{ borderRadius: RAD.small, paddingHorizontal: SPACE.lg, backgroundColor: colors().elevated }, style] }, t(label, { fontSize: TYPE.caption, fontWeight: "600" }, { numberOfLines: 1 }));
     const ib = (name, label, action, value, id, run, disabled) => h(Control, { label, action, value, id: id || action, run, disabled, style: { borderRadius: RAD.round } }, h(Icon, { name }));
@@ -455,11 +457,13 @@
     // The native ScrollView implements hide-on-down/reveal-on-up, including iOS bounce handling.
     // No scroll-direction timer or shared callback in the patched You Bar is involved.
     Page = class extends React.Component {
+      constructor(p) { super(p); this.enter = animated() ? new RN.Animated.Value(0) : null; }
+      componentDidMount() { if (this.enter) safe(() => RN.Animated.timing(this.enter, { toValue: 1, duration: 280, easing: RN.Easing?.out?.(RN.Easing.cubic), useNativeDriver: true }).start()); }
       render() { const p = this.props; return h(RN.ScrollView, { testID: p.id || "scene-scroll", style: { flex: 1, minHeight: 0, backgroundColor: colors().bg },
         stickyHeaderIndices: [0], stickyHeaderHiddenOnScroll: true, scrollEventThrottle: 16,
         keyboardShouldPersistTaps: "handled", keyboardDismissMode: "interactive", showsVerticalScrollIndicator: false,
         contentInsetAdjustmentBehavior: "never", contentContainerStyle: { paddingBottom: SPACE.xxl } },
-        h(Header, { title: p.title, back: p.back, right: p.right }), h(RN.View, { style: { paddingHorizontal: SPACE.xl, width: "100%", maxWidth: 820, alignSelf: "center" } }, p.children)); }
+        h(Header, { title: p.title, back: p.back, right: p.right }), h(RN.Animated && this.enter ? RN.Animated.View : RN.View, { style: [{ paddingHorizontal: SPACE.xl, width: "100%", maxWidth: 820, alignSelf: "center" }, this.enter ? { opacity: this.enter, transform: [{ translateY: this.enter.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }] } : null] }, p.children)); }
     };
     function Section(p) { return h(RN.View, { style: { marginTop: SPACE.xl, marginBottom: SPACE.md, flexDirection: "row", justifyContent: "space-between", alignItems: "center" } }, t(p.title, { fontSize: TYPE.title, fontWeight: "600", letterSpacing: -0.3, flexShrink: 1 }), p.right || null); }
     function Empty(p) { return h(RN.View, { style: { paddingVertical: SPACE.xxl } }, t(p.title, { fontSize: TYPE.title, fontWeight: "600" }), p.error ? t(p.error, { fontSize: TYPE.caption, color: colors().danger, marginTop: SPACE.sm }) : null, p.action ? button(p.cta, p.action, p.value, { marginTop: SPACE.lg, alignSelf: "flex-start" }) : null); }
@@ -481,7 +485,18 @@
       h(Control, { id: "dm:" + d.id, label: d.name, action: "channel", value: d.id, style: { flex: 1, flexDirection: "row", justifyContent: "flex-start", paddingVertical: cfg("density") === "compact" ? SPACE.md : SPACE.lg } }, h(Avatar, { name: d.name, uri: imageUrl(d.user, "user"), size: 46 }),
         h(RN.View, { style: { flex: 1, minWidth: 0, marginLeft: SPACE.md } }, h(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, t(d.name, { flex: 1, fontWeight: d.unread ? "700" : "500" }, { numberOfLines: 1 }), h(Badge, { count: d.mentions, dot: d.unread })),
           d.preview ? t(d.preview, { color: d.unread ? colors().ink : colors().muted, fontSize: TYPE.caption, marginTop: SPACE.xs }, { numberOfLines: 1 }) : null)), h(Pin, { kind: "dm", id: d.id, name: d.name })); }
-    function Home(p) { const gs = guilds(), ds = listDms(), q = state.search.toLowerCase().trim(), favorites = gs.filter(g => pinned("guild", g.id)); const show = (q ? gs.filter(g => g.name.toLowerCase().includes(q)) : favorites.length ? favorites : gs).slice(0, 4); const dms = (q ? ds.filter(d => d.name.toLowerCase().includes(q)) : ds).slice(0, 6); return h(Page, { title: "Home" },
+    function HomeGlance() {
+      const c = colors(), hour = new Date().getHours(), name = userName(me()).split(/\s+/)[0];
+      const ds = listDms(), unreadCount = ds.filter(d => d.unread).length, mentionTotal = ds.reduce((n, d) => n + d.mentions, 0);
+      const recent = account().recent.map(r => { const ch = channel(r.id), dm = ds.find(d => d.id === r.id); return ch ? { id: r.id, name: dm?.name || ch.name || "Channel", user: dm?.user, dm: !!dm } : null; }).filter(Boolean).slice(0, 8);
+      const summary = mentionTotal ? mentionTotal + (mentionTotal === 1 ? " mention" : " mentions") : unreadCount ? unreadCount + " unread" : "All caught up";
+      return h(RN.View, { style: { marginBottom: SPACE.lg } },
+        h(RN.View, { style: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: SPACE.lg } },
+          h(RN.View, { style: { flex: 1, minWidth: 0 } }, t((hour < 5 ? "Good night" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening") + (name && name !== "Unknown" ? ", " + name : ""), { fontSize: TYPE.title, lineHeight: 26, fontWeight: "600", letterSpacing: -0.3 }, { numberOfLines: 1 })),
+          mentionTotal || unreadCount ? h(Control, { id: "glance-unread", label: summary, run: () => { send("tab", "messages"); send("filter", mentionTotal ? "mentions" : "unread"); }, style: { flexDirection: "row", borderRadius: RAD.round, paddingHorizontal: SPACE.md, backgroundColor: c.accentSoft } }, t(summary, { fontSize: TYPE.small, fontWeight: "600", color: c.accent })) : t(summary, { fontSize: TYPE.small, color: c.muted })),
+        recent.length ? h(RN.ScrollView, { horizontal: true, showsHorizontalScrollIndicator: false, keyboardShouldPersistTaps: "handled", testID: "jump-back-in" }, ...recent.map(r => h(Control, { key: r.id, id: "recent:" + r.id, label: r.name, action: "channel", value: r.id, style: { flexDirection: "row", marginRight: SPACE.sm, paddingLeft: SPACE.sm, paddingRight: SPACE.md, borderRadius: RAD.round, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line } }, r.dm ? h(Avatar, { name: r.name, uri: imageUrl(r.user, "user"), size: 28 }) : h(Icon, { name: "HashIcon", size: 18, color: c.faint }), t(r.name, { marginLeft: SPACE.sm, fontSize: TYPE.caption, maxWidth: 140 }, { numberOfLines: 1 })))) : null);
+    }
+    function Home(p) { const gs = guilds(), ds = listDms(), q = state.search.toLowerCase().trim(), favorites = gs.filter(g => pinned("guild", g.id)); const show = (q ? gs.filter(g => g.name.toLowerCase().includes(q)) : favorites.length ? favorites : gs).slice(0, 4); const dms = (q ? ds.filter(d => d.name.toLowerCase().includes(q)) : ds).slice(0, 6); return h(Page, { title: "Home" }, h(HomeGlance),
       h(Search, { placeholder: "Search" }), h(Section, { title: favorites.length && !q ? "Favorites" : "Servers", right: button("View all", "tab", "servers", { backgroundColor: colors().clear, paddingHorizontal: SPACE.sm }, "all-servers") }),
       show.length ? h(ServerGrid, { items: show, width: p.width }) : h(Empty, { title: "No servers found" }),
       h(Section, { title: "Direct Messages", right: button("View all", "tab", "messages", { backgroundColor: colors().clear, paddingHorizontal: SPACE.sm }, "all-messages") }),
@@ -495,7 +510,7 @@
       h(Search, { placeholder: "Search channels" }), h(Section, { title: "Channels" }), list === null ? h(Empty, { title: "Channels unavailable", error: "Discord's permission-checked channel list is unavailable." }) :
         h(RN.View, null, ...list.filter(c => !q || c.name?.toLowerCase().includes(q)).slice(0, state.limit).map(c => h(RN.View, { key: c.id, style: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors().line } },
           h(Control, { id: "channel:" + c.id, label: c.name, action: "channel", value: c.id, style: { flex: 1, flexDirection: "row", justifyContent: "flex-start", paddingVertical: SPACE.lg } }, h(Icon, { name: [2, 13].includes(c.type) ? "VoiceIcon" : "HashIcon", color: unread(c.id) ? colors().accent : colors().faint }), t(c.name, { marginLeft: SPACE.md, flex: 1, fontWeight: unread(c.id) ? "700" : "400" }, { numberOfLines: 1 })), h(Pin, { kind: "channel", id: c.id, guildId: g.id, name: c.name }))))); }
-    function Messages() { const q = state.search.toLowerCase().trim(); const ds = listDms().filter(d => (!q || d.name.toLowerCase().includes(q)) && (state.filter !== "unread" || d.unread) && (state.filter !== "pinned" || pinned("dm", d.id))); return h(Page, { title: "Messages" }, h(Search, { placeholder: "Search messages" }), h(Filters, { options: [{ id: "all", name: "All" }, { id: "unread", name: "Unread" }, { id: "pinned", name: "Pinned" }] }),
+    function Messages() { const q = state.search.toLowerCase().trim(); const ds = listDms().filter(d => (!q || d.name.toLowerCase().includes(q)) && (state.filter !== "unread" || d.unread) && (state.filter !== "mentions" || d.mentions > 0) && (state.filter !== "pinned" || pinned("dm", d.id))); return h(Page, { title: "Messages" }, h(Search, { placeholder: "Search messages" }), h(Filters, { options: [{ id: "all", name: "All" }, { id: "unread", name: "Unread" }, { id: "mentions", name: "Mentions" }, { id: "pinned", name: "Pinned" }] }),
       ...ds.slice(0, state.limit).map(d => h(DmRow, { key: d.id, dm: d })), !ds.length ? h(Empty, { title: "No messages found" }) : ds.length > state.limit ? button("Show more", "more") : null); }
     function Toggle(p) { return h(RN.View, { style: { flexDirection: "row", alignItems: "center", paddingVertical: SPACE.md, borderBottomWidth: 1, borderBottomColor: colors().line } }, t(p.label, { flex: 1, minWidth: 0, paddingRight: SPACE.lg, fontWeight: "500" }), h(RN.Switch, { testID: "setting-" + p.name, accessibilityLabel: p.label, value: !!cfg(p.name), trackColor: { false: colors().line, true: colors().accent }, thumbColor: colors().surface, onValueChange: value => send("setting", { key: p.name, value: !!value }) })); }
     function Preferences() { const c = colors(); return h(Page, { title: "Appearance", back: true },
@@ -686,8 +701,9 @@
         if (!live) return this.props.original || null;
         const p = presenter.snapshot();
         // Original navigation remains intact; the custom dock belongs inside Scene.
-        const launch = this.props.mode !== "settings" && cfg("layout") && me()
-          ? button("Reimagined", null, null, { marginHorizontal: SPACE.lg }, "reimagined-launcher", () => present()) : null;
+        const launch = this.props.mode === "settings" || !me() ? null
+          : cfg("layout") ? button("Reimagined", null, null, { marginHorizontal: SPACE.lg }, "reimagined-launcher", () => present())
+          : button("Return to Reimagined", null, null, { marginHorizontal: SPACE.lg, backgroundColor: colors().accentSoft }, "reimagined-return", () => { api.storage.layout = true; present(); });
         return h(React.Fragment, null, this.props.original, launch,
           RN.Modal ? h(RN.Modal, { visible: p.modal && modalOwner === this,
             presentationStyle: "fullScreen", animationType: "none",
