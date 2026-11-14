@@ -1,0 +1,42 @@
+name: Reimagined Repair
+on:
+  push:
+    branches: [distra-youbar-plus-port]
+    paths:
+      - scripts/reimagined/**
+      - .github/workflows/reimagined-repair.yml
+permissions:
+  contents: write
+concurrency:
+  group: reimagined-repair
+  cancel-in-progress: false
+jobs:
+  verify-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build opt-in candidate without changing the stable feed
+        run: node scripts/reimagined/build-repair.cjs
+      - name: Syntax and regression checks
+        run: |
+          node --check discord-reimagined-preview/index.js
+          node --test scripts/reimagined/presenter.test.cjs scripts/reimagined/integration.test.cjs
+          git diff --exit-code -- discord-reimagined/manifest.json discord-reimagined/index.js discord-reimagined/next.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: discord-reimagined-alpha2
+          path: |
+            discord-reimagined-preview/
+            discord-reimagined/next.js
+            scripts/reimagined/
+          retention-days: 7
+      - name: Publish tested candidate on the isolated plugin branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add discord-reimagined-preview
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'build: publish tested Reimagined alpha.2 preview (stable feed unchanged)'
+          git push origin HEAD:distra-youbar-plus-port
