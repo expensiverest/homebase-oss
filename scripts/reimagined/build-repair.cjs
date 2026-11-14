@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.32');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.33');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -259,28 +259,74 @@ swap('    Boundary = class extends React.Component {', `    SkinFrame = class ex
     };
     Boundary = class extends React.Component {`);
 swap('  function scan() {', `  let SkinFrame;
-  // Rewrites the native screen components themselves (found by Discord's module file paths, which survive minification) so the Reimagined layout renders in place of their output, inside the native navigator and header.
-  const LAYOUT_TARGETS = [["NativeHome", "modules/main_tabs_v2/native/tabs/messages/Messages.tsx", "messages", false], ["NativeNotifications", "modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx", "notifications", true], ["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true], ["NativeGuilds", "modules/main_tabs_v2/native/tabs/guilds/Guilds.tsx", "guilds", false], ["NativeHomePanel", "modules/main_tabs_v2/native/tabs/guilds/HomePanelContent.tsx", "guilds", false], ["NativeForYou", "modules/notification_center/native/NotificationCenterForYou.tsx", "notifications", true, "NotificationCenterForYou"]];
+  // Re-lays out Discord's own screens in place. Whole screens are only replaced where they are self-contained pushed routes (You);
+  // elsewhere the native screen, its scroll plumbing and the YouBar stay intact while its building blocks (rows, section headers, items, empty states) take the Reimagined layout.
+  const LAYOUT_TARGETS = [["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true]];
+  const NC = "modules/notification_center/native/", MT = "modules/main_tabs_v2/native/tabs/messages/";
+  const PIECE_TARGETS = [
+    ["NativeDmRow", MT + "items/MessagesItemChannel.tsx", ["MessagesItemChannelFast", "MessagesItemChannelFlash", "MessagesItemChannelLegend"], "row"],
+    ["NativeMessagesEmpty", MT + "MessagesEmptyState.tsx", ["default", "MessagesEmptyState"], "empty"],
+    ["NativeForYouItem", NC + "ForYouItems.tsx", ["ForYouItems"], "card"],
+    ["NativeForYouFriend", NC + "ForYouSuggestedFriendRow.tsx", ["default"], "card"],
+    ["NativeForYouReadHeader", NC + "ForYouReadSectionHeader.tsx", ["ForYouReadSectionHeader"], "header"],
+    ["NativeForYouRecentHeader", NC + "ForYouRecentActivitySectionHeader.tsx", ["ForYouRecentActivitySectionHeader"], "header"],
+    ["NativeForYouFriendsHeader", NC + "ForYouSuggestedFriendsSectionHeader.tsx", ["default"], "header"],
+    ["NativeForYouEmpty", NC + "ForYouEmptyState.tsx", ["ForYouEmptyState"], "empty"],
+    ["NativeForYouCleared", NC + "ForYouUnreadClearedState.tsx", ["ForYouUnreadClearedState"], "empty"]
+  ];
   const passthrough = p => p.__out == null ? null : p.__out;
-  function patchLayouts() {
-    if (!live) return;
-    for (const [label, file, route, pushed, exp = "default"] of LAYOUT_TARGETS) {
-      const raw = safe(() => api.metro.findByFilePath(file), null);
-      const target = raw && safe(() => renderTarget(raw, exp), null);
-      if (!target) { health.hooks[label] = "not found"; continue; }
+  function nodeText(node, depth = 0) {
+    if (node == null || depth > 8 || typeof node === "boolean") return "";
+    if (typeof node === "string" || typeof node === "number") return String(node).trim();
+    if (Array.isArray(node)) { for (const n of node) { const v = nodeText(n, depth + 1); if (v) return v; } return ""; }
+    return isEl(node) ? nodeText(node.props?.children, depth + 1) : "";
+  }
+  function rowChannelId(p) {
+    const v = p?.channelId || p?.channel?.id || p?.item?.channel?.id || p?.item?.channelId || p?.row?.channel?.id || p?.data?.channel?.id;
+    return typeof v === "string" ? v : null;
+  }
+  function pieceWrap(kind, output, args) {
+    const c = colors();
+    if (kind === "row") { const id = rowChannelId(args?.[0]); return id && RowCard && !args?.[0]?.__reimaginedRaw ? h(RowCard, { channelId: id, __reimaginedOrig: () => output }) : output; }
+    if (kind === "header") { const text = nodeText(output); return text ? h(SkinFrame, { fallback: output }, h(RN.View, { style: { paddingTop: SPACE.lg } }, skinTitle(text))) : output; }
+    if (kind === "card") return h(SkinFrame, { fallback: output }, h(RN.View, { style: { marginHorizontal: SPACE.md, marginVertical: SPACE.xs, borderRadius: RAD.large, backgroundColor: c.surface, borderWidth: RN.StyleSheet?.hairlineWidth || 1, borderColor: c.line, overflow: "hidden" } }, output));
+    if (kind === "empty") return h(SkinFrame, { fallback: output }, h(RN.View, { style: { margin: SPACE.xl, paddingVertical: SPACE.xxl, paddingHorizontal: SPACE.xl, borderRadius: RAD.sheet, backgroundColor: c.surface, alignItems: "center" } }, output));
+    return output;
+  }
+  function hookExport(label, file, names, wrap) {
+    const raw = safe(() => api.metro.findByFilePath(file), null);
+    if (!raw) { health.hooks[label] = "not found"; return; }
+    let patched = 0;
+    for (const name of names) {
+      if (raw[name] == null && name !== "default") continue;
+      const target = safe(() => renderTarget(raw, name), null);
+      if (!target) continue;
       const [object, method] = target, seen = targets.get(object) || new Set();
-      if (seen.has("layout:" + route)) { health.hooks[label] = "patched"; continue; }
-      if ([...seen].some(k => String(k).startsWith("layout:"))) { health.hooks[label] = "shared with another screen"; continue; }
+      if (seen.has("layout")) { patched++; continue; }
       try {
-        api.patcher.after(method, object, (_args, output) => {
-          if (!live || !cfg("nativeScreens") || output == null || !NativeHost) return output;
-          if (route === "you" && currentRouteName() !== "you") return output;
-          health.hooks[label] = "layout";
-          return h(NativeHost, { route: { name: route }, forceTab: SCREEN_TAB[route] || route, navigation: safe(() => root(), null), overlay: pushed, __out: output, __reimaginedOrig: passthrough });
+        api.patcher.after(method, object, (args, output) => {
+          if (!live || !cfg("nativeScreens") || output == null) return output;
+          const next = safe(() => wrap(output, args), output);
+          if (next !== output) health.hooks[label] = "applied";
+          return next;
         });
-        seen.add("layout:" + route); targets.set(object, seen); health.hooks[label] = "patched";
+        seen.add("layout"); targets.set(object, seen); patched++;
       } catch (_) { issue("hook-failed:" + label); }
     }
+    if (health.hooks[label] !== "applied") health.hooks[label] = patched ? "patched" : "no export";
+  }
+  function openChannelSheet(id) {
+    const sheet = safe(() => api.metro.findByFilePath("modules/channel/native/ChannelLongPressActionSheet.tsx"), null), lazy = mod("openLazy", "hideActionSheet");
+    if (sheet && typeof lazy?.openLazy === "function" && safe(() => (lazy.openLazy(Promise.resolve(sheet.default ? sheet : { default: sheet }), "ChannelLongPress", { channelId: id }), true), false)) return;
+    openChannel(id);
+  }
+  function patchLayouts() {
+    if (!live) return;
+    for (const [label, file, route, pushed] of LAYOUT_TARGETS) hookExport(label, file, ["default"], output => {
+      if (!NativeHost || currentRouteName() !== route) return output;
+      return h(NativeHost, { route: { name: route }, forceTab: SCREEN_TAB[route] || route, navigation: safe(() => root(), null), overlay: pushed, __out: output, __reimaginedOrig: passthrough });
+    });
+    for (const [label, file, names, kind] of PIECE_TARGETS) hookExport(label, file, names, (output, args) => pieceWrap(kind, output, args));
   }
   function patchNativeSkin() {
     if (!live) return;
@@ -506,7 +552,7 @@ swap('cfg("layout") && cfg("startHome") && !autoPresented', 'cfg("layout") && !c
 swap('const launch = this.props.mode === "settings" || !me() ? null', 'const launch = this.props.mode === "settings" || !me() || cfg("nativeScreens") ? null');
 swap('if (!baseRoute || !cfg("layout")) return;', 'if (!baseRoute || !cfg("layout") || cfg("nativeScreens")) return;');
 swap('    push({ screen: "conversation", channel: id }); loadMessages(id);', '    if (cfg("nativeScreens")) { nativeConversation(id); return; }\n    push({ screen: "conversation", channel: id }); loadMessages(id);');
-swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, RowCard, embeddedRoute = null;
+swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, RowCard, NativeRow, embeddedRoute = null;
   const SCREEN_TAB = { guilds: "home", messages: "messages", notifications: "messages", you: "you" };
   // Diagnostic: lists (in the compatibility report) which navigation-related elements Discord really creates, with their prop names.
   let navProbeCount = 0; const treeSeen = new Set();
@@ -562,8 +608,34 @@ swap('    Boundary = class extends React.Component {', `    RowCard = class exte
       render() {
         const { __reimaginedOrig: Orig, ...rest } = this.props, raw = h(Orig, { ...rest, __reimaginedRaw: true });
         if (!live || this.state.failed || !cfg("nativeScreens")) return raw;
-        const c = colors();
-        return h(RN.View, { style: { marginHorizontal: SPACE.md, marginVertical: 3, borderRadius: RAD.medium, backgroundColor: c.surface, overflow: "hidden" } }, raw);
+        return h(NativeRow, { id: rest.channelId, fallback: raw });
+      }
+    };
+    // Discord's conversation/channel row, re-laid out: avatar with presence, name, preview and badge on a soft press-scaled surface. Tap opens the channel natively; long press opens Discord's own channel actions.
+    NativeRow = class extends React.Component {
+      constructor(p) { super(p); this.scale = RN.Animated ? new RN.Animated.Value(1) : null; this.press = to => this.scale && animated() && safe(() => RN.Animated.spring(this.scale, { toValue: to, speed: 40, bounciness: 6, useNativeDriver: true }).start()); }
+      render() {
+        const ch = channel(this.props.id);
+        if (!ch || ![0, 1, 3, 5, 10, 11, 12].includes(ch.type)) return this.props.fallback;
+        const c = colors(), dm = isPrivate(ch), uid = dm && ch.type === 1 ? call(ch, "getRecipientId", [], ch.recipients?.[0]) : null, u = uid ? user(uid) : null;
+        const name = dm ? (ch.name || (ch.type === 3 ? (ch.recipients || []).map(id => userName(user(id))).slice(0, 3).join(", ") || "Group DM" : userName(u))) : (ch.name || "channel");
+        const isUnread = unread(ch.id), mentions = mentionCount(ch.id), muted = !!call(stores.UserGuildSettingsStore, "isChannelMuted", [ch.guild_id || null, ch.id], false);
+        const last = cfg("showPreviews") && dm ? call(call(stores.MessageStore, "getMessages", [ch.id], null), "last", [], null) : null, preview = typeof last?.content === "string" && last.content ? last.content.replace(/\s+/g, " ") : null;
+        const status = uid ? call(stores.PresenceStore, "getStatus", [uid], "offline") : null, dot = { online: c.success || "#3BA55D", idle: "#FAA81A", dnd: c.danger || "#ED4245" }[status];
+        const size = dm ? 42 : 30;
+        const lead = dm ? h(RN.View, null, h(Avatar, { name, uri: u ? imageUrl(u, "user") : null, size }), dot ? h(RN.View, { style: { position: "absolute", right: -1, bottom: -1, width: 14, height: 14, borderRadius: 7, backgroundColor: dot, borderWidth: 3, borderColor: c.bg } }) : null)
+          : h(RN.View, { style: { width: size, height: size, borderRadius: RAD.small - 2, backgroundColor: isUnread ? c.accentSoft : c.elevated, alignItems: "center", justifyContent: "center" } }, t(ch.type === 5 ? "\u{1F4E3}" : "#", { fontSize: 15, fontWeight: "700", color: isUnread ? c.accent : c.muted }));
+        return h(this.scale ? RN.Animated.View : RN.View, { style: this.scale ? { transform: [{ scale: this.scale }] } : null }, h(RN.Pressable, {
+          accessibilityRole: "button", accessibilityLabel: name + (mentions ? ", " + mentions + " mentions" : isUnread ? ", unread" : ""),
+          onPressIn: () => this.press(0.97), onPressOut: () => this.press(1),
+          onPress: () => { recordTap("native-row"); openChannel(ch.id); },
+          onLongPress: () => { recordTap("native-row-menu"); openChannelSheet(ch.id); }, delayLongPress: 320,
+          style: ({ pressed }) => ({ flexDirection: "row", alignItems: "center", minHeight: dm ? 58 : 40, marginHorizontal: SPACE.sm, marginVertical: 1, paddingHorizontal: SPACE.md, paddingVertical: dm ? SPACE.sm : 6, borderRadius: RAD.medium, backgroundColor: pressed ? c.elevated : isUnread && dm ? c.surface : "transparent", opacity: muted && !isUnread ? 0.55 : 1 })
+        }, lead,
+          h(RN.View, { style: { flex: 1, minWidth: 0, marginLeft: SPACE.md } },
+            t(name, { fontSize: dm ? TYPE.body : 15, fontWeight: isUnread ? "700" : "500", color: isUnread ? c.ink : dm ? c.ink : c.muted }, { numberOfLines: 1 }),
+            preview ? t(preview, { fontSize: TYPE.caption - 1, marginTop: 2, color: isUnread ? c.ink : c.muted }, { numberOfLines: 1 }) : null),
+          mentions || isUnread ? h(RN.View, { style: { marginLeft: SPACE.sm } }, h(Badge, { count: mentions, dot: isUnread && !mentions })) : null));
       }
     };
     NativeHost = class extends React.Component {
@@ -612,11 +684,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.32',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.33',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.32
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.33
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -662,4 +734,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.32', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.33', sourceSHA256: digest(code), output: out }));
