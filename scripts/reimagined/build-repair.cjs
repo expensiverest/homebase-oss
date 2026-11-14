@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.3');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.4');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -240,15 +240,46 @@ swap('    const invoke = () => {\n      if (!live) return;\n      try {\n       
 swap('  function present(tab) {\n    if (!live || !me()) return;', '  function present(tab) {\n    if (!live || !me()) return;\n    stopReturnWatch(); { const n = currentRouteName(); if (n && n !== customRouteName) baseRoute = n; }');
 swap('  function restoreOriginal() {\n    api.storage.layout = false;', '  function restoreOriginal() {\n    stopReturnWatch(); api.storage.layout = false;');
 swap('async function stop() { presenter?.stop();', 'async function stop() { stopReturnWatch(); presenter?.stop();');
+// Native skin (beta): restyle Discord's own settings lists in place by patching the design-system TableRowGroup. Off by default; any failure turns it off.
+swap('showPreviews: true, grid: true, accounts: {} };', 'showPreviews: true, grid: true, nativeSkin: false, accounts: {} };');
+swap('h(Toggle, { name: "layout", label: "Navigation dock" }),', 'h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }),');
+swap('if (["palette", "nativePalette"].includes(value.key)) syncTheme();', 'if (["palette", "nativePalette"].includes(value.key)) syncTheme(); if (value.key === "nativeSkin") patchNativeSkin();');
+swap('    Boundary = class extends React.Component {', `    SkinFrame = class extends React.Component {
+      constructor(p) { super(p); this.state = { failed: false }; this.enter = animated() ? new RN.Animated.Value(0) : null; }
+      componentDidMount() { if (this.enter) safe(() => RN.Animated.timing(this.enter, { toValue: 1, duration: 260, useNativeDriver: true }).start()); }
+      componentDidCatch() { issue("skin-render-failed"); api.storage.nativeSkin = false; this.setState({ failed: true }); }
+      render() {
+        if (this.state.failed) return null;
+        const c = colors();
+        return h(RN.Animated && this.enter ? RN.Animated.View : RN.View, { style: { borderRadius: RAD.large, borderWidth: 1, borderColor: c.line, overflow: "hidden", backgroundColor: c.surface, marginBottom: SPACE.sm, opacity: this.enter || 1 } }, this.props.children);
+      }
+    };
+    Boundary = class extends React.Component {`);
+swap('  function scan() {', `  let SkinFrame;
+  function patchNativeSkin() {
+    if (!live || !cfg("nativeSkin")) return;
+    const hub = mod("TableRowGroup", "TableRow"), target = hub ? safe(() => renderTarget(hub, "TableRowGroup"), null) : null;
+    if (!target) { health.hooks.NativeSkinGroup = "not found"; return; }
+    const [object, method] = target, seen = targets.get(object) || new Set();
+    if (!seen.has("skin:" + method)) {
+      try {
+        api.patcher.after(method, object, (_args, output) => (!live || !cfg("nativeSkin") || output == null || !SkinFrame) ? output : h(SkinFrame, null, output));
+        seen.add("skin:" + method); targets.set(object, seen);
+      } catch (_) { issue("hook-failed:NativeSkinGroup"); return; }
+    }
+    health.hooks.NativeSkinGroup = "patched";
+  }
+  function scan() {`);
+swap('    scan(); syncTheme();', '    scan(); syncTheme(); patchNativeSkin();');
 fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.3',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.4',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.3
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.4
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -284,10 +315,14 @@ Replaced: Home, Servers, server channels, Messages, conversations, voice call co
 
 When Reimagined hands off to a Discord screen (a forum, Settings under the fallback modal, a conversation), it watches navigation and reopens itself once you are back on the route you started from.
 
+## Native skin (beta)
+
+Appearance > Restyle Discord settings (beta) restyles Discord's own settings lists in place (rounded bordered cards with a fade-in) by patching the design-system TableRowGroup. It is off by default, needs no tweak, and switches itself off if a restyled list fails to render. Check the compatibility report for NativeSkinGroup.
+
 ## Validation
 
 Presenter tests and synthetic plugin lifecycle integration checks run in the Reimagined Repair workflow before publication. No physical iOS/Hermes/Yoga test or real Discord service action is claimed. See scripts/reimagined/ for the reproducible build and tests.
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.3', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.4', sourceSHA256: digest(code), output: out }));

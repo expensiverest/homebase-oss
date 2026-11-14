@@ -1,14 +1,14 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.3 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.4 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.3", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.4", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
-    showPreviews: true, grid: true, accounts: {} };
+    showPreviews: true, grid: true, nativeSkin: false, accounts: {} };
   const PALETTES = {
     blurple: { name: "Blurple", bg: "#17181f", surface: "#20222b", elevated: "#2b2d38", line: "#3a3d4b", ink: "#f2f3f8", muted: "#b0b4c4", faint: "#9296a9", accent: "#b4bcff", accentInk: "#1d2160", accentSoft: "#30346a", danger: "#f5a9b3", clear: "transparent", shade: "rgba(8,9,14,0.62)" },
     midnight: { name: "Midnight", bg: "#141918", surface: "#1c2320", elevated: "#27302b", line: "#39443d", ink: "#f0f2e9", muted: "#a8b5aa", faint: "#8a9b8e", accent: "#bdd7b7", accentInk: "#203323", accentSoft: "#2d3b2e", danger: "#f3b9ad", clear: "transparent", shade: "rgba(10,15,12,0.6)" },
@@ -326,7 +326,7 @@
     else if (action === "drawer-close") { state.drawer = false; emit(); }
     else if (action === "expand") { state = { ...state, drawer: false, tab: "servers", screen: "main", search: "", filter: "all" }; emit(); }
     else if (action === "pin") pin(value.kind, value.id, value.guildId);
-    else if (action === "setting") { api.storage[value.key] = value.value; if (value.key === "layout" && !value.value) presenter.dismiss(null, true); if (["palette", "nativePalette"].includes(value.key)) syncTheme(); emit(); }
+    else if (action === "setting") { api.storage[value.key] = value.value; if (value.key === "layout" && !value.value) presenter.dismiss(null, true); if (["palette", "nativePalette"].includes(value.key)) syncTheme(); if (value.key === "nativeSkin") patchNativeSkin(); emit(); }
     else if (action === "media") push({ screen: "media", media: value });
     else if (action === "report") copyReport();
     else if (action === "close") { presenter.dismiss(null, true); }
@@ -537,7 +537,7 @@
     function Toggle(p) { return h(RN.View, { style: { flexDirection: "row", alignItems: "center", paddingVertical: SPACE.md, borderBottomWidth: 1, borderBottomColor: colors().line } }, t(p.label, { flex: 1, minWidth: 0, paddingRight: SPACE.lg, fontWeight: "500" }), h(RN.Switch, { testID: "setting-" + p.name, accessibilityLabel: p.label, value: !!cfg(p.name), trackColor: { false: colors().line, true: colors().accent }, thumbColor: colors().surface, onValueChange: value => send("setting", { key: p.name, value: !!value }) })); }
     function Preferences() { const c = colors(); return h(Page, { title: "Appearance", back: true },
       h(RN.View, { style: { flexDirection: "row", justifyContent: "space-between" } }, ...Object.entries(PALETTES).map(([id, p]) => h(Control, { key: id, id: "palette-" + id, label: p.name, action: "setting", value: { key: "palette", value: id }, selected: cfg("palette") === id, style: { flex: 1, marginRight: id === "slate" ? 0 : SPACE.sm, padding: SPACE.md, borderRadius: RAD.medium, borderWidth: cfg("palette") === id ? 2 : 1, borderColor: cfg("palette") === id ? c.accent : c.line, backgroundColor: p.bg } }, h(RN.View, { style: { flexDirection: "row", marginBottom: SPACE.sm } }, ...[p.surface, p.accent, p.ink].map((color, i) => h(RN.View, { key: i, style: { width: 16, height: 16, borderRadius: 8, marginRight: 3, backgroundColor: color } }))), t(p.name, { color: p.ink, fontSize: TYPE.small, fontWeight: "600" }, { numberOfLines: 1 })))),
-      h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }),
+      h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }),
       button(cfg("density") === "compact" ? "Comfortable" : "Compact", "setting", { key: "density", value: cfg("density") === "compact" ? "comfortable" : "compact" }, { marginTop: SPACE.lg }, "density"),
       h(Section, { title: "Diagnostics" }), h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"),
       t(VERSION, { fontSize: TYPE.small, color: c.muted, marginTop: SPACE.xl }), health.issues.length ? t(health.issues.join("\n"), { color: c.danger, marginTop: SPACE.md, fontSize: TYPE.small }) : null); }
@@ -693,6 +693,16 @@
             n.id === "messages" && total ? h(RN.View, { accessible: false, style: { position: "absolute", top: 6, right: on ? 10 : "22%", minWidth: 16, height: 16, paddingHorizontal: 4, borderRadius: RAD.round, backgroundColor: c.accent, alignItems: "center", justifyContent: "center" } }, t(total > 99 ? "99+" : String(total), { fontSize: 10, lineHeight: 13, fontWeight: "700", color: c.accentInk }, { accessible: false })) : null);
         })));
     }
+    SkinFrame = class extends React.Component {
+      constructor(p) { super(p); this.state = { failed: false }; this.enter = animated() ? new RN.Animated.Value(0) : null; }
+      componentDidMount() { if (this.enter) safe(() => RN.Animated.timing(this.enter, { toValue: 1, duration: 260, useNativeDriver: true }).start()); }
+      componentDidCatch() { issue("skin-render-failed"); api.storage.nativeSkin = false; this.setState({ failed: true }); }
+      render() {
+        if (this.state.failed) return null;
+        const c = colors();
+        return h(RN.Animated && this.enter ? RN.Animated.View : RN.View, { style: { borderRadius: RAD.large, borderWidth: 1, borderColor: c.line, overflow: "hidden", backgroundColor: c.surface, marginBottom: SPACE.sm, opacity: this.enter || 1 } }, this.props.children);
+      }
+    };
     Boundary = class extends React.Component { constructor(p) { super(p); this.state = { failed: false }; } componentDidCatch() { issue("surface-render-failed"); this.setState({ failed: true }); } render() { return this.state.failed ? h(RN.View, { style: { backgroundColor: colors().bg, padding: SPACE.xl } }, t("This screen could not be displayed."), button("Back", "back", null, { marginTop: SPACE.lg }), button("Settings", "settings", null, { marginTop: SPACE.md }), button("Copy compatibility report", "report", null, { marginTop: SPACE.md }), button("Restore Discord", "restore", null, { marginTop: SPACE.md }, "render-error-restore")) : this.props.children; } };
     Scene = class extends React.Component {
       constructor(p) { super(p); this.state = { tick: 0, width: safe(() => RN.Dimensions.get("window").width, 390) }; this.refresh = () => this.setState(s => ({ tick: s.tick + 1 })); }
@@ -742,6 +752,20 @@
   function renderTarget(raw, name) { for (const value of [raw?.[name], raw?.default, raw]) { let node = unwrap(value); if (!node) continue; if (typeof node === "function" && node.prototype?.render) return [node.prototype, "render"]; if (typeof node === "function") { if (raw?.[name] === node) return [raw, name]; if (raw?.default === node) return [raw, "default"]; } for (let i = 0; node && i < 5; i++) { if (typeof node.type === "function") return [node, "type"]; if (typeof node.render === "function") return [node, "render"]; node = node.type; } } return null; }
   function patch(raw, name, mode) { const target = safe(() => renderTarget(raw, name), null); if (!live || !target) return false; const [object, method] = target, seen = targets.get(object) || new Set(); if (seen.has(method)) return true;
     try { api.patcher.after(method, object, (_args, output) => { if (!live || output == null || !me() || (mode === "launcher" && health.hooks.YouBar === "patched")) return output; return h(DockHost, { original: output, mode }); }); seen.add(method); targets.set(object, seen); health.hooks[name] = "patched"; return true; } catch (_) { issue("hook-failed:" + name); return false; } }
+  let SkinFrame;
+  function patchNativeSkin() {
+    if (!live || !cfg("nativeSkin")) return;
+    const hub = mod("TableRowGroup", "TableRow"), target = hub ? safe(() => renderTarget(hub, "TableRowGroup"), null) : null;
+    if (!target) { health.hooks.NativeSkinGroup = "not found"; return; }
+    const [object, method] = target, seen = targets.get(object) || new Set();
+    if (!seen.has("skin:" + method)) {
+      try {
+        api.patcher.after(method, object, (_args, output) => (!live || !cfg("nativeSkin") || output == null || !SkinFrame) ? output : h(SkinFrame, null, output));
+        seen.add("skin:" + method); targets.set(object, seen);
+      } catch (_) { issue("hook-failed:NativeSkinGroup"); return; }
+    }
+    health.hooks.NativeSkinGroup = "patched";
+  }
   function scan() { [["YouBar", "dock"], ["YouBarNotificationsButton", "launcher"]].forEach(([name, mode]) => { if (health.hooks[name] === "patched") return; const raw = safe(() => api.metro.findByFileName(name, false), null) || safe(() => api.metro.findByTypeName(name, false), null); if (!patch(raw, name, mode)) health.hooks[name] = "settings entry required"; }); }
   function start(pluginApi) {
     api = pluginApi; live = true; epoch++; presenter = null; modalOwner = null; activeSceneNavigation = null; presentationInstance = Date.now().toString(36) + Math.random().toString(36).slice(2); presentationHosts.clear(); accountId = null; autoPresented = false; sceneCount = 0; routeOpening = false;
@@ -755,7 +779,7 @@
     if (flux?.subscribe) [["MESSAGE_CREATE", "create"], ["MESSAGE_UPDATE", "update"], ["MESSAGE_DELETE", "delete"]].forEach(([name, kind]) => { const f = e => messageEvent(e, kind); flux.subscribe(name, f); stops.push(() => flux.unsubscribe?.(name, f)); });
     [["YouBar", "dock"], ["YouBarNotificationsButton", "launcher"]].forEach(([name, mode]) => [api.metro.byFileName, api.metro.byTypeName].filter(f => typeof f === "function").forEach(make => { const cancel = safe(() => api.metro.waitFor(make(name), raw => patch(raw, name, mode), { raw: true }), null); if (typeof cancel === "function") stops.push(cancel); }));
     health.capabilities.nativeRoute = !!root()?.navigate; health.capabilities.messageActions = !!mod("sendMessage", "editMessage"); health.capabilities.voice = !!mod("selectVoiceChannel"); health.capabilities.webView = !!mod("WebView")?.WebView;
-    scan(); syncTheme();
+    scan(); syncTheme(); patchNativeSkin();
   }
   async function stop() { stopReturnWatch(); presenter?.stop(); live = false; epoch++; clearTimeout(storeTimer); storeTimer = null; stops.splice(0).forEach(f => safe(f)); Array.from(listeners).forEach(f => safe(f)); listeners.clear(); conversations.clear(); drafts.clear(); profiles.clear(); await themeQueue; await restoreTheme(); Object.keys(stores).forEach(k => delete stores[k]); Object.keys(modules).forEach(k => delete modules[k]); assets.clear(); }
   return definePlugin({ start, stop, SettingsComponent: () => live && buildUI.Settings ? h(DockHost, { mode: "settings", original: h(buildUI.Settings) }) : null, diagnostics: report });

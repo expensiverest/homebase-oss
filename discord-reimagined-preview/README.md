@@ -1,4 +1,4 @@
-# Discord: Reimagined 0.2.0-alpha.3
+# Discord: Reimagined 0.2.0-alpha.4
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -33,6 +33,10 @@ Replaced: Home, Servers, server channels, Messages, conversations, voice call co
 ## Returning from native screens
 
 When Reimagined hands off to a Discord screen (a forum, Settings under the fallback modal, a conversation), it watches navigation and reopens itself once you are back on the route you started from.
+
+## Native skin (beta)
+
+Appearance > Restyle Discord settings (beta) restyles Discord's own settings lists in place (rounded bordered cards with a fade-in) by patching the design-system TableRowGroup. It is off by default, needs no tweak, and switches itself off if a restyled list fails to render. Check the compatibility report for NativeSkinGroup.
 
 ## Validation
 
