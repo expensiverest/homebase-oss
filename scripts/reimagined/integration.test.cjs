@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.31');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.32');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -196,8 +196,9 @@ test('native screen modules are re-laid out in place and fail open', async () =>
   const hooks = f.plugin.diagnostics().hooks;
   assert.equal(hooks.NativeHome, 'not found');
   assert.ok(/patched|layout/.test(hooks.NativeNotifications) && /patched|layout/.test(hooks.NativeYou));
-  const res = files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default();
-  assert.notEqual(res, out); assert.equal(res.props.route.name, 'you'); assert.equal(res.props.__out, out);
+  assert.equal(files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default(), out);
+  const res = files['modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx'].default();
+  assert.notEqual(res, out); assert.equal(res.props.route.name, 'notifications'); assert.equal(res.props.__out, out);
   f.api.storage.nativeScreens = false; assert.equal(files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default(), out); await f.stop();
 });
 test('app tour visits declared routes, skips risky ones and returns', async () => {

@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.31 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.32 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.31", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.32", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
@@ -1022,13 +1022,13 @@
     if (c?.setString) { c.setString(JSON.stringify(data)); toast("Settings blueprint copied"); }
   }
   // Rewrites the native screen components themselves (found by Discord's module file paths, which survive minification) so the Reimagined layout renders in place of their output, inside the native navigator and header.
-  const LAYOUT_TARGETS = [["NativeHome", "modules/main_tabs_v2/native/tabs/messages/Messages.tsx", "messages", false], ["NativeNotifications", "modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx", "notifications", true], ["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true]];
+  const LAYOUT_TARGETS = [["NativeHome", "modules/main_tabs_v2/native/tabs/messages/Messages.tsx", "messages", false], ["NativeNotifications", "modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx", "notifications", true], ["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true], ["NativeGuilds", "modules/main_tabs_v2/native/tabs/guilds/Guilds.tsx", "guilds", false], ["NativeHomePanel", "modules/main_tabs_v2/native/tabs/guilds/HomePanelContent.tsx", "guilds", false], ["NativeForYou", "modules/notification_center/native/NotificationCenterForYou.tsx", "notifications", true, "NotificationCenterForYou"]];
   const passthrough = p => p.__out == null ? null : p.__out;
   function patchLayouts() {
     if (!live) return;
-    for (const [label, file, route, pushed] of LAYOUT_TARGETS) {
+    for (const [label, file, route, pushed, exp = "default"] of LAYOUT_TARGETS) {
       const raw = safe(() => api.metro.findByFilePath(file), null);
-      const target = raw && safe(() => renderTarget(raw, "default"), null);
+      const target = raw && safe(() => renderTarget(raw, exp), null);
       if (!target) { health.hooks[label] = "not found"; continue; }
       const [object, method] = target, seen = targets.get(object) || new Set();
       if (seen.has("layout:" + route)) { health.hooks[label] = "patched"; continue; }
@@ -1036,6 +1036,7 @@
       try {
         api.patcher.after(method, object, (_args, output) => {
           if (!live || !cfg("nativeScreens") || output == null || !NativeHost) return output;
+          if (route === "you" && currentRouteName() !== "you") return output;
           health.hooks[label] = "layout";
           return h(NativeHost, { route: { name: route }, forceTab: SCREEN_TAB[route] || route, navigation: safe(() => root(), null), overlay: pushed, __out: output, __reimaginedOrig: passthrough });
         });
