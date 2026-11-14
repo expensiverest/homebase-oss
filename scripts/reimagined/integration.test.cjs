@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.4');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.5');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -145,7 +145,7 @@ test('returns to Reimagined after leaving a native Settings screen', async () =>
 test('native skin wraps design-system groups and is inert when disabled', async () => {
   const group = { default: { type: () => ({ type: 'RowGroup', props: {} }) } };
   const f = fixture({ hub: { TableRowGroup: group.default, TableRow: {} } });
-  assert.equal(f.plugin.diagnostics().hooks.NativeSkinGroup, 'patched');
+  assert.equal(f.plugin.diagnostics().hooks.NativeSkinGroup, 'patched x1');
   const wrapped = group.default.type(); assert.equal(typeof wrapped.type, 'function'); assert.equal(wrapped.props.children.type, 'RowGroup');
   f.api.storage.nativeSkin = false; assert.equal(group.default.type().type, 'RowGroup'); await f.stop();
 });

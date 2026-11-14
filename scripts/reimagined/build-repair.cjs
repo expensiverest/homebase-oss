@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.4');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.5');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -258,16 +258,20 @@ swap('    Boundary = class extends React.Component {', `    SkinFrame = class ex
 swap('  function scan() {', `  let SkinFrame;
   function patchNativeSkin() {
     if (!live || !cfg("nativeSkin")) return;
-    const hub = mod("TableRowGroup", "TableRow"), target = hub ? safe(() => renderTarget(hub, "TableRowGroup"), null) : null;
-    if (!target) { health.hooks.NativeSkinGroup = "not found"; return; }
-    const [object, method] = target, seen = targets.get(object) || new Set();
-    if (!seen.has("skin:" + method)) {
+    const hubs = [mod("TableRowGroup", "TableRow"), ...(safe(() => api.metro.findByPropsAll("TableRowGroup"), []) || [])].map(unwrap).filter(Boolean);
+    let patched = 0;
+    for (const hub of new Set(hubs)) {
+      const target = safe(() => renderTarget(hub, "TableRowGroup"), null);
+      if (!target) continue;
+      const [object, method] = target, seen = targets.get(object) || new Set();
+      if (seen.has("skin:" + method)) { patched++; continue; }
       try {
         api.patcher.after(method, object, (_args, output) => (!live || !cfg("nativeSkin") || output == null || !SkinFrame) ? output : h(SkinFrame, null, output));
-        seen.add("skin:" + method); targets.set(object, seen);
-      } catch (_) { issue("hook-failed:NativeSkinGroup"); return; }
+        seen.add("skin:" + method); targets.set(object, seen); patched++;
+      } catch (_) { issue("hook-failed:NativeSkinGroup"); }
     }
-    health.hooks.NativeSkinGroup = "patched";
+    if (!patched) { health.hooks.NativeSkinGroup = hubs.length ? "no patchable group" : "not found"; return; }
+    health.hooks.NativeSkinGroup = "patched x" + patched;
   }
   function scan() {`);
 swap('    scan(); syncTheme();', '    scan(); syncTheme(); patchNativeSkin();');
@@ -275,11 +279,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.4',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.5',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.4
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.5
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -325,4 +329,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.4', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.5', sourceSHA256: digest(code), output: out }));
