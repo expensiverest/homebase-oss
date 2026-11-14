@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.24 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.25 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.24", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.25", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
@@ -794,14 +794,15 @@
   let SkinFrame, NativeHost, NativeOverlay, embeddedRoute = null;
   const SCREEN_TAB = { guilds: "home", notifications: "messages", you: "you" };
   // Diagnostic: lists (in the compatibility report) which navigation-related elements Discord really creates, with their prop names.
-  let navProbeCount = 0;
+  let navProbeCount = 0; const treeSeen = new Set();
   function navProbe(type, props) {
     const name = typeName(type), keys = Object.keys(props);
     const hit = props.route || props.navigation || props.descriptors || props.state || /screen|scene|navigator|stack|route|tab|pager|layout/i.test(name);
     const rn = currentRouteName();
     if (rn && typeof type !== "string" && !/^(Scene|Router|Boundary|DockHost|NativeHost|SkinFrame)/.test(name)) {
+      // Only the first route to render a component claims it, so persistent shell parts don't hide what is unique to each screen.
       const ek = "Tree:" + rn, cur = health.hooks[ek] || "", entry = name + "{" + keys.slice(0, 5).join(",") + "}";
-      if (cur.length < 900 && !cur.split(" ").includes(entry)) health.hooks[ek] = cur + (cur ? " " : "") + entry;
+      if (cur.length < 1100 && !treeSeen.has(entry)) { treeSeen.add(entry); health.hooks[ek] = cur + (cur ? " " : "") + entry; }
     }
     if (!hit) return;
     const key = "Nav:" + name; if (health.hooks[key] || navProbeCount >= 24) return;
