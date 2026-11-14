@@ -26,7 +26,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: discord-reimagined-alpha2
+          name: discord-reimagined-alpha3
           path: |
             discord-reimagined-preview/
             discord-reimagined/next.js
@@ -38,5 +38,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add discord-reimagined-preview
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'build: publish tested Reimagined alpha.2 preview (stable feed unchanged)'
+          git commit -m 'build: publish tested Reimagined alpha.3 preview (stable feed unchanged)'
           git push origin HEAD:distra-youbar-plus-port

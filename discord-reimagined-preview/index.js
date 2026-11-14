@@ -1,15 +1,16 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.2 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.3 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.2", THEME_ID = "discord-reimagined";
-  const DEFAULTS = { palette: "midnight", density: "comfortable", nativePalette: true,
+  const VERSION = "0.2.0-alpha.3", THEME_ID = "discord-reimagined";
+  const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, accounts: {} };
   const PALETTES = {
+    blurple: { name: "Blurple", bg: "#17181f", surface: "#20222b", elevated: "#2b2d38", line: "#3a3d4b", ink: "#f2f3f8", muted: "#b0b4c4", faint: "#9296a9", accent: "#b4bcff", accentInk: "#1d2160", accentSoft: "#30346a", danger: "#f5a9b3", clear: "transparent", shade: "rgba(8,9,14,0.62)" },
     midnight: { name: "Midnight", bg: "#141918", surface: "#1c2320", elevated: "#27302b", line: "#39443d", ink: "#f0f2e9", muted: "#a8b5aa", faint: "#8a9b8e", accent: "#bdd7b7", accentInk: "#203323", accentSoft: "#2d3b2e", danger: "#f3b9ad", clear: "transparent", shade: "rgba(10,15,12,0.6)" },
     pearl: { name: "Pearl", bg: "#f4f3ed", surface: "#fcfbf6", elevated: "#e8ece2", line: "#c8d0c4", ink: "#242d27", muted: "#536455", faint: "#637365", accent: "#3b6345", accentInk: "#f5f8ef", accentSoft: "#dce7d5", danger: "#9b3930", clear: "transparent", shade: "rgba(10,15,12,0.45)" },
     slate: { name: "Slate", bg: "#171b22", surface: "#20262e", elevated: "#2c3540", line: "#414f5d", ink: "#edf0f3", muted: "#acb8c4", faint: "#90a1b1", accent: "#b8cfe7", accentInk: "#25354a", accentSoft: "#2d3e50", danger: "#f1b5ba", clear: "transparent", shade: "rgba(10,14,20,0.6)" }
@@ -135,6 +136,7 @@
   const channel = id => call(stores.ChannelStore, "getChannel", [id], null);
   const user = id => call(stores.UserStore, "getUser", [id], null);
   const unread = id => !!call(stores.ReadStateStore, "hasUnread", [id], false);
+  const mentionCount = id => Math.max(0, Number(call(stores.ReadStateStore, "getMentionCount", [id], 0)) || 0);
   const isPrivate = c => c?.type === 1 || c?.type === 3;
   function checkAccount() {
     const id = me()?.id || null;
@@ -166,7 +168,7 @@
     return items.map(v => typeof v === "string" ? channel(v) : v?.channel || v).filter(c => c?.id && isPrivate(c) && !seen.has(c.id) && seen.add(c.id))
       .filter(c => c.type === 3 || !call(stores.RelationshipStore, "isBlocked", [call(c, "getRecipientId", [], c.recipients?.[0])], false))
       .map(c => { const u = user(call(c, "getRecipientId", [], c.recipients?.[0])); const cached = call(stores.MessageStore, "getMessages", [c.id], null); const last = call(cached, "last", [], null);
-        return { id: c.id, channel: c, user: u, name: c.name || (c.type === 3 ? (c.recipients || []).map(id => userName(user(id))).slice(0, 3).join(", ") || "Group DM" : userName(u)), unread: unread(c.id), preview: cfg("showPreviews") && typeof last?.content === "string" ? last.content.replace(/\s+/g, " ").slice(0, 140) : "" }; });
+        return { id: c.id, channel: c, user: u, name: c.name || (c.type === 3 ? (c.recipients || []).map(id => userName(user(id))).slice(0, 3).join(", ") || "Group DM" : userName(u)), unread: unread(c.id), mentions: mentionCount(c.id), preview: cfg("showPreviews") && typeof last?.content === "string" ? last.content.replace(/\s+/g, " ").slice(0, 140) : "" }; });
   }
   function permission(name, c) {
     if (!c || !accountId) return false;
@@ -469,10 +471,16 @@
       h(Control, { id: "server:" + g.id, label: g.name, action: "server", value: g.id, style: { alignItems: "flex-start", padding: SPACE.lg, minHeight: 62 } }, t(g.name, { fontSize: TYPE.body, fontWeight: "600", letterSpacing: -0.2 }, { numberOfLines: 1 }))); }
     function ServerRow(p) { const g = p.guild; return h(RN.View, { style: { flexDirection: "row", alignItems: "center", paddingVertical: SPACE.sm } }, h(Control, { id: "server:" + g.id, label: g.name, action: "server", value: g.id, style: { flex: 1, flexDirection: "row", justifyContent: "flex-start" } }, h(Avatar, { name: g.name, uri: imageUrl(g, "guild"), size: 44, square: true }), t(g.name, { marginLeft: SPACE.md, flex: 1, fontWeight: "500" }, { numberOfLines: 1 })), h(Pin, { kind: "guild", id: g.id, name: g.name })); }
     function ServerGrid(p) { const columns = p.width >= 600 ? 3 : 2, width = Math.floor((p.width - SPACE.xl * 2 - SPACE.md * (columns - 1)) / columns); return h(RN.View, { style: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" } }, ...p.items.map(g => h(ServerCard, { key: g.id, guild: g, width }))); }
+    function Badge(p) {
+      const c = colors(), n = p.count;
+      if (!n && !p.dot) return null;
+      return h(RN.View, { accessible: false, style: n ? { minWidth: 20, height: 20, paddingHorizontal: 6, borderRadius: RAD.round, backgroundColor: c.accent, alignItems: "center", justifyContent: "center", marginLeft: SPACE.sm } : { width: 8, height: 8, borderRadius: RAD.round, backgroundColor: c.accent, marginLeft: SPACE.sm } },
+        n ? t(n > 99 ? "99+" : String(n), { fontSize: 11, lineHeight: 14, fontWeight: "700", color: c.accentInk }, { accessible: false }) : null);
+    }
     function DmRow(p) { const d = p.dm; return h(RN.View, { style: { flexDirection: "row", alignItems: "center", borderBottomWidth: 1, borderBottomColor: colors().line } },
       h(Control, { id: "dm:" + d.id, label: d.name, action: "channel", value: d.id, style: { flex: 1, flexDirection: "row", justifyContent: "flex-start", paddingVertical: cfg("density") === "compact" ? SPACE.md : SPACE.lg } }, h(Avatar, { name: d.name, uri: imageUrl(d.user, "user"), size: 46 }),
-        h(RN.View, { style: { flex: 1, minWidth: 0, marginLeft: SPACE.md } }, h(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, t(d.name, { flex: 1, fontWeight: d.unread ? "700" : "500" }, { numberOfLines: 1 }), d.unread ? h(RN.View, { style: { width: 7, height: 7, borderRadius: RAD.round, backgroundColor: colors().accent } }) : null),
-          d.preview ? t(d.preview, { color: colors().muted, fontSize: TYPE.caption, marginTop: SPACE.xs }, { numberOfLines: 1 }) : null)), h(Pin, { kind: "dm", id: d.id, name: d.name })); }
+        h(RN.View, { style: { flex: 1, minWidth: 0, marginLeft: SPACE.md } }, h(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, t(d.name, { flex: 1, fontWeight: d.unread ? "700" : "500" }, { numberOfLines: 1 }), h(Badge, { count: d.mentions, dot: d.unread })),
+          d.preview ? t(d.preview, { color: d.unread ? colors().ink : colors().muted, fontSize: TYPE.caption, marginTop: SPACE.xs }, { numberOfLines: 1 }) : null)), h(Pin, { kind: "dm", id: d.id, name: d.name })); }
     function Home(p) { const gs = guilds(), ds = listDms(), q = state.search.toLowerCase().trim(), favorites = gs.filter(g => pinned("guild", g.id)); const show = (q ? gs.filter(g => g.name.toLowerCase().includes(q)) : favorites.length ? favorites : gs).slice(0, 4); const dms = (q ? ds.filter(d => d.name.toLowerCase().includes(q)) : ds).slice(0, 6); return h(Page, { title: "Home" },
       h(Search, { placeholder: "Search" }), h(Section, { title: favorites.length && !q ? "Favorites" : "Servers", right: button("View all", "tab", "servers", { backgroundColor: colors().clear, paddingHorizontal: SPACE.sm }, "all-servers") }),
       show.length ? h(ServerGrid, { items: show, width: p.width }) : h(Empty, { title: "No servers found" }),
@@ -636,9 +644,18 @@
           h(Page, { title: "Servers", right: ib("CloseIcon", "Close", "drawer-close", null, "drawer-close"), id: "drawer-scroll" }, h(ServerGrid, { items: guilds(), width: p.width })),
           button("View all servers", "expand", null, { marginHorizontal: SPACE.xl, marginBottom: SPACE.lg }, "expand-drawer")));
     }
-    function Dock() { const c = colors(); return h(RN.View, { testID: "reimagined-dock", style: { width: "100%", paddingHorizontal: SPACE.lg, paddingVertical: SPACE.sm, backgroundColor: c.bg } }, h(RN.View, { style: { flexDirection: "row", alignItems: "center", padding: SPACE.xs, borderRadius: RAD.large, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line } },
-      ...NAV.map(n => h(Control, { key: n.id, id: "tab-" + n.id, label: n.label, role: "tab", action: "tab", value: n.id, selected: state.tab === n.id && state.screen === "main", measure: true, longPress: n.id === "servers" ? () => send("drawer") : undefined,
-        style: { flex: 1, minWidth: 0, minHeight: 54, borderRadius: RAD.medium, backgroundColor: state.tab === n.id && state.screen === "main" ? c.accentSoft : c.clear } }, h(Icon, { name: n.icon, color: state.tab === n.id && state.screen === "main" ? c.accent : c.muted, size: 21 }), t(n.label, { fontSize: TYPE.small, lineHeight: 17, fontWeight: "600", color: state.tab === n.id && state.screen === "main" ? c.accent : c.muted, marginTop: 2 }, { numberOfLines: 1 }))))); }
+    function Dock() {
+      const c = colors(), total = listDms().reduce((sum, d) => sum + d.mentions, 0);
+      return h(RN.View, { testID: "reimagined-dock", style: { width: "100%", paddingHorizontal: SPACE.lg, paddingVertical: SPACE.sm, backgroundColor: c.bg } }, h(RN.View, { style: { flexDirection: "row", alignItems: "center", padding: SPACE.xs, borderRadius: RAD.round, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line } },
+        ...NAV.map(n => {
+          const on = state.tab === n.id && state.screen === "main";
+          return h(Control, { key: n.id, id: "tab-" + n.id, label: n.label, role: "tab", action: "tab", value: n.id, selected: on, measure: true, longPress: n.id === "servers" ? () => send("drawer") : undefined,
+            style: { flex: on ? 1.7 : 1, minWidth: 0, minHeight: 50, flexDirection: "row", borderRadius: RAD.round, backgroundColor: on ? c.accentSoft : c.clear } },
+            h(Icon, { name: n.icon, color: on ? c.accent : c.muted, size: 22 }),
+            on ? t(n.label, { fontSize: TYPE.caption, lineHeight: 18, fontWeight: "600", color: c.accent, marginLeft: SPACE.sm, flexShrink: 1 }, { numberOfLines: 1, accessible: false }) : null,
+            n.id === "messages" && total ? h(RN.View, { accessible: false, style: { position: "absolute", top: 6, right: on ? 10 : "22%", minWidth: 16, height: 16, paddingHorizontal: 4, borderRadius: RAD.round, backgroundColor: c.accent, alignItems: "center", justifyContent: "center" } }, t(total > 99 ? "99+" : String(total), { fontSize: 10, lineHeight: 13, fontWeight: "700", color: c.accentInk }, { accessible: false })) : null);
+        })));
+    }
     Boundary = class extends React.Component { constructor(p) { super(p); this.state = { failed: false }; } componentDidCatch() { issue("surface-render-failed"); this.setState({ failed: true }); } render() { return this.state.failed ? h(RN.View, { style: { backgroundColor: colors().bg, padding: SPACE.xl } }, t("This screen could not be displayed."), button("Back", "back", null, { marginTop: SPACE.lg }), button("Settings", "settings", null, { marginTop: SPACE.md }), button("Copy compatibility report", "report", null, { marginTop: SPACE.md }), button("Restore Discord", "restore", null, { marginTop: SPACE.md }, "render-error-restore")) : this.props.children; } };
     Scene = class extends React.Component {
       constructor(p) { super(p); this.state = { tick: 0, width: safe(() => RN.Dimensions.get("window").width, 390) }; this.refresh = () => this.setState(s => ({ tick: s.tick + 1 })); }
