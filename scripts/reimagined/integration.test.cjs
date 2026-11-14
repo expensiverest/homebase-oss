@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.13');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.14');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -171,7 +171,13 @@ test('native skin wraps the settings SearchField in a pill', async () => {
   const field = { type: () => ({ type: 'Field', props: {} }) };
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {}, SearchField: field } });
   assert.equal(f.plugin.diagnostics().hooks.NativeSkinSearchField, 'patched x1');
-  const out = JSON.stringify(field.type()); assert.ok(out.includes('"borderRadius":999') && out.includes('Field')); await f.stop();
+  const out = JSON.stringify(field.type()); assert.ok(out.includes('"borderRadius":18') && out.includes('Field')); await f.stop();
+});
+test('app tour visits declared routes, skips risky ones and returns', async () => {
+  const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} } });
+  f.plugin.scanApp(); f.advance(300); for (let i = 0; i < 6; i++) f.advance(900);
+  const names = f.navigations.map(n => n.name);
+  assert.ok(names.includes('settings')); assert.ok(!names.includes('DISTRA_CUSTOM_PAGE')); assert.equal(names[names.length - 1], 'home'); await f.stop();
 });
 test('blueprint search probe captures search elements', async () => {
   const f = fixture({ hub: { TableRowGroup: () => null, TableRow: () => null }, blueprint: true });
