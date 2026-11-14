@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.30 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.31 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.30", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.31", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
@@ -725,7 +725,7 @@
       render() {
         const { __reimaginedOrig: Orig, ...rest } = this.props;
         if (!live || this.state.failed || !cfg("nativeScreens") || !me()) return h(Orig, { ...rest, __reimaginedRaw: true });
-        const c = colors(), Safe = RN.SafeAreaView || RN.View, width = Math.min(this.state.width, 820), mine = embeddedRoute === rest.route?.name, tab = mine ? state.tab : SCREEN_TAB[rest.route?.name], screen = mine ? state.screen : "main";
+        const c = colors(), Safe = RN.SafeAreaView || RN.View, width = Math.min(this.state.width, 820), mine = embeddedRoute === rest.route?.name, tab = rest.forceTab || (mine ? state.tab : SCREEN_TAB[rest.route?.name]), screen = mine ? state.screen : "main";
         const content = screen === "media" ? h(Media) : screen === "call" ? h(CallScreen) : screen === "edit-profile" ? h(EditProfile) : screen === "preferences" ? h(Preferences) : screen === "profile" ? h(Profile, { id: state.profile }) : screen === "channels" ? h(Channels) : tab === "servers" ? h(Servers, { width }) : tab === "messages" ? h(Messages) : tab === "you" ? h(Profile, { id: accountId }) : h(Home, { width });
         return h(Safe, { testID: "reimagined-native-screen", style: { flex: 1, backgroundColor: c.bg, paddingBottom: rest.overlay ? 0 : 84 } }, h(Boundary, { key: screen + ":" + tab }, h(SkinFrame, { fill: true }, content)), state.drawer && mine ? h(ServerDrawer, { width }) : null);
       }
@@ -804,7 +804,7 @@
   function patch(raw, name, mode) { const target = safe(() => renderTarget(raw, name), null); if (!live || !target) return false; const [object, method] = target, seen = targets.get(object) || new Set(); if (seen.has(method)) return true;
     try { api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint")) safe(() => recordTabBar(name, _args[0])); if (!live || output == null || !me() || (mode === "launcher" && health.hooks.YouBar === "patched")) return output; return h(DockHost, { original: output, mode }); }); seen.add(method); targets.set(object, seen); health.hooks[name] = "patched"; return true; } catch (_) { issue("hook-failed:" + name); return false; } }
   let SkinFrame, NativeHost, NativeOverlay, RowCard, embeddedRoute = null;
-  const SCREEN_TAB = { guilds: "home", notifications: "messages", you: "you" };
+  const SCREEN_TAB = { guilds: "home", messages: "messages", notifications: "messages", you: "you" };
   // Diagnostic: lists (in the compatibility report) which navigation-related elements Discord really creates, with their prop names.
   let navProbeCount = 0; const treeSeen = new Set();
   function navProbe(type, props) {
@@ -1022,7 +1022,7 @@
     if (c?.setString) { c.setString(JSON.stringify(data)); toast("Settings blueprint copied"); }
   }
   // Rewrites the native screen components themselves (found by Discord's module file paths, which survive minification) so the Reimagined layout renders in place of their output, inside the native navigator and header.
-  const LAYOUT_TARGETS = [["NativeHome", "modules/main_tabs_v2/native/tabs/messages/Messages.tsx", "guilds", false], ["NativeNotifications", "modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx", "notifications", true], ["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true]];
+  const LAYOUT_TARGETS = [["NativeHome", "modules/main_tabs_v2/native/tabs/messages/Messages.tsx", "messages", false], ["NativeNotifications", "modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx", "notifications", true], ["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true]];
   const passthrough = p => p.__out == null ? null : p.__out;
   function patchLayouts() {
     if (!live) return;
@@ -1032,11 +1032,12 @@
       if (!target) { health.hooks[label] = "not found"; continue; }
       const [object, method] = target, seen = targets.get(object) || new Set();
       if (seen.has("layout:" + route)) { health.hooks[label] = "patched"; continue; }
+      if ([...seen].some(k => String(k).startsWith("layout:"))) { health.hooks[label] = "shared with another screen"; continue; }
       try {
         api.patcher.after(method, object, (_args, output) => {
           if (!live || !cfg("nativeScreens") || output == null || !NativeHost) return output;
           health.hooks[label] = "layout";
-          return h(NativeHost, { route: { name: route }, navigation: safe(() => root(), null), overlay: pushed, __out: output, __reimaginedOrig: passthrough });
+          return h(NativeHost, { route: { name: route }, forceTab: SCREEN_TAB[route] || route, navigation: safe(() => root(), null), overlay: pushed, __out: output, __reimaginedOrig: passthrough });
         });
         seen.add("layout:" + route); targets.set(object, seen); health.hooks[label] = "patched";
       } catch (_) { issue("hook-failed:" + label); }

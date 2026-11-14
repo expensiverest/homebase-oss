@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.30');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.31');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -260,7 +260,7 @@ swap('    Boundary = class extends React.Component {', `    SkinFrame = class ex
     Boundary = class extends React.Component {`);
 swap('  function scan() {', `  let SkinFrame;
   // Rewrites the native screen components themselves (found by Discord's module file paths, which survive minification) so the Reimagined layout renders in place of their output, inside the native navigator and header.
-  const LAYOUT_TARGETS = [["NativeHome", "modules/main_tabs_v2/native/tabs/messages/Messages.tsx", "guilds", false], ["NativeNotifications", "modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx", "notifications", true], ["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true]];
+  const LAYOUT_TARGETS = [["NativeHome", "modules/main_tabs_v2/native/tabs/messages/Messages.tsx", "messages", false], ["NativeNotifications", "modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx", "notifications", true], ["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true]];
   const passthrough = p => p.__out == null ? null : p.__out;
   function patchLayouts() {
     if (!live) return;
@@ -270,11 +270,12 @@ swap('  function scan() {', `  let SkinFrame;
       if (!target) { health.hooks[label] = "not found"; continue; }
       const [object, method] = target, seen = targets.get(object) || new Set();
       if (seen.has("layout:" + route)) { health.hooks[label] = "patched"; continue; }
+      if ([...seen].some(k => String(k).startsWith("layout:"))) { health.hooks[label] = "shared with another screen"; continue; }
       try {
         api.patcher.after(method, object, (_args, output) => {
           if (!live || !cfg("nativeScreens") || output == null || !NativeHost) return output;
           health.hooks[label] = "layout";
-          return h(NativeHost, { route: { name: route }, navigation: safe(() => root(), null), overlay: pushed, __out: output, __reimaginedOrig: passthrough });
+          return h(NativeHost, { route: { name: route }, forceTab: SCREEN_TAB[route] || route, navigation: safe(() => root(), null), overlay: pushed, __out: output, __reimaginedOrig: passthrough });
         });
         seen.add("layout:" + route); targets.set(object, seen); health.hooks[label] = "patched";
       } catch (_) { issue("hook-failed:" + label); }
@@ -505,7 +506,7 @@ swap('const launch = this.props.mode === "settings" || !me() ? null', 'const lau
 swap('if (!baseRoute || !cfg("layout")) return;', 'if (!baseRoute || !cfg("layout") || cfg("nativeScreens")) return;');
 swap('    push({ screen: "conversation", channel: id }); loadMessages(id);', '    if (cfg("nativeScreens")) { nativeConversation(id); return; }\n    push({ screen: "conversation", channel: id }); loadMessages(id);');
 swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, RowCard, embeddedRoute = null;
-  const SCREEN_TAB = { guilds: "home", notifications: "messages", you: "you" };
+  const SCREEN_TAB = { guilds: "home", messages: "messages", notifications: "messages", you: "you" };
   // Diagnostic: lists (in the compatibility report) which navigation-related elements Discord really creates, with their prop names.
   let navProbeCount = 0; const treeSeen = new Set();
   function navProbe(type, props) {
@@ -573,7 +574,7 @@ swap('    Boundary = class extends React.Component {', `    RowCard = class exte
       render() {
         const { __reimaginedOrig: Orig, ...rest } = this.props;
         if (!live || this.state.failed || !cfg("nativeScreens") || !me()) return h(Orig, { ...rest, __reimaginedRaw: true });
-        const c = colors(), Safe = RN.SafeAreaView || RN.View, width = Math.min(this.state.width, 820), mine = embeddedRoute === rest.route?.name, tab = mine ? state.tab : SCREEN_TAB[rest.route?.name], screen = mine ? state.screen : "main";
+        const c = colors(), Safe = RN.SafeAreaView || RN.View, width = Math.min(this.state.width, 820), mine = embeddedRoute === rest.route?.name, tab = rest.forceTab || (mine ? state.tab : SCREEN_TAB[rest.route?.name]), screen = mine ? state.screen : "main";
         const content = screen === "media" ? h(Media) : screen === "call" ? h(CallScreen) : screen === "edit-profile" ? h(EditProfile) : screen === "preferences" ? h(Preferences) : screen === "profile" ? h(Profile, { id: state.profile }) : screen === "channels" ? h(Channels) : tab === "servers" ? h(Servers, { width }) : tab === "messages" ? h(Messages) : tab === "you" ? h(Profile, { id: accountId }) : h(Home, { width });
         return h(Safe, { testID: "reimagined-native-screen", style: { flex: 1, backgroundColor: c.bg, paddingBottom: rest.overlay ? 0 : 84 } }, h(Boundary, { key: screen + ":" + tab }, h(SkinFrame, { fill: true }, content)), state.drawer && mine ? h(ServerDrawer, { width }) : null);
       }
@@ -610,11 +611,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.30',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.31',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.30
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.31
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -660,4 +661,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.30', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.31', sourceSHA256: digest(code), output: out }));
