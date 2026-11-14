@@ -1,15 +1,9 @@
 {
   "name": "Discord: Reimagined",
-  "description": "Scroll-aware headers, Servers and Messages navigation, custom conversations, composer, media, voice controls and editable profiles. Experimental alpha.",
-  "authors": [
-    {
-      "name": "expensiverest"
-    }
-  ],
-  "version": "0.2.0-alpha.1",
-  "main": "next.js",
-  "hash": "e508378660675a0659af7cc1276491ca7588aea7f3245a1da2c11536c75a9451",
-  "distra": {
-    "spec": 1
-  }
+  "description": "Recovery rollback to the original Home, Spaces, Chats and You interface. The 0.2.0-alpha.1 native-route release is withdrawn after an on-device navigation lockout.",
+  "authors": [{ "name": "expensiverest" }],
+  "version": "0.1.0-alpha.1",
+  "main": "index.js",
+  "hash": "c1f58d54791466bf4dad42b2f79ec2ee418854cb1c008e1c5eaf88ab6804ab81",
+  "distra": { "spec": 1 }
 }
