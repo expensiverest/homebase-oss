@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.33 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.34 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.33", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.34", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
@@ -556,6 +556,63 @@
         own ? h(RN.View, null, button("Edit Profile", "edit-profile", null, { backgroundColor: colors().accentSoft }, "edit-profile"),
           h(Section, { title: "Settings" }), button("Appearance", "preferences", null, { marginBottom: SPACE.md }, "appearance"), button("Avatar and Banner", "settings", "profile", { marginBottom: SPACE.md }, "avatar-settings"), button("Account Settings", "settings", null, { marginBottom: SPACE.md }, "account-settings")) : null);
     }
+    // The You page: everything the native You screen exposes (banner, status, badges, Orbs, member since, connections, friends, note, activity,
+    // Quests/Shop/Nitro/Settings, account switcher), laid out in the Reimagined language. Anything only Discord can render (activity history, wishlist) opens the native page in place.
+    const youStore = name => { youStore.cache = youStore.cache || {}; return youStore.cache[name] || (youStore.cache[name] = safe(() => api.metro.findByStoreName(name), null)); };
+    const deepLink = path => { recordTap("you-link:" + path); safe(() => RN.Linking.openURL("discord://-" + path)); };
+    const accountSheet = () => { const m = safe(() => api.metro.findByFilePath("modules/main_tabs_v2/native/tabs/you/utils/showYouAccountActionSheet.tsx"), null), fn = m?.showYouAccountActionSheet || m?.default; if (typeof fn !== "function" || safe(() => (fn(), false), true)) send("settings"); };
+    const since = id => safe(() => new Date(Number((BigInt(id) >> BigInt(22)) + BigInt(1420070400000))).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }), null);
+    const activityArt = a => { const img = a?.assets?.large_image; if (!img) return null; if (img.startsWith("spotify:")) return "https://i.scdn.co/image/" + img.slice(8); if (img.startsWith("mp:")) return "https://media.discordapp.net/" + img.slice(3); return a.application_id ? "https://cdn.discordapp.com/app-assets/" + a.application_id + "/" + img + ".png" : null; };
+    const youExtra = {};
+    class YouPage extends React.Component {
+      constructor(p) { super(p); this.state = { tab: "main" }; }
+      componentDidMount() {
+        const id = accountId; if (!id || youExtra[id]) return; youExtra[id] = {};
+        safe(() => http("get", "/users/" + encodeURIComponent(id) + "/profile").then(p => { youExtra[id] = { ...(p?.user_profile || {}), badges: p?.badges, connectedAccounts: p?.connected_accounts }; if (live) this.setState({ loaded: true }); }, () => { delete youExtra[id]; }));
+      }
+      render() {
+        const c = colors(), id = accountId, u = me(), data = { ...profileFor(id), ...(youExtra[id] || {}) }, name = data._displayName || userName(u);
+        const status = call(stores.PresenceStore, "getStatus", [id], "online"), ring = { online: "#3BA55D", idle: "#FAA81A", dnd: "#ED4245" }[status] || c.line;
+        const acts = call(stores.PresenceStore, "getActivities", [id], []) || [], custom = acts.find(a => a?.type === 4), others = acts.filter(a => a && a.type !== 4);
+        const accentNum = data.accentColor ?? data.accent_color ?? u?.accentColor, banner = imageUrl({ id, banner: data.banner || u?.banner }, "banner"), accent = typeof accentNum === "number" ? "#" + accentNum.toString(16).padStart(6, "0") : c.accentSoft;
+        const badges = Array.isArray(data.badges) ? data.badges : [], links = (data.connectedAccounts || data.connected_accounts || []).filter(x => x && x.name);
+        const rel = call(stores.RelationshipStore, "getFriendIDs", [], null) || Object.entries(call(stores.RelationshipStore, "getRelationships", [], {}) || {}).filter(([, v]) => v === 1 || v?.type === 1).map(([k]) => k);
+        const vc = youStore("VirtualCurrencyStore"), orbs = call(vc, "getCurrentBalance", [], null) ?? vc?.balance, note = call(youStore("NoteStore"), "getNote", [id], null)?.note;
+        const card = (children, extra) => h(RN.View, { style: [{ backgroundColor: c.surface, borderRadius: RAD.large, padding: SPACE.lg, marginBottom: SPACE.md }, extra] }, children);
+        const label = s => t(s, { fontSize: TYPE.small, fontWeight: "700", letterSpacing: 0.8, color: c.muted, marginBottom: SPACE.sm });
+        const tile = (icon, text, run, key) => h(Control, { key, id: "you-" + key, label: text, run, style: { flex: 1, paddingVertical: SPACE.md, borderRadius: RAD.medium, backgroundColor: c.surface, marginHorizontal: 3 } }, h(Icon, { name: icon, size: 22, color: c.ink }), t(text, { fontSize: TYPE.small, fontWeight: "600", marginTop: SPACE.xs }));
+        const seg = ["main", "activity"].map(k => h(Control, { key: k, id: "you-tab-" + k, label: k, selected: this.state.tab === k, run: () => { if (animated()) safe(() => RN.LayoutAnimation.configureNext(RN.LayoutAnimation.Presets.easeInEaseOut)); this.setState({ tab: k }); }, style: { flex: 1, borderRadius: RAD.round, backgroundColor: this.state.tab === k ? c.elevated : "transparent" } }, t(k === "main" ? "Main" : "Activity", { fontSize: TYPE.caption, fontWeight: "700", color: this.state.tab === k ? c.ink : c.muted })));
+        const main = [
+          orbs != null ? card(h(RN.View, { style: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" } }, t("Orbs Balance", { fontWeight: "600" }), h(RN.View, { style: { paddingHorizontal: SPACE.md, paddingVertical: 6, borderRadius: RAD.round, backgroundColor: c.elevated } }, t(String(orbs), { fontWeight: "700" }))), null) : null,
+          data.bio ? card([label("ABOUT ME"), h(MessageText, { key: "bio", content: data.bio })]) : null,
+          card([label("MEMBER SINCE"), t(since(id) || "Unknown", { key: "d", fontSize: TYPE.body })]),
+          links.length ? card([label("CONNECTIONS"), ...links.map((l, i) => h(RN.View, { key: "l" + i, style: { flexDirection: "row", alignItems: "center", paddingVertical: 6 } }, h(RN.View, { style: { paddingHorizontal: SPACE.sm, paddingVertical: 2, borderRadius: RAD.small - 4, backgroundColor: c.elevated, marginRight: SPACE.md } }, t(String(l.type || "").toUpperCase(), { fontSize: 10, fontWeight: "700", color: c.muted })), t(l.name + (l.verified ? "  \u2713" : ""), { flex: 1, fontWeight: "600" }, { numberOfLines: 1 })))]) : null,
+          card(h(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, h(RN.View, { style: { flex: 1 } }, t("Friends", { fontWeight: "600" }), t(rel.length + " friends", { fontSize: TYPE.caption, color: c.muted, marginTop: 2 })), h(RN.View, { style: { flexDirection: "row" } }, ...rel.slice(0, 5).map((fid, i) => h(RN.View, { key: fid, style: { marginLeft: i ? -10 : 0, borderRadius: 16, borderWidth: 2, borderColor: c.surface } }, h(Avatar, { name: userName(user(fid)), uri: imageUrl(user(fid), "user"), size: 28 })))))),
+          card([label("NOTE (ONLY VISIBLE TO YOU)"), t(note || "No note yet.", { key: "n", color: note ? c.ink : c.muted })])
+        ];
+        const activity = [
+          others.length ? others.map((a, i) => card(h(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, activityArt(a) ? h(RN.Image, { source: { uri: activityArt(a) }, style: { width: 56, height: 56, borderRadius: RAD.small, marginRight: SPACE.md } }) : null,
+            h(RN.View, { style: { flex: 1, minWidth: 0 } }, t(({ 0: "Playing", 1: "Streaming", 2: "Listening to", 3: "Watching", 5: "Competing in" }[a.type] || "") + " " + (a.name || ""), { fontSize: TYPE.small, fontWeight: "700", color: c.muted }, { numberOfLines: 1 }), a.details ? t(a.details, { fontWeight: "600", marginTop: 2 }, { numberOfLines: 1 }) : null, a.state ? t(a.state, { fontSize: TYPE.caption, color: c.muted }, { numberOfLines: 1 }) : null)), { key: "a" + i })) : card(t("Nothing happening right now.", { color: c.muted })),
+          this.props.onClassic ? h(Control, { key: "classic", id: "you-history", label: "Recent activity and wishlist", run: this.props.onClassic, style: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: SPACE.lg, paddingVertical: SPACE.lg, borderRadius: RAD.large, backgroundColor: c.surface } }, t("Recent activity and wishlist", { fontWeight: "600" }), h(Icon, { name: "ArrowSmallRightIcon", size: 18 })) : null
+        ];
+        return h(Page, { title: "You", right: ib("SettingsIcon", "Settings", "settings", null, "profile-settings") },
+          h(RN.View, { style: { borderRadius: RAD.sheet, overflow: "hidden", backgroundColor: c.surface, marginBottom: SPACE.lg } },
+            banner ? h(RN.Image, { source: { uri: banner }, resizeMode: "cover", style: { height: 120, width: "100%" } }) : h(RN.View, { style: { height: 120, backgroundColor: accent } }),
+            h(RN.View, { style: { paddingHorizontal: SPACE.lg, paddingBottom: SPACE.lg } },
+              h(RN.View, { style: { flexDirection: "row", alignItems: "flex-end", marginTop: -44 } },
+                h(RN.View, { style: { borderRadius: 50, borderWidth: 4, borderColor: c.surface } }, h(RN.View, { style: { borderRadius: 46, borderWidth: 3, borderColor: ring } }, h(Avatar, { name, uri: imageUrl(u, "user"), size: 80 }))),
+                h(Control, { id: "you-status", label: "Set status", run: accountSheet, style: { flex: 1, marginLeft: SPACE.md, marginBottom: SPACE.sm, alignItems: "flex-start", paddingHorizontal: SPACE.md, borderRadius: RAD.medium, backgroundColor: c.elevated } }, t(custom ? ((custom.emoji?.name && !custom.emoji.id ? custom.emoji.name + " " : "") + (custom.state || "")) : "Set a status", { fontSize: TYPE.caption, fontStyle: custom ? "normal" : "italic", color: custom ? c.ink : c.muted }, { numberOfLines: 2 }))),
+              h(Control, { id: "you-account", label: "Switch account or status", run: accountSheet, style: { flexDirection: "row", justifyContent: "flex-start", marginTop: SPACE.md, minHeight: 36 } }, t(name, { fontSize: TYPE.section, fontWeight: "800", letterSpacing: -0.4 }, { numberOfLines: 1 }), t("  \u25BE", { color: c.muted, fontSize: TYPE.body })),
+              h(RN.View, { style: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" } }, t(u?.username || "", { color: c.muted }), data.pronouns ? t("  \u00B7  " + data.pronouns, { color: c.muted }) : null,
+                badges.length ? h(RN.View, { style: { flexDirection: "row", marginLeft: SPACE.sm, paddingHorizontal: 6, paddingVertical: 3, borderRadius: RAD.small - 4, backgroundColor: c.elevated } }, ...badges.slice(0, 10).map(b => h(RN.Image, { key: b.id, accessibilityLabel: b.description, source: { uri: "https://cdn.discordapp.com/badge-icons/" + b.icon + ".png" }, style: { width: 18, height: 18, marginHorizontal: 2 } }))) : null),
+              h(RN.View, { style: { flexDirection: "row", marginTop: SPACE.lg } },
+                button("Edit Profile", "edit-profile", null, { flex: 1, backgroundColor: c.accent, marginRight: SPACE.sm }, "edit-profile"),
+                button("Avatar & Banner", "settings", "profile", { flex: 1 }, "avatar-settings")))),
+          h(RN.View, { style: { flexDirection: "row", marginHorizontal: -3, marginBottom: SPACE.lg } }, tile("QuestsIcon", "Quests", () => deepLink("/quest-home"), "quests"), tile("ShopIcon", "Shop", () => deepLink("/shop"), "shop"), tile("NitroWheelIcon", "Nitro", () => deepLink("/store"), "nitro"), tile("SettingsIcon", "Settings", () => send("settings"), "settings")),
+          h(RN.View, { style: { flexDirection: "row", padding: 4, borderRadius: RAD.round, backgroundColor: c.surface, marginBottom: SPACE.lg } }, ...seg),
+          ...(this.state.tab === "main" ? main : activity));
+      }
+    }
     class EditProfile extends React.Component {
       constructor(p) { super(p); const data = profileFor(accountId), u = me(); this.state = { globalName: data._displayName || u?.globalName || u?.global_name || "", bio: data.bio || "", pronouns: data.pronouns || "", dirty: [], busy: false, error: null }; this.owner = accountId; }
       async save() {
@@ -751,8 +808,9 @@
       render() {
         const { __reimaginedOrig: Orig, ...rest } = this.props;
         if (!live || this.state.failed || !cfg("nativeScreens") || !me()) return h(Orig, { ...rest, __reimaginedRaw: true });
+        if (this.state.classic && rest.__out != null) { const c = colors(); return h(RN.View, { style: { flex: 1 } }, rest.__out, h(Control, { id: "you-reimagined", label: "Back to Reimagined", run: () => this.setState({ classic: false }), style: { position: "absolute", top: 58, right: SPACE.lg, paddingHorizontal: SPACE.lg, borderRadius: RAD.round, backgroundColor: c.accentSoft } }, t("Reimagined", { fontSize: TYPE.caption, fontWeight: "700", color: c.accent }))); }
         const c = colors(), Safe = RN.SafeAreaView || RN.View, width = Math.min(this.state.width, 820), mine = embeddedRoute === rest.route?.name, tab = rest.forceTab || (mine ? state.tab : SCREEN_TAB[rest.route?.name]), screen = mine ? state.screen : "main";
-        const content = screen === "media" ? h(Media) : screen === "call" ? h(CallScreen) : screen === "edit-profile" ? h(EditProfile) : screen === "preferences" ? h(Preferences) : screen === "profile" ? h(Profile, { id: state.profile }) : screen === "channels" ? h(Channels) : tab === "servers" ? h(Servers, { width }) : tab === "messages" ? h(Messages) : tab === "you" ? h(Profile, { id: accountId }) : h(Home, { width });
+        const content = screen === "media" ? h(Media) : screen === "call" ? h(CallScreen) : screen === "edit-profile" ? h(EditProfile) : screen === "preferences" ? h(Preferences) : screen === "profile" ? h(Profile, { id: state.profile }) : screen === "channels" ? h(Channels) : tab === "servers" ? h(Servers, { width }) : tab === "messages" ? h(Messages) : tab === "you" ? h(YouPage, { onClassic: rest.__out != null ? () => { recordTap("you-classic"); this.setState({ classic: true }); } : null }) : h(Home, { width });
         return h(Safe, { testID: "reimagined-native-screen", style: { flex: 1, backgroundColor: c.bg, paddingBottom: rest.overlay ? 0 : 84 } }, h(Boundary, { key: screen + ":" + tab }, h(SkinFrame, { fill: true }, content)), state.drawer && mine ? h(ServerDrawer, { width }) : null);
       }
     };
@@ -852,7 +910,7 @@
     if (props && props.__reimaginedRaw) { const { __reimaginedRaw, ...rest } = props; return [type, rest, ...args.slice(2)]; }
     if (live && cfg("nativeScreens") && props && typeof type !== "string") safe(() => navProbe(type, props));
     // Layout: conversation rows (recognised by their props, since Discord's component names are minified) become spaced cards in place.
-    if (live && cfg("nativeScreens") && RowCard && props && typeof type !== "string" && type !== RowCard && props.channelId != null && Object.keys(props).every(k => k === "key" || k === "channelId")) {
+    if (live && cfg("nativeScreens") && cfg("nativeRowsBeta") && RowCard && props && typeof type !== "string" && type !== RowCard && props.channelId != null && Object.keys(props).every(k => k === "key" || k === "channelId")) {
       health.hooks.NativeRows = "cards";
       return [RowCard, { ...props, __reimaginedOrig: type }, ...args.slice(2)];
     }
@@ -1051,16 +1109,11 @@
   // elsewhere the native screen, its scroll plumbing and the YouBar stay intact while its building blocks (rows, section headers, items, empty states) take the Reimagined layout.
   const LAYOUT_TARGETS = [["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true]];
   const NC = "modules/notification_center/native/", MT = "modules/main_tabs_v2/native/tabs/messages/";
+  // Discord's notification and DM lists use fixed-size cells, so only self-sizing pieces (section headers) are re-laid out; rows and items stay native.
   const PIECE_TARGETS = [
-    ["NativeDmRow", MT + "items/MessagesItemChannel.tsx", ["MessagesItemChannelFast", "MessagesItemChannelFlash", "MessagesItemChannelLegend"], "row"],
-    ["NativeMessagesEmpty", MT + "MessagesEmptyState.tsx", ["default", "MessagesEmptyState"], "empty"],
-    ["NativeForYouItem", NC + "ForYouItems.tsx", ["ForYouItems"], "card"],
-    ["NativeForYouFriend", NC + "ForYouSuggestedFriendRow.tsx", ["default"], "card"],
     ["NativeForYouReadHeader", NC + "ForYouReadSectionHeader.tsx", ["ForYouReadSectionHeader"], "header"],
     ["NativeForYouRecentHeader", NC + "ForYouRecentActivitySectionHeader.tsx", ["ForYouRecentActivitySectionHeader"], "header"],
-    ["NativeForYouFriendsHeader", NC + "ForYouSuggestedFriendsSectionHeader.tsx", ["default"], "header"],
-    ["NativeForYouEmpty", NC + "ForYouEmptyState.tsx", ["ForYouEmptyState"], "empty"],
-    ["NativeForYouCleared", NC + "ForYouUnreadClearedState.tsx", ["ForYouUnreadClearedState"], "empty"]
+    ["NativeForYouFriendsHeader", NC + "ForYouSuggestedFriendsSectionHeader.tsx", ["default"], "header"]
   ];
   const passthrough = p => p.__out == null ? null : p.__out;
   function nodeText(node, depth = 0) {

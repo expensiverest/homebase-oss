@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.33');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.34');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -179,9 +179,10 @@ test('native screens restyle design-system cards in place and report hub exports
   const d = f.plugin.diagnostics().hooks; assert.equal(d.NativeSkinCard, 'patched x1'); assert.match(d.HubExports, /Card/);
   const out = JSON.stringify(card.type()); assert.ok(out.includes('"borderRadius":24') && out.includes('"flex":1')); await f.stop();
 });
-test('native screens wrap conversation rows in cards by props and fail open', async () => {
+test('native screens keep conversation rows native unless the row beta is enabled', async () => {
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} }, screens: true });
   const create = f.api.common.React.createElement, Row = function Row() { return null; };
+  assert.equal(create(Row, { channelId: '1' }).type, Row); f.api.storage.nativeRowsBeta = true;
   const wrapped = create(Row, { channelId: '1' }); assert.notEqual(wrapped.type, Row); assert.equal(wrapped.props.__reimaginedOrig, Row);
   const card = new wrapped.type(wrapped.props), relaid = card.render(); assert.equal(relaid.props.id, '1');
   const nativeRow = new relaid.type(relaid.props); assert.equal(nativeRow.render(), relaid.props.fallback);
@@ -200,16 +201,20 @@ test('native screens re-lay out pieces in place and only replace You on its rout
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} }, screens: true, files });
   await f.advance(2000);
   const hooks = f.plugin.diagnostics().hooks;
-  assert.equal(hooks.NativeForYouEmpty, 'not found'); assert.equal(hooks.NativeYou, 'patched');
+  assert.equal(hooks.NativeForYouEmpty, undefined); assert.equal(hooks.NativeDmRow, undefined); assert.equal(hooks.NativeYou, 'patched');
   assert.equal(files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default(), out);
   const header = files[NC + 'ForYouRecentActivitySectionHeader.tsx'].ForYouRecentActivitySectionHeader();
   assert.notEqual(header, out); assert.equal(header.props.fallback, out); assert.ok(JSON.stringify(header).includes('RECENT ACTIVITY'));
-  const card = files[NC + 'ForYouItems.tsx'].ForYouItems(); assert.equal(card.props.fallback, out);
-  const row = files['modules/main_tabs_v2/native/tabs/messages/items/MessagesItemChannel.tsx'].MessagesItemChannelFast({ channelId: '9' });
-  assert.equal(row.props.channelId, '9'); assert.equal(row.props.__reimaginedOrig(), out);
-  assert.equal(files['modules/main_tabs_v2/native/tabs/messages/items/MessagesItemChannel.tsx'].MessagesItemChannelFast({ channelId: '9', __reimaginedRaw: true }), out);
+  assert.equal(files[NC + 'ForYouItems.tsx'].ForYouItems(), out);
+  assert.equal(files['modules/main_tabs_v2/native/tabs/messages/items/MessagesItemChannel.tsx'].MessagesItemChannelFast({ channelId: '9' }), out);
+  f.focused({ name: 'you' }); const you = files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default();
+  assert.equal(you.props.__out, out); const host = new you.type(you.props), tree = host.render();
+  const find = (n, pred) => !n || typeof n !== 'object' ? null : pred(n) ? n : [].concat(n.props?.children ?? []).concat(Array.isArray(n) ? n : []).reduce((a, k) => a || find(k, pred), null);
+  const page = find(tree, n => n.type?.name === 'YouPage'); assert.ok(page, 'You page rendered');
+  const youText = JSON.stringify(new page.type(page.props).render()); for (const s of ['MEMBER SINCE', 'Edit Profile', 'Quests', 'Shop', 'Nitro', 'Friends', 'NOTE (ONLY VISIBLE TO YOU)']) assert.ok(youText.includes(s), s);
+  host.state.classic = true; assert.ok(JSON.stringify(host.render()).includes('native-out'));
   assert.equal(f.plugin.diagnostics().hooks.NativeForYouRecentHeader, 'applied');
-  f.api.storage.nativeScreens = false; assert.equal(files[NC + 'ForYouItems.tsx'].ForYouItems(), out); await f.stop();
+  f.api.storage.nativeScreens = false; assert.equal(files[NC + 'ForYouRecentActivitySectionHeader.tsx'].ForYouRecentActivitySectionHeader(), out); await f.stop();
 });
 test('app tour visits declared routes, skips risky ones and returns', async () => {
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} } });
