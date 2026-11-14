@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.23');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.24');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -459,9 +459,9 @@ swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, embeddedRo
     const name = typeName(type), keys = Object.keys(props);
     const hit = props.route || props.navigation || props.descriptors || props.state || /screen|scene|navigator|stack|route|tab|pager|layout/i.test(name);
     const rn = currentRouteName();
-    if (rn && SCREEN_TAB[rn] && typeof type !== "string" && name.length <= 3) {
-      const ek = "Elem:" + rn, cur = health.hooks[ek] || "";
-      if (cur.length < 400 && !cur.includes(name + "{")) health.hooks[ek] = cur + (cur ? " " : "") + name + "{" + keys.slice(0, 6).join(",") + "}";
+    if (rn && typeof type !== "string" && !/^(Scene|Router|Boundary|DockHost|NativeHost|SkinFrame)/.test(name)) {
+      const ek = "Tree:" + rn, cur = health.hooks[ek] || "", entry = name + "{" + keys.slice(0, 5).join(",") + "}";
+      if (cur.length < 900 && !cur.split(" ").includes(entry)) health.hooks[ek] = cur + (cur ? " " : "") + entry;
     }
     if (!hit) return;
     const key = "Nav:" + name; if (health.hooks[key] || navProbeCount >= 24) return;
@@ -539,11 +539,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.23',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.24',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.23
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.24
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -589,4 +589,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.23', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.24', sourceSHA256: digest(code), output: out }));

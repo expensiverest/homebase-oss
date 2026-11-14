@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.23 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.24 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.23", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.24", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
@@ -799,9 +799,9 @@
     const name = typeName(type), keys = Object.keys(props);
     const hit = props.route || props.navigation || props.descriptors || props.state || /screen|scene|navigator|stack|route|tab|pager|layout/i.test(name);
     const rn = currentRouteName();
-    if (rn && SCREEN_TAB[rn] && typeof type !== "string" && name.length <= 3) {
-      const ek = "Elem:" + rn, cur = health.hooks[ek] || "";
-      if (cur.length < 400 && !cur.includes(name + "{")) health.hooks[ek] = cur + (cur ? " " : "") + name + "{" + keys.slice(0, 6).join(",") + "}";
+    if (rn && typeof type !== "string" && !/^(Scene|Router|Boundary|DockHost|NativeHost|SkinFrame)/.test(name)) {
+      const ek = "Tree:" + rn, cur = health.hooks[ek] || "", entry = name + "{" + keys.slice(0, 5).join(",") + "}";
+      if (cur.length < 900 && !cur.split(" ").includes(entry)) health.hooks[ek] = cur + (cur ? " " : "") + entry;
     }
     if (!hit) return;
     const key = "Nav:" + name; if (health.hooks[key] || navProbeCount >= 24) return;
