@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.28 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.29 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.28", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.29", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
@@ -706,6 +706,8 @@
     };
     RowCard = class extends React.Component {
       constructor(p) { super(p); this.state = { failed: false }; }
+      componentDidMount() { rowInstances.add(this); }
+      componentWillUnmount() { rowInstances.delete(this); }
       componentDidCatch() { issue("native-row-failed"); this.setState({ failed: true }); }
       render() {
         const { __reimaginedOrig: Orig, ...rest } = this.props, raw = h(Orig, { ...rest, __reimaginedRaw: true });
@@ -983,19 +985,22 @@
     blueprint.tabBars[name] = { propKeys: Object.keys(props).slice(0, 24), routes: (st.routes || []).map(r => r.name), index: st.index, routeNames: st.routeNames, descriptorKeys: Object.keys(first).slice(0, 16), optionKeys: Object.keys(first.options || {}).slice(0, 24), renderIsFn: typeof first.render === "function", navigationKeys: Object.keys(props.navigation || {}).slice(0, 24) };
   }
   // Walks the mounted React tree from a class instance we own (its _reactInternals is a fiber) and copies an indented outline of composite components, so native screens can be targeted without guessing.
-  let treeHost = null;
+  let treeHost = null; const rowInstances = new Set();
   function copyTree() {
     const c = safe(() => unwrap(api.common.clipboard), null);
-    // Hosts that were unmounted keep a detached fiber, so only accept one that climbs to a HostRoot, then read its current tree.
-    let root = null;
-    for (const host of [...presentationHosts, treeHost]) {
-      for (let f of [host?._reactInternals || host?._reactInternalFiber, host?._reactInternals?.alternate]) {
-        let top = f; while (top?.return) top = top.return;
-        if (top && top.tag === 3) { root = top.stateNode?.current || top; break; }
+    // Candidate fibers come from every class instance we own (docks and conversation rows); unmounted ones keep a detached fiber, so prefer a chain that reaches a HostRoot and otherwise the tallest one.
+    let root = null, best = -1;
+    const sources = [...presentationHosts, treeHost, ...rowInstances];
+    for (const inst of sources) {
+      const first = inst?._reactInternals || inst?._reactInternalFiber;
+      for (const f of [first, first?.alternate]) {
+        let top = f, depth = 0; while (top?.return) { top = top.return; depth++; }
+        if (!top) continue;
+        const score = (top.tag === 3 ? 1e6 : 0) + depth;
+        if (score > best) { best = score; root = top.tag === 3 ? (top.stateNode?.current || top) : top; }
       }
-      if (root) break;
     }
-    if (!root) { toast("Tree unavailable: no mounted dock"); return; }
+    if (!root) { toast("Tree unavailable (" + sources.length + " sources)"); return; }
     const nameOf = f => { const t = f.type; if (!t || typeof t === "string") return null; if (f.tag === 5 || f.tag === 6) return null; const n = t.displayName || t.name || t.render?.displayName || t.render?.name || t.type?.displayName || t.type?.name; return (f.tag === 14 || f.tag === 15 ? "memo:" : f.tag === 11 ? "fwd:" : "") + (n || "anonymous"); };
     const lines = [], stack = [[root, 0]]; let count = 0;
     while (stack.length && lines.length < 3500) {
