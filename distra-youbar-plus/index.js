@@ -8,7 +8,7 @@
   const DEFAULTS = Object.freeze({
     showDMButton: true,
     showSettingsButton: true,
-    showFavoritesButton: false,
+    showFavoritesButton: true,
   });
   const OPTIONS = [
     { key: "showDMButton", label: "Direct Messages", icon: "ChatIcon", description: "Add a DM shortcut to the You Bar.", dest: "@me" },
@@ -40,6 +40,20 @@
 
   function iconId(name) {
     if (iconCache.has(name)) return iconCache.get(name);
+    // Distra's Vendetta compatibility layer has an asset-name resolver that
+    // initializes any as-yet unloaded modules. This is important for StarIcon.
+    try {
+      const resolver = globalThis.vendetta?.ui?.assets?.getAssetIDByName;
+      if (typeof resolver === "function") {
+        const found = resolver(name);
+        if (typeof found === "number") {
+          iconCache.set(name, found);
+          return found;
+        }
+      }
+    } catch (error) {
+      api?.logger?.warn?.(`Asset resolver failed for ${name}: ${String(error)}`);
+    }
     const registry = api && api.common && api.common.assetsRegistry;
     if (!registry || typeof registry.getAssetByID !== "function") return undefined;
     // React Native asset IDs are 1-based, contiguous and assigned as image modules load.
@@ -57,21 +71,26 @@
   function navigate(destination) {
     if (!api) return;
     try {
-      if (destination !== "settings") {
-        const transition = api.metro.findByProps("transitionToGuild");
-        if (typeof transition?.transitionToGuild === "function") {
-          transition.transitionToGuild(destination);
+      if (destination === "settings") {
+        // Match the current Valenced plugin: the root settings route is the
+        // stable path on Discord's main_tabs_v2 navigation stack.
+        const ref = api.common.tabsNavigationRef?.getRootNavigationRef?.();
+        if (typeof ref?.navigate === "function") {
+          ref.navigate("settings");
+          api.logger?.info?.("Settings button: root navigate(settings)");
           return;
         }
-      } else {
         const actions = api.metro.findByProps("openUserSettings");
         if (typeof actions?.openUserSettings === "function") {
           actions.openUserSettings();
+          api.logger?.info?.("Settings button: openUserSettings()");
           return;
         }
-        const nav = api.common.tabsNavigationRef?.getRootNavigationRef?.();
-        if (typeof nav?.navigate === "function") {
-          nav.navigate("settings");
+      } else {
+        const transition = api.metro.findByProps("transitionToGuild");
+        if (typeof transition?.transitionToGuild === "function") {
+          transition.transitionToGuild(destination);
+          api.logger?.info?.(`Navigation button: transitionToGuild(${destination})`);
           return;
         }
       }
@@ -114,11 +133,13 @@
         icon: asset,
         onPress: () => navigate(option.dest),
       });
+      // The original container may have its own onPress, navigation state, or
+      // pointer handlers. Copying those props made every injected button behave
+      // like the original (e.g. opening Favorites) instead of its own shortcut.
+      // Like the Valenced source, render a FRESH container with only our child.
       const wrapper = React.createElement(Container, {
-        ...output.props,
         key: `distra-youbar-wrapper-${option.key}`,
-        children: icon,
-      });
+      }, icon);
       extraButtons.push(wrapper);
     }
     return extraButtons.length ? React.createElement(React.Fragment, null, ...extraButtons, output) : output;
@@ -168,12 +189,27 @@
       listeners.add(invalidate);
       return () => { listeners.delete(invalidate); };
     }, [invalidate]);
-    const { Stack, TableRowGroup, TableSwitchRow, TableRow, Text } = api.components;
 
-    return React.createElement(RN.ScrollView, { contentContainerStyle: { paddingHorizontal: 12, paddingVertical: 24, paddingBottom: 48 } },
-      React.createElement(Stack, { spacing: 20 },
-        React.createElement(TableRowGroup, { title: "You Bar shortcuts" },
-          ...OPTIONS.map(option => React.createElement(TableSwitchRow, {
+    // IMPORTANT: api.components.* are Distra lazy PROXIES. Some Discord design
+    // components are memo/forwardRef OBJECTS, not functions. React treats the
+    // proxy as callable, then its apply trap throws "target is not callable".
+    // Resolve the actual Discord component types from Metro before rendering.
+    const design = api.metro.findByProps("TableRowGroup", "TableSwitchRow");
+    const note = "The new buttons appear after a Discord restart. Only enable one YouBar+ plugin at a time. Favorites requires support from your current Discord build.";
+    const inset = { paddingHorizontal: 12, paddingVertical: 24, paddingBottom: 48 };
+
+    if (design?.TableRowGroup && design?.TableSwitchRow) {
+      const retry = design.TableRow
+        ? React.createElement(design.TableRow, {
+          label: "Retry patch",
+          subLabel: status,
+          onPress: tryPatch,
+        })
+        : React.createElement(RN.Pressable, { onPress: tryPatch, style: { paddingVertical: 14 } },
+            React.createElement(RN.Text, null, `Retry patch - ${status}`));
+      return React.createElement(RN.ScrollView, { contentContainerStyle: inset },
+        React.createElement(design.TableRowGroup, { title: "You Bar shortcuts" },
+          ...OPTIONS.map(option => React.createElement(design.TableSwitchRow, {
             key: option.key,
             label: option.label,
             subLabel: option.description,
@@ -181,17 +217,28 @@
             onValueChange: value => { api.storage[option.key] = !!value; emit(); },
           })),
         ),
-        React.createElement(TableRowGroup, { title: "Compatibility" },
-          React.createElement(TableRow, {
-            label: "Retry patch",
-            subLabel: status,
-            onPress: tryPatch,
-          }),
+        React.createElement(design.TableRowGroup, { title: "Compatibility" }, retry),
+        React.createElement(RN.Text, { style: { paddingHorizontal: 10, marginTop: 18, opacity: 0.7, fontSize: 12, lineHeight: 18 } }, note),
+      );
+    }
+
+    // Safe fallback if Discord's current design-system module cannot be found.
+    return React.createElement(RN.ScrollView, { contentContainerStyle: inset },
+      React.createElement(RN.Text, { style: { fontSize: 20, fontWeight: "bold", marginBottom: 16 } }, "You Bar shortcuts"),
+      ...OPTIONS.map(option => React.createElement(RN.View, {
+        key: option.key,
+        style: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 12 },
+      },
+        React.createElement(RN.View, { style: { flexShrink: 1, paddingRight: 12 } },
+          React.createElement(RN.Text, { style: { fontWeight: "600", fontSize: 16 } }, option.label),
+          React.createElement(RN.Text, { style: { opacity: 0.7, fontSize: 12 } }, option.description),
         ),
-        React.createElement(Text, { variant: "text-sm/medium", color: "text-muted" },
-          "These shortcuts are client-side only. If you installed this plugin while Discord was already open, fully restart the app to rebuild the You Bar. Disable other YouBar+ forks to avoid duplicate buttons.",
-        ),
-      ),
+        React.createElement(RN.Switch, { accessibilityLabel: option.label, value: enabled(option.key),
+          onValueChange: value => { api.storage[option.key] = !!value; emit(); } }),
+      )),
+      React.createElement(RN.Pressable, { onPress: tryPatch, style: { marginTop: 16, paddingVertical: 14 } },
+        React.createElement(RN.Text, null, `Retry patch - ${status}`)),
+      React.createElement(RN.Text, { style: { marginTop: 18, opacity: 0.7, fontSize: 12 } }, note),
     );
   }
 
@@ -203,6 +250,12 @@
       unsubscribe = [];
       for (const [key, initial] of Object.entries(DEFAULTS)) {
         if (typeof api.storage[key] !== "boolean") api.storage[key] = initial;
+      }
+      // v0.1.0 accidentally defaulted Favorites to off AND broke its settings
+      // screen, so prior users could never enable it. Enable once on migration.
+      if (api.storage.__youbarPortV2Migration !== true) {
+        api.storage.showFavoritesButton = true;
+        api.storage.__youbarPortV2Migration = true;
       }
       setStatus("Looking for Discord's You Bar component...");
 
@@ -230,3 +283,4 @@
     SettingsComponent,
   });
 })()
+
