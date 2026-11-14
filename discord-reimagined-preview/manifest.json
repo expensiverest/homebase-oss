@@ -1,6 +1,6 @@
 {
   "name": "Discord: Reimagined (0.2 Preview)",
-  "version": "0.2.0-alpha.2",
+  "version": "0.2.0-alpha.3",
   "description": "0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.",
   "authors": [
     {
@@ -8,7 +8,7 @@
     }
   ],
   "main": "index.js",
-  "hash": "7e5622561b19b34be8c17fd888261fd6d8e6867b28056ceaa3f305ba0f109954",
+  "hash": "bbbd5d2b7e820f6d9b61b46ec34fee650eb8ab9868a6950d1f91a34029699490",
   "distra": {
     "spec": 1
   }
