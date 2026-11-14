@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.10 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.11 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.10", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.11", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, blueprint: false, accounts: {} };
@@ -755,6 +755,11 @@
   let SkinFrame;
   const skinned = new WeakSet();
   const isEl = x => React.isValidElement(x);
+  function skinSearch(args) {
+    const p = args?.[0], c = colors();
+    if (!p || typeof p.placeholder !== "string" || !/search/i.test(p.placeholder)) return undefined;
+    return [{ ...p, style: [p.style, { borderRadius: RAD.round, backgroundColor: c.elevated, borderColor: c.accentSoft, borderWidth: 1, paddingHorizontal: SPACE.sm }] }, ...args.slice(1)];
+  }
   function skinTitle(text) { const c = colors(); return h(RN.Text, { style: { color: c.muted, fontSize: 12, fontWeight: "700", letterSpacing: 0.9, marginLeft: SPACE.md, marginBottom: SPACE.sm, marginTop: SPACE.xs } }, text.toUpperCase()); }
   function skinGroup(output) {
     if (!isEl(output) || !isEl(output.props.children)) return output;
@@ -763,7 +768,7 @@
       if (!isEl(kid)) return kid;
       const name = typeName(kid.type), style = flat(kid.props.style);
       if (name === "TableRowGroupTitle" && typeof kid.props.title === "string") return React.cloneElement(skinTitle(kid.props.title), { key: kid.key });
-      if (style.borderRadius === 12 && style.overflow === "hidden") return React.cloneElement(kid, { style: [kid.props.style, { borderRadius: RAD.large, borderWidth: RN.StyleSheet?.hairlineWidth || 1, borderColor: c.line }] });
+      if (style.borderRadius === 12 && style.overflow === "hidden") return React.cloneElement(kid, { style: [kid.props.style, { borderRadius: RAD.large, borderWidth: RN.StyleSheet?.hairlineWidth || 1, borderColor: c.line, backgroundColor: c.elevated }] });
       return kid;
     });
     return React.cloneElement(output, null, React.cloneElement(view, { style: [view.props.style, { marginBottom: SPACE.sm }] }, ...kids));
@@ -774,7 +779,7 @@
     const selected = isEl(trailing) && typeName(trailing.type) === "FormRadio" && trailing.props.selected === true;
     const tile = isEl(icon) ? h(RN.View, { style: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: c.accentSoft } }, icon) : icon;
     const child = isEl(inner) && icon && inner.props.icon !== tile ? React.cloneElement(inner, { icon: tile }) : inner;
-    const out = React.cloneElement(card, { radius: RAD.large, style: [card.props.style, { minHeight: 64, backgroundColor: selected ? c.accentSoft : c.surface }] }, child);
+    const out = React.cloneElement(card, { radius: RAD.large, style: [card.props.style, { minHeight: 64, justifyContent: "center", backgroundColor: selected ? c.accentSoft : c.elevated }] }, child);
     skinned.add(out); return out;
   }
   function skinRow(output) {
@@ -814,8 +819,8 @@
     return out;
   }
   function record(name, args, output) {
-    const route = currentRouteName() || "unknown", bucket = blueprint.routes[route] || (blueprint.routes[route] = { TableRowGroup: [], TableRow: [] });
-    const list = bucket[name]; if (list.length >= (name === "TableRow" ? 5 : 3) || blueprint.samples > 400) return;
+    const route = currentRouteName() || "unknown", bucket = blueprint.routes[route] || (blueprint.routes[route] = { TableRowGroup: [], TableRow: [], TextInput: [], TableRowGroupTitle: [] });
+    const list = bucket[name] || (bucket[name] = []); if (list.length >= (name === "TableRow" ? 5 : 3) || blueprint.samples > 400) return;
     const sig = Object.keys(args?.[0] || {}).sort().join(",") + "|" + typeName(output?.type); if (list.some(x => x.sig === sig)) return;
     blueprint.samples++;
     list.push({ sig, props: describe({ type: name, props: { ...(args?.[0] || {}), children: undefined } }, 0, { n: 20 })?.p, output: describe(output, 0, { n: 60 }) });
@@ -827,9 +832,9 @@
   }
   function patchNativeSkin() {
     if (!live) return;
-    const pass = (name, flag, wrap) => {
+    const pass = (name, flag, wrap, before) => {
       if (!cfg(flag) && !cfg("blueprint")) return;
-      const hubs = [mod("TableRowGroup", "TableRow"), ...(safe(() => api.metro.findByPropsAll(name), []) || [])].map(unwrap).filter(Boolean);
+      const hubs = [mod("TableRowGroup", "TableRow"), ...(safe(() => before ? api.metro.findByPropsAll(name, "TableRow") : api.metro.findByPropsAll(name), []) || [])].map(unwrap).filter(Boolean);
       let patched = 0;
       for (const hub of new Set(hubs)) {
         const target = safe(() => renderTarget(hub, name), null);
@@ -837,7 +842,8 @@
         const [object, method] = target, seen = targets.get(object) || new Set();
         if (seen.has("skin:" + name)) { patched++; continue; }
         try {
-          api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint") && output != null) safe(() => record(name, _args, output)); return (!live || !cfg(flag) || output == null) ? output : safe(() => wrap(output, _args), output); });
+          if (before) api.patcher.before(method, object, args => { if (live && cfg("blueprint")) safe(() => record(name, args, null)); return (!live || !cfg(flag)) ? undefined : safe(() => wrap(args), undefined); });
+          else api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint") && output != null) safe(() => record(name, _args, output)); return (!live || !cfg(flag) || output == null) ? output : safe(() => wrap(output, _args), output); });
           seen.add("skin:" + name); targets.set(object, seen); patched++;
         } catch (_) { issue("hook-failed:NativeSkin" + name); }
       }
@@ -846,6 +852,7 @@
     pass("TableRowGroup", "nativeSkin", output => SkinFrame ? h(SkinFrame, { fallback: output }, safe(() => skinGroup(output), output)) : output);
     pass("TableRowGroupTitle", "nativeSkin", (output, args) => typeof args?.[0]?.title === "string" ? skinTitle(args[0].title) : output);
     pass("TableRow", "nativeSkinRows", skinRow);
+    pass("TextInput", "nativeSkin", skinSearch, true);
   }
   function scan() { [["YouBar", "dock"], ["YouBarNotificationsButton", "launcher"]].forEach(([name, mode]) => { if (health.hooks[name] === "patched") return; const raw = safe(() => api.metro.findByFileName(name, false), null) || safe(() => api.metro.findByTypeName(name, false), null); if (!patch(raw, name, mode)) health.hooks[name] = "settings entry required"; }); }
   function start(pluginApi) {
