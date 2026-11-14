@@ -238,14 +238,34 @@
     });
   }
   function restoreOriginal() {
-    api.storage.layout = false;
+    stopReturnWatch(); api.storage.layout = false;
     autoPresented = true;
     presenter?.dismiss(null, true); emit();
+  }
+  let baseRoute = null, returnTimer = null;
+  const customRouteName = "DISTRA_CUSTOM_PAGE";
+  const currentRouteName = () => safe(() => { const r = root(); return (r.getCurrentRoute?.() || null)?.name || null; }, null);
+  function stopReturnWatch() { if (returnTimer !== null) clearTimeout(returnTimer); returnTimer = null; }
+  function watchReturn() {
+    stopReturnWatch();
+    if (!baseRoute || !cfg("layout")) return;
+    let away = false; const armedAt = Date.now();
+    const tick = () => {
+      returnTimer = null; if (!live || !cfg("layout")) return;
+      const name = currentRouteName();
+      if (name && name !== customRouteName && name !== baseRoute) away = true;
+      else if (away && name === baseRoute) { returnTimer = setTimeout(() => { returnTimer = null; if (live && cfg("layout")) present(); }, 250); return; }
+      // Give up if the handoff never left the starting route.
+      if (!away && Date.now() - armedAt > 20000) return;
+      returnTimer = setTimeout(tick, 350);
+    };
+    returnTimer = setTimeout(tick, 350);
   }
   function nativeConversation(id) {
     const c = channel(id); if (!permission("VIEW_CHANNEL", c)) return toast("You cannot open this channel.");
     presenter.dismiss(() => {
       if (!live) return;
+      watchReturn();
       try {
         if (isPrivate(c)) { const a = mod("selectPrivateChannel"); if (!a?.selectPrivateChannel) throw new Error("Unavailable"); a.selectPrivateChannel(id); }
         else { const a = mod("transitionToGuild"); if (!a?.transitionToGuild) throw new Error("Unavailable"); a.transitionToGuild(c.guild_id, id); }
@@ -255,6 +275,7 @@
   function nativeSettings(profile) {
     const invoke = () => {
       if (!live) return;
+      if (!(presenter.snapshot().mode === "route")) watchReturn();
       try {
         const r = root();
         if (profile) {
@@ -275,6 +296,7 @@
   }
   function present(tab) {
     if (!live || !me()) return;
+    stopReturnWatch(); { const n = currentRouteName(); if (n && n !== customRouteName) baseRoute = n; }
     if (tab) state = { ...state, tab, screen: "main", guild: null, channel: null, search: "", history: [], menu: null };
     presenter.open(); emit();
   }
@@ -735,6 +757,6 @@
     health.capabilities.nativeRoute = !!root()?.navigate; health.capabilities.messageActions = !!mod("sendMessage", "editMessage"); health.capabilities.voice = !!mod("selectVoiceChannel"); health.capabilities.webView = !!mod("WebView")?.WebView;
     scan(); syncTheme();
   }
-  async function stop() { presenter?.stop(); live = false; epoch++; clearTimeout(storeTimer); storeTimer = null; stops.splice(0).forEach(f => safe(f)); Array.from(listeners).forEach(f => safe(f)); listeners.clear(); conversations.clear(); drafts.clear(); profiles.clear(); await themeQueue; await restoreTheme(); Object.keys(stores).forEach(k => delete stores[k]); Object.keys(modules).forEach(k => delete modules[k]); assets.clear(); }
+  async function stop() { stopReturnWatch(); presenter?.stop(); live = false; epoch++; clearTimeout(storeTimer); storeTimer = null; stops.splice(0).forEach(f => safe(f)); Array.from(listeners).forEach(f => safe(f)); listeners.clear(); conversations.clear(); drafts.clear(); profiles.clear(); await themeQueue; await restoreTheme(); Object.keys(stores).forEach(k => delete stores[k]); Object.keys(modules).forEach(k => delete modules[k]); assets.clear(); }
   return definePlugin({ start, stop, SettingsComponent: () => live && buildUI.Settings ? h(DockHost, { mode: "settings", original: h(buildUI.Settings) }) : null, diagnostics: report });
 })()
