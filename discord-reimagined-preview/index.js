@@ -1,14 +1,14 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.16 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.17 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.16", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.17", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
-    showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, blueprint: false, accounts: {} };
+    showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
   const PALETTES = {
     blurple: { name: "Blurple", bg: "#17181f", surface: "#20222b", elevated: "#2b2d38", line: "#3a3d4b", ink: "#f2f3f8", muted: "#b0b4c4", faint: "#9296a9", accent: "#b4bcff", accentInk: "#1d2160", accentSoft: "#30346a", danger: "#f5a9b3", clear: "transparent", shade: "rgba(8,9,14,0.62)" },
     midnight: { name: "Midnight", bg: "#141918", surface: "#1c2320", elevated: "#27302b", line: "#39443d", ink: "#f0f2e9", muted: "#a8b5aa", faint: "#8a9b8e", accent: "#bdd7b7", accentInk: "#203323", accentSoft: "#2d3b2e", danger: "#f3b9ad", clear: "transparent", shade: "rgba(10,15,12,0.6)" },
@@ -248,7 +248,7 @@
   function stopReturnWatch() { if (returnTimer !== null) clearTimeout(returnTimer); returnTimer = null; }
   function watchReturn() {
     stopReturnWatch();
-    if (!baseRoute || !cfg("layout")) return;
+    if (!baseRoute || !cfg("layout") || cfg("nativeScreens")) return;
     let away = false; const armedAt = Date.now();
     const tick = () => {
       returnTimer = null; if (!live || !cfg("layout")) return;
@@ -308,6 +308,7 @@
     if ([2, 13].includes(c.type)) { push({ screen: "call", channel: id }); return; }
     if ([15, 16].includes(c.type)) { toast("Opening this forum in Discord. Use Return to Reimagined to come back."); nativeConversation(id); return; }
     remember(isPrivate(c) ? "dm" : "channel", id, c.guild_id);
+    if (cfg("nativeScreens")) { nativeConversation(id); return; }
     push({ screen: "conversation", channel: id }); loadMessages(id);
   }
   function send(action, value) {
@@ -326,7 +327,7 @@
     else if (action === "drawer-close") { state.drawer = false; emit(); }
     else if (action === "expand") { state = { ...state, drawer: false, tab: "servers", screen: "main", search: "", filter: "all" }; emit(); }
     else if (action === "pin") pin(value.kind, value.id, value.guildId);
-    else if (action === "setting") { api.storage[value.key] = value.value; if (value.key === "layout" && !value.value) presenter.dismiss(null, true); if (["palette", "nativePalette"].includes(value.key)) syncTheme(); if (value.key === "nativeSkin" || value.key === "nativeSkinRows" || value.key === "blueprint") patchNativeSkin(); emit(); }
+    else if (action === "setting") { api.storage[value.key] = value.value; if (value.key === "layout" && !value.value) presenter.dismiss(null, true); if (["palette", "nativePalette"].includes(value.key)) syncTheme(); if (value.key === "nativeSkin" || value.key === "nativeSkinRows" || value.key === "blueprint" || value.key === "nativeScreens") patchNativeSkin(); emit(); }
     else if (action === "media") push({ screen: "media", media: value });
     else if (action === "report") copyReport(); else if (action === "blueprint") copyBlueprint(); else if (action === "tour") startTour();
     else if (action === "close") { presenter.dismiss(null, true); }
@@ -537,7 +538,7 @@
     function Toggle(p) { return h(RN.View, { style: { flexDirection: "row", alignItems: "center", paddingVertical: SPACE.md, borderBottomWidth: 1, borderBottomColor: colors().line } }, t(p.label, { flex: 1, minWidth: 0, paddingRight: SPACE.lg, fontWeight: "500" }), h(RN.Switch, { testID: "setting-" + p.name, accessibilityLabel: p.label, value: !!cfg(p.name), trackColor: { false: colors().line, true: colors().accent }, thumbColor: colors().surface, onValueChange: value => send("setting", { key: p.name, value: !!value }) })); }
     function Preferences() { const c = colors(); return h(Page, { title: "Appearance", back: true },
       h(RN.View, { style: { flexDirection: "row", justifyContent: "space-between" } }, ...Object.entries(PALETTES).map(([id, p]) => h(Control, { key: id, id: "palette-" + id, label: p.name, action: "setting", value: { key: "palette", value: id }, selected: cfg("palette") === id, style: { flex: 1, marginRight: id === "slate" ? 0 : SPACE.sm, padding: SPACE.md, borderRadius: RAD.medium, borderWidth: cfg("palette") === id ? 2 : 1, borderColor: cfg("palette") === id ? c.accent : c.line, backgroundColor: p.bg } }, h(RN.View, { style: { flexDirection: "row", marginBottom: SPACE.sm } }, ...[p.surface, p.accent, p.ink].map((color, i) => h(RN.View, { key: i, style: { width: 16, height: 16, borderRadius: 8, marginRight: 3, backgroundColor: color } }))), t(p.name, { color: p.ink, fontSize: TYPE.small, fontWeight: "600" }, { numberOfLines: 1 })))),
-      h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }), h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }),
+      h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }), h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }), h(Toggle, { name: "nativeScreens", label: "Reimagined inside native screens (beta)" }),
       button(cfg("density") === "compact" ? "Comfortable" : "Compact", "setting", { key: "density", value: cfg("density") === "compact" ? "comfortable" : "compact" }, { marginTop: SPACE.lg }, "density"),
       h(Section, { title: "Diagnostics" }), h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"), h(Toggle, { name: "blueprint", label: "Record settings blueprint" }), button("Copy settings blueprint", "blueprint", null, { marginTop: SPACE.sm }, "copy-blueprint"), button("Scan whole app (tour)", "tour", null, { marginTop: SPACE.sm }, "scan-app"),
       t(VERSION, { fontSize: TYPE.small, color: c.muted, marginTop: SPACE.xl }), health.issues.length ? t(health.issues.join("\n"), { color: c.danger, marginTop: SPACE.md, fontSize: TYPE.small }) : null); }
@@ -703,6 +704,20 @@
         return h(RN.Animated.View, { style: { opacity: this.enter, transform: [{ translateY: this.enter.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] } }, this.props.children);
       }
     };
+    NativeHost = class extends React.Component {
+      constructor(p) { super(p); this.state = { failed: false, tick: 0, width: safe(() => RN.Dimensions.get("window").width, 390) }; this.refresh = () => this.setState(s => ({ tick: s.tick + 1 })); }
+      componentDidMount() { listeners.add(this.refresh); this.focusOff = safe(() => this.props.navigation?.addListener?.("focus", () => this.claim()), null); this.claim(true); loadProfile(accountId); }
+      componentWillUnmount() { listeners.delete(this.refresh); if (typeof this.focusOff === "function") this.focusOff(); else this.focusOff?.remove?.(); }
+      claim(quiet) { const r = this.props.route?.name; if (embeddedRoute === r) return; embeddedRoute = r; state = { ...state, tab: SCREEN_TAB[r] || "home", screen: "main", history: [], menu: null, drawer: false, channel: null }; if (!quiet) emit(); }
+      componentDidCatch() { issue("native-screen-failed"); api.storage.nativeScreens = false; this.setState({ failed: true }); }
+      render() {
+        const { __reimaginedOrig: Orig, ...rest } = this.props;
+        if (!live || this.state.failed || !cfg("nativeScreens") || !me()) return h(Orig, { ...rest, __reimaginedRaw: true });
+        const c = colors(), Safe = RN.SafeAreaView || RN.View, width = Math.min(this.state.width, 820), mine = embeddedRoute === rest.route?.name, tab = mine ? state.tab : SCREEN_TAB[rest.route?.name], screen = mine ? state.screen : "main";
+        const content = screen === "media" ? h(Media) : screen === "call" ? h(CallScreen) : screen === "edit-profile" ? h(EditProfile) : screen === "preferences" ? h(Preferences) : screen === "profile" ? h(Profile, { id: state.profile }) : screen === "channels" ? h(Channels) : tab === "servers" ? h(Servers, { width }) : tab === "messages" ? h(Messages) : tab === "you" ? h(Profile, { id: accountId }) : h(Home, { width });
+        return h(Safe, { testID: "reimagined-native-screen", style: { flex: 1, backgroundColor: c.bg, paddingBottom: 84 } }, h(Boundary, { key: screen + ":" + tab }, h(SkinFrame, null, content)), state.drawer && mine ? h(ServerDrawer, { width }) : null);
+      }
+    };
     Boundary = class extends React.Component { constructor(p) { super(p); this.state = { failed: false }; } componentDidCatch() { issue("surface-render-failed"); this.setState({ failed: true }); } render() { return this.state.failed ? h(RN.View, { style: { backgroundColor: colors().bg, padding: SPACE.xl } }, t("This screen could not be displayed."), button("Back", "back", null, { marginTop: SPACE.lg }), button("Settings", "settings", null, { marginTop: SPACE.md }), button("Copy compatibility report", "report", null, { marginTop: SPACE.md }), button("Restore Discord", "restore", null, { marginTop: SPACE.md }, "render-error-restore")) : this.props.children; } };
     Scene = class extends React.Component {
       constructor(p) { super(p); this.state = { tick: 0, width: safe(() => RN.Dimensions.get("window").width, 390) }; this.refresh = () => this.setState(s => ({ tick: s.tick + 1 })); }
@@ -720,7 +735,7 @@
       componentDidMount() {
         presentationHosts.add(this); if (!modalOwner) modalOwner = this;
         listeners.add(this.refresh);
-        if (this.props.mode !== "settings" && cfg("layout") && cfg("startHome") && !autoPresented && me()) {
+        if (this.props.mode !== "settings" && cfg("layout") && !cfg("nativeScreens") && cfg("startHome") && !autoPresented && me()) {
           autoPresented = true; this.timer = setTimeout(() => { if (live) present("home"); }, 150);
         }
       }
@@ -733,7 +748,7 @@
         if (!live) return this.props.original || null;
         const p = presenter.snapshot();
         // Original navigation remains intact; the custom dock belongs inside Scene.
-        const launch = this.props.mode === "settings" || !me() ? null
+        const launch = this.props.mode === "settings" || !me() || cfg("nativeScreens") ? null
           : cfg("layout") ? button("Reimagined", null, null, { marginHorizontal: SPACE.lg }, "reimagined-launcher", () => present())
           : button("Return to Reimagined", null, null, { marginHorizontal: SPACE.lg, backgroundColor: colors().accentSoft }, "reimagined-return", () => { api.storage.layout = true; present(); });
         return h(React.Fragment, null, this.props.original, launch,
@@ -752,7 +767,26 @@
   function renderTarget(raw, name) { for (const value of [raw?.[name], raw?.default, raw]) { let node = unwrap(value); if (!node) continue; if (typeof node === "function" && node.prototype?.render) return [node.prototype, "render"]; if (typeof node === "function") { if (raw?.[name] === node) return [raw, name]; if (raw?.default === node) return [raw, "default"]; } for (let i = 0; node && i < 5; i++) { if (typeof node.type === "function") return [node, "type"]; if (typeof node.render === "function") return [node, "render"]; node = node.type; } } return null; }
   function patch(raw, name, mode) { const target = safe(() => renderTarget(raw, name), null); if (!live || !target) return false; const [object, method] = target, seen = targets.get(object) || new Set(); if (seen.has(method)) return true;
     try { api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint")) safe(() => recordTabBar(name, _args[0])); if (!live || output == null || !me() || (mode === "launcher" && health.hooks.YouBar === "patched")) return output; return h(DockHost, { original: output, mode }); }); seen.add(method); targets.set(object, seen); health.hooks[name] = "patched"; return true; } catch (_) { issue("hook-failed:" + name); return false; } }
-  let SkinFrame;
+  let SkinFrame, NativeHost, embeddedRoute = null;
+  const SCREEN_TAB = { guilds: "home", notifications: "messages", you: "you" };
+  function swapScreen(args) {
+    const type = args?.[0], props = args?.[1];
+    if (props && props.__reimaginedRaw) { const { __reimaginedRaw, ...rest } = props; return [type, rest, ...args.slice(2)]; }
+    if (!live || !cfg("nativeScreens") || !NativeHost || typeof type === "string" || type === NativeHost || !props || !props.route || !props.navigation) return undefined;
+    const name = props.route.name;
+    if (typeof name !== "string" || !SCREEN_TAB[name] || Object.keys(props).some(k => k !== "route" && k !== "navigation")) return undefined;
+    if (typeof type !== "function" && !(type && typeof type === "object" && (type.$$typeof || type.render))) return undefined;
+    health.hooks.NativeScreens = "swapped " + name;
+    return [NativeHost, { ...props, __reimaginedOrig: type }, ...args.slice(2)];
+  }
+  function patchScreens() {
+    if (!live || !cfg("nativeScreens")) return;
+    const seen = targets.get(swapScreen) || new Set(); targets.set(swapScreen, seen);
+    const attach = (object, method, key) => { if (!object || typeof object[method] !== "function" || seen.has(key)) return; try { api.patcher.before(method, object, args => swapScreen(args)); seen.add(key); } catch (_) { issue("hook-failed:NativeScreens"); } };
+    attach(React, "createElement", "createElement");
+    let n = 0; for (const rt of safe(() => api.metro.findByPropsAll("jsx", "jsxs"), []) || []) { const o = unwrap(rt); n++; ["jsx", "jsxs", "jsxDEV"].forEach(m => attach(o, m, "rt" + n + ":" + m)); }
+    health.hooks.NativeScreens = health.hooks.NativeScreens || (seen.size ? "armed" : "no hook");
+  }
   const skinned = new WeakSet();
   const isEl = x => React.isValidElement(x);
   // Settings search: Discord's SettingSearchBar renders the design hub's SearchField; wrap it in a pill with an accent hairline and clip the inner field to it.
@@ -788,7 +822,7 @@
     const kids = React.Children.toArray(output.props.children);
     return kids.length ? React.cloneElement(output, null, ...kids.map(skinCard)) : output;
   }
-  const blueprint = { hub: null, routes: {}, samples: 0, search: [], probes: [], hubSearch: null, census: {}, tour: [], screens: {}, tabBars: {} };
+  const blueprint = { hub: null, routes: {}, samples: 0, search: [], probes: [], hubSearch: null, census: {}, tour: [], screens: {}, screenRoots: {}, tabBars: {} };
   const TEXTY = /title|label|text|children|description|subtitle|placeholder|accessibilityLabel/i;
   function typeName(t) { return typeof t === "string" ? t : t?.displayName || t?.name || t?.type?.displayName || t?.type?.name || t?.render?.displayName || t?.render?.name || (t ? "anonymous" : "null"); }
   function flat(style, out = {}, depth = 0) {
@@ -838,6 +872,7 @@
         const route = currentRouteName() || "unknown", key = name, row = blueprint.census[key] || (Object.keys(blueprint.census).length < 400 ? (blueprint.census[key] = { n: 0, routes: [], keys: Object.keys(props).slice(0, 14), sample: null }) : null);
         if (row) { row.n++; if (row.routes.length < 6 && !row.routes.includes(route)) row.routes.push(route); if (!row.sample && /^(Card|Table|Button|Icon|Text|Heading|Header|Nav|Tab|Bar|Search|Field|Input|Toggle|Switch|Avatar|Badge|Sheet|List|Row|Section|Modal|Menu)/.test(name)) row.sample = safe(() => describe({ type, props: { ...props, children: undefined } }, 0, { n: 14 })?.p, null); }
       }
+      if (props.route && typeof props.route.name === "string" && props.navigation && typeof type !== "string") { const list = blueprint.screenRoots[props.route.name] || (blueprint.screenRoots[props.route.name] = []), sig = name + "|" + Object.keys(props).sort().join(","); if (list.length < 4 && !list.some(x => x.sig === sig)) list.push({ sig, type: name, keys: Object.keys(props).slice(0, 14) }); }
       if (blueprint.search.length >= 8) return;
       const hit = /search/i.test(name) || (typeof props.placeholder === "string" && /search/i.test(props.placeholder)) || (typeof props.accessibilityLabel === "string" && /search/i.test(props.accessibilityLabel));
       if (!hit) return;
@@ -888,7 +923,7 @@
   }
   function copyBlueprint() {
     const c = safe(() => unwrap(api.common.clipboard), null), hub = mod("TableRowGroup", "TableRow");
-    const data = { product: "Discord: Reimagined", version: VERSION, kind: "settings-blueprint", hubExports: hub ? Object.keys(hub).slice(0, 120) : null, route: currentRouteName(), routes: blueprint.routes, census: blueprint.census, screens: blueprint.screens, tabBars: blueprint.tabBars, tour: blueprint.tour, search: blueprint.search, searchProbes: blueprint.probes, hubSearchExports: blueprint.hubSearch, patched: { group: health.hooks.NativeSkinTableRowGroup, row: health.hooks.NativeSkinTableRow } };
+    const data = { product: "Discord: Reimagined", version: VERSION, kind: "settings-blueprint", hubExports: hub ? Object.keys(hub).slice(0, 120) : null, route: currentRouteName(), routes: blueprint.routes, census: blueprint.census, screens: blueprint.screens, screenRoots: blueprint.screenRoots, tabBars: blueprint.tabBars, tour: blueprint.tour, search: blueprint.search, searchProbes: blueprint.probes, hubSearchExports: blueprint.hubSearch, patched: { group: health.hooks.NativeSkinTableRowGroup, row: health.hooks.NativeSkinTableRow } };
     if (c?.setString) { c.setString(JSON.stringify(data)); toast("Settings blueprint copied"); }
   }
   function patchNativeSkin() {
@@ -913,6 +948,7 @@
     pass("TableRowGroup", "nativeSkin", output => SkinFrame ? h(SkinFrame, { fallback: output }, safe(() => skinGroup(output), output)) : output);
     pass("TableRowGroupTitle", "nativeSkin", (output, args) => typeof args?.[0]?.title === "string" ? skinTitle(args[0].title) : output);
     pass("TableRow", "nativeSkinRows", skinRow);
+    patchScreens();
     pass("SearchField", "nativeSkin", output => SkinFrame ? h(SkinFrame, { fallback: output }, safe(() => skinSearch(output), output)) : output);
     probeSearch();
   }
