@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.22');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.23');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -141,7 +141,7 @@ region('    DockHost = class extends React.Component {', '    // Plugin settings
         // Original navigation remains intact; the custom dock belongs inside Scene.
         const launch = this.props.mode !== "settings" && cfg("layout") && me()
           ? button("Reimagined", null, null, { marginHorizontal: SPACE.lg }, "reimagined-launcher", () => present()) : null;
-        const overlay = this.props.mode !== "settings" && cfg("nativeScreens") && me() && NativeOverlay ? h(NativeOverlay) : null;
+        const overlay = null;
         return h(React.Fragment, null, this.props.original, launch, overlay,
           RN.Modal ? h(RN.Modal, { visible: p.modal && modalOwner === this,
             presentationStyle: "fullScreen", animationType: "none",
@@ -261,9 +261,9 @@ swap('    Boundary = class extends React.Component {', `    SkinFrame = class ex
 swap('  function scan() {', `  let SkinFrame;
   function patchNativeSkin() {
     if (!live) return;
-    const pass = (name, flag, wrap, before) => {
+    const pass = (name, flag, wrap, before, only) => {
       if (!cfg(flag) && !cfg("blueprint")) return;
-      const hubs = [mod("TableRowGroup", "TableRow"), ...(safe(() => before ? api.metro.findByPropsAll(name, "TableRow") : api.metro.findByPropsAll(name), []) || [])].map(unwrap).filter(Boolean);
+      const hubs = [mod("TableRowGroup", "TableRow"), ...(only ? [] : safe(() => before ? api.metro.findByPropsAll(name, "TableRow") : api.metro.findByPropsAll(name), []) || [])].map(unwrap).filter(Boolean);
       let patched = 0;
       for (const hub of new Set(hubs)) {
         const target = safe(() => renderTarget(hub, name), null);
@@ -281,6 +281,16 @@ swap('  function scan() {', `  let SkinFrame;
     pass("TableRowGroup", "nativeSkin", output => SkinFrame ? h(SkinFrame, { fallback: output }, safe(() => skinGroup(output), output)) : output);
     pass("TableRowGroupTitle", "nativeSkin", (output, args) => typeof args?.[0]?.title === "string" ? skinTitle(args[0].title) : output);
     pass("TableRow", "nativeSkinRows", skinRow);
+    // Restyles shared design-system pieces so every native screen (Home, Notifications, You) picks up the Reimagined surface language in place.
+    const hubKeys = safe(() => Object.keys(unwrap(mod("TableRowGroup", "TableRow")) || {}), []) || [];
+    health.hooks.HubExports = hubKeys.join(",").slice(0, 900) || "none";
+    const restyle = style => output => isEl(output) && output.props ? React.cloneElement(output, { style: [output.props.style, style()] }) : output;
+    const cardStyle = () => { const c = colors(); return { backgroundColor: c.elevated, borderRadius: RAD.large, borderWidth: RN.StyleSheet?.hairlineWidth || 1, borderColor: c.line }; };
+    const pillStyle = () => ({ borderRadius: RAD.round });
+    const chipStyle = () => { const c = colors(); return { backgroundColor: c.accentSoft, borderRadius: RAD.round }; };
+    pass("Card", "nativeScreens", restyle(cardStyle), false, true);
+    pass("Button", "nativeScreens", restyle(pillStyle), false, true);
+    pass("Chip", "nativeScreens", restyle(chipStyle), false, true);
     pass("SearchField", "nativeSkin", output => SkinFrame ? h(SkinFrame, { fallback: output }, safe(() => skinSearch(output), output)) : output);
     probeSearch();
   }
@@ -435,7 +445,7 @@ swap('  let SkinFrame;', `  let SkinFrame;
 
 // Native screens: when enabled, the screen components Discord's navigator renders for the guilds, notifications and you routes are replaced in place by Reimagined content (YouBar and native navigation stay), failing open to the original screen.
 swap('nativeSkinRows: false, blueprint: false', 'nativeSkinRows: false, nativeScreens: false, blueprint: false');
-swap('h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }),', 'h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }), h(Toggle, { name: "nativeScreens", label: "Reimagined inside native screens (beta)" }),');
+swap('h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }),', 'h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }), h(Toggle, { name: "nativeScreens", label: "Restyle native screens (beta)" }),');
 swap('if (value.key === "nativeSkin" || value.key === "nativeSkinRows" || value.key === "blueprint") patchNativeSkin();', 'if (value.key === "nativeSkin" || value.key === "nativeSkinRows" || value.key === "blueprint" || value.key === "nativeScreens") patchNativeSkin();');
 swap('cfg("layout") && cfg("startHome") && !autoPresented', 'cfg("layout") && !cfg("nativeScreens") && cfg("startHome") && !autoPresented');
 swap('const launch = this.props.mode === "settings" || !me() ? null', 'const launch = this.props.mode === "settings" || !me() || cfg("nativeScreens") ? null');
@@ -529,11 +539,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.22',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.23',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.22
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.23
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -579,4 +589,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.22', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.23', sourceSHA256: digest(code), output: out }));

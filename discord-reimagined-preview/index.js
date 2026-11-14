@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.22 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.23 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.22", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.23", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
@@ -538,7 +538,7 @@
     function Toggle(p) { return h(RN.View, { style: { flexDirection: "row", alignItems: "center", paddingVertical: SPACE.md, borderBottomWidth: 1, borderBottomColor: colors().line } }, t(p.label, { flex: 1, minWidth: 0, paddingRight: SPACE.lg, fontWeight: "500" }), h(RN.Switch, { testID: "setting-" + p.name, accessibilityLabel: p.label, value: !!cfg(p.name), trackColor: { false: colors().line, true: colors().accent }, thumbColor: colors().surface, onValueChange: value => send("setting", { key: p.name, value: !!value }) })); }
     function Preferences() { const c = colors(); return h(Page, { title: "Appearance", back: true },
       h(RN.View, { style: { flexDirection: "row", justifyContent: "space-between" } }, ...Object.entries(PALETTES).map(([id, p]) => h(Control, { key: id, id: "palette-" + id, label: p.name, action: "setting", value: { key: "palette", value: id }, selected: cfg("palette") === id, style: { flex: 1, marginRight: id === "slate" ? 0 : SPACE.sm, padding: SPACE.md, borderRadius: RAD.medium, borderWidth: cfg("palette") === id ? 2 : 1, borderColor: cfg("palette") === id ? c.accent : c.line, backgroundColor: p.bg } }, h(RN.View, { style: { flexDirection: "row", marginBottom: SPACE.sm } }, ...[p.surface, p.accent, p.ink].map((color, i) => h(RN.View, { key: i, style: { width: 16, height: 16, borderRadius: 8, marginRight: 3, backgroundColor: color } }))), t(p.name, { color: p.ink, fontSize: TYPE.small, fontWeight: "600" }, { numberOfLines: 1 })))),
-      h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }), h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }), h(Toggle, { name: "nativeScreens", label: "Reimagined inside native screens (beta)" }),
+      h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }), h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }), h(Toggle, { name: "nativeScreens", label: "Restyle native screens (beta)" }),
       button(cfg("density") === "compact" ? "Comfortable" : "Compact", "setting", { key: "density", value: cfg("density") === "compact" ? "comfortable" : "compact" }, { marginTop: SPACE.lg }, "density"),
       h(Section, { title: "Diagnostics" }), h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"), h(Toggle, { name: "blueprint", label: "Record settings blueprint" }), button("Copy settings blueprint", "blueprint", null, { marginTop: SPACE.sm }, "copy-blueprint"), button("Scan whole app (tour)", "tour", null, { marginTop: SPACE.sm }, "scan-app"),
       t(VERSION, { fontSize: TYPE.small, color: c.muted, marginTop: SPACE.xl }), health.issues.length ? t(health.issues.join("\n"), { color: c.danger, marginTop: SPACE.md, fontSize: TYPE.small }) : null); }
@@ -774,7 +774,7 @@
         const launch = this.props.mode === "settings" || !me() || cfg("nativeScreens") ? null
           : cfg("layout") ? button("Reimagined", null, null, { marginHorizontal: SPACE.lg }, "reimagined-launcher", () => present())
           : button("Return to Reimagined", null, null, { marginHorizontal: SPACE.lg, backgroundColor: colors().accentSoft }, "reimagined-return", () => { api.storage.layout = true; present(); });
-        const overlay = this.props.mode !== "settings" && cfg("nativeScreens") && me() && NativeOverlay ? h(NativeOverlay) : null;
+        const overlay = null;
         return h(React.Fragment, null, this.props.original, launch, overlay,
           RN.Modal ? h(RN.Modal, { visible: p.modal && modalOwner === this,
             presentationStyle: "fullScreen", animationType: "none",
@@ -973,9 +973,9 @@
   }
   function patchNativeSkin() {
     if (!live) return;
-    const pass = (name, flag, wrap, before) => {
+    const pass = (name, flag, wrap, before, only) => {
       if (!cfg(flag) && !cfg("blueprint")) return;
-      const hubs = [mod("TableRowGroup", "TableRow"), ...(safe(() => before ? api.metro.findByPropsAll(name, "TableRow") : api.metro.findByPropsAll(name), []) || [])].map(unwrap).filter(Boolean);
+      const hubs = [mod("TableRowGroup", "TableRow"), ...(only ? [] : safe(() => before ? api.metro.findByPropsAll(name, "TableRow") : api.metro.findByPropsAll(name), []) || [])].map(unwrap).filter(Boolean);
       let patched = 0;
       for (const hub of new Set(hubs)) {
         const target = safe(() => renderTarget(hub, name), null);
@@ -993,6 +993,16 @@
     pass("TableRowGroup", "nativeSkin", output => SkinFrame ? h(SkinFrame, { fallback: output }, safe(() => skinGroup(output), output)) : output);
     pass("TableRowGroupTitle", "nativeSkin", (output, args) => typeof args?.[0]?.title === "string" ? skinTitle(args[0].title) : output);
     pass("TableRow", "nativeSkinRows", skinRow);
+    // Restyles shared design-system pieces so every native screen (Home, Notifications, You) picks up the Reimagined surface language in place.
+    const hubKeys = safe(() => Object.keys(unwrap(mod("TableRowGroup", "TableRow")) || {}), []) || [];
+    health.hooks.HubExports = hubKeys.join(",").slice(0, 900) || "none";
+    const restyle = style => output => isEl(output) && output.props ? React.cloneElement(output, { style: [output.props.style, style()] }) : output;
+    const cardStyle = () => { const c = colors(); return { backgroundColor: c.elevated, borderRadius: RAD.large, borderWidth: RN.StyleSheet?.hairlineWidth || 1, borderColor: c.line }; };
+    const pillStyle = () => ({ borderRadius: RAD.round });
+    const chipStyle = () => { const c = colors(); return { backgroundColor: c.accentSoft, borderRadius: RAD.round }; };
+    pass("Card", "nativeScreens", restyle(cardStyle), false, true);
+    pass("Button", "nativeScreens", restyle(pillStyle), false, true);
+    pass("Chip", "nativeScreens", restyle(chipStyle), false, true);
     patchScreens();
     pass("SearchField", "nativeSkin", output => SkinFrame ? h(SkinFrame, { fallback: output }, safe(() => skinSearch(output), output)) : output);
     probeSearch();
