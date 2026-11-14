@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.25');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.27');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -178,6 +178,14 @@ test('native screens restyle design-system cards in place and report hub exports
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {}, Card: card }, screens: true });
   const d = f.plugin.diagnostics().hooks; assert.equal(d.NativeSkinCard, 'patched x1'); assert.match(d.HubExports, /Card/);
   const out = JSON.stringify(card.type()); assert.ok(out.includes('"borderRadius":24') && out.includes('"flex":1')); await f.stop();
+});
+test('native screens wrap conversation rows in cards by props and fail open', async () => {
+  const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} }, screens: true });
+  const create = f.api.common.React.createElement, Row = function Row() { return null; };
+  const wrapped = create(Row, { channelId: '1' }); assert.notEqual(wrapped.type, Row); assert.equal(wrapped.props.__reimaginedOrig, Row);
+  assert.equal(create(Row, { channelId: '1', extra: 1 }).type, Row);
+  assert.equal(create(Row, { channelId: '1', __reimaginedRaw: true }).type, Row);
+  f.api.storage.nativeScreens = false; assert.equal(create(Row, { channelId: '1' }).type, Row); await f.stop();
 });
 test('app tour visits declared routes, skips risky ones and returns', async () => {
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} } });

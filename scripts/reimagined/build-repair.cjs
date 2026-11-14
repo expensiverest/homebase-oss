@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.25');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.27');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -124,7 +124,7 @@ swap('content), state.screen === "main" || state.screen === "channels" ? h(Dock)
 region('    DockHost = class extends React.Component {', '    // Plugin settings remain a small entry point;', `    DockHost = class extends React.Component {
       constructor(p) { super(p); this.state = { tick: 0 }; this.refresh = () => this.setState(s => ({ tick: s.tick + 1 })); }
       componentDidMount() {
-        presentationHosts.add(this); if (!modalOwner) modalOwner = this;
+        presentationHosts.add(this); treeHost = this; if (!modalOwner) modalOwner = this;
         listeners.add(this.refresh);
         if (this.props.mode !== "settings" && cfg("layout") && cfg("startHome") && !autoPresented && me()) {
           autoPresented = true; this.timer = setTimeout(() => { if (live) present("home"); }, 150);
@@ -298,8 +298,8 @@ swap('  function scan() {', `  let SkinFrame;
 swap('api.patcher.after(method, object, (_args, output) => { if (!live || output == null || !me() ||', 'api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint")) safe(() => recordTabBar(name, _args[0])); if (!live || output == null || !me() ||');
 swap('    scan(); syncTheme();', '    scan(); syncTheme(); patchNativeSkin();');
 // Settings blueprint: records a compact structural sample (component names, prop keys, numeric styles; text lengths only) of the native rows and groups so the skin can be designed from real data.
-swap('h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"),', 'h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"), h(Toggle, { name: "blueprint", label: "Record settings blueprint" }), button("Copy settings blueprint", "blueprint", null, { marginTop: SPACE.sm }, "copy-blueprint"), button("Scan whole app (tour)", "tour", null, { marginTop: SPACE.sm }, "scan-app"),');
-swap('else if (action === "report") copyReport();', 'else if (action === "report") copyReport(); else if (action === "blueprint") copyBlueprint(); else if (action === "tour") startTour();');
+swap('h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"),', 'h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"), h(Toggle, { name: "blueprint", label: "Record settings blueprint" }), button("Copy settings blueprint", "blueprint", null, { marginTop: SPACE.sm }, "copy-blueprint"), button("Scan whole app (tour)", "tour", null, { marginTop: SPACE.sm }, "scan-app"), button("Copy screen tree", "tree", null, { marginTop: SPACE.sm }, "copy-tree"),');
+swap('else if (action === "report") copyReport();', 'else if (action === "report") copyReport(); else if (action === "blueprint") copyBlueprint(); else if (action === "tour") startTour(); else if (action === "tree") safe(() => copyTree());');
 swap('if (value.key === "nativeSkin" || value.key === "nativeSkinRows") patchNativeSkin();', 'if (value.key === "nativeSkin" || value.key === "nativeSkinRows" || value.key === "blueprint") patchNativeSkin();');
 swap('  let SkinFrame;', `  let SkinFrame;
   const blueprint = { hub: null, routes: {}, samples: 0, search: [], probes: [], hubSearch: null, census: {}, tour: [], screens: {}, tabBars: {} };
@@ -400,6 +400,27 @@ swap('  let SkinFrame;', `  let SkinFrame;
     const st = props.state || {}, d = props.descriptors || {}, first = d[Object.keys(d)[0]] || {};
     blueprint.tabBars[name] = { propKeys: Object.keys(props).slice(0, 24), routes: (st.routes || []).map(r => r.name), index: st.index, routeNames: st.routeNames, descriptorKeys: Object.keys(first).slice(0, 16), optionKeys: Object.keys(first.options || {}).slice(0, 24), renderIsFn: typeof first.render === "function", navigationKeys: Object.keys(props.navigation || {}).slice(0, 24) };
   }
+  // Walks the mounted React tree from a class instance we own (its _reactInternals is a fiber) and copies an indented outline of composite components, so native screens can be targeted without guessing.
+  let treeHost = null;
+  function copyTree() {
+    const c = safe(() => unwrap(api.common.clipboard), null), start = treeHost && (treeHost._reactInternals || treeHost._reactInternalFiber);
+    if (!start) { toast("Tree unavailable: no mounted dock"); return; }
+    let root = start; while (root.return) root = root.return;
+    const nameOf = f => { const t = f.type; if (!t || typeof t === "string") return null; if (f.tag === 5 || f.tag === 6) return null; const n = t.displayName || t.name || t.render?.displayName || t.render?.name || t.type?.displayName || t.type?.name; return (f.tag === 14 || f.tag === 15 ? "memo:" : f.tag === 11 ? "fwd:" : "") + (n || "anonymous"); };
+    const lines = [], stack = [[root, 0]]; let count = 0;
+    while (stack.length && lines.length < 3500) {
+      const [f, d] = stack.pop(); if (!f) continue;
+      if (f.sibling) stack.push([f.sibling, d]);
+      let nd = d; const n = nameOf(f), p = f.memoizedProps && typeof f.memoizedProps === "object" ? f.memoizedProps : null;
+      if (n) {
+        const keys = p ? Object.keys(p).slice(0, 8).join(",") : "", tag = p ? [p.testID, p.nativeID, p.accessibilityLabel, p.route?.name].filter(x => typeof x === "string").map(x => x.slice(0, 28)).join("|") : "";
+        lines.push(" ".repeat(Math.min(d, 60)) + n + "{" + keys + "}" + (tag ? " #" + tag : "")); nd = d + 1;
+      } else if (p && (typeof p.testID === "string" || typeof p.accessibilityLabel === "string")) lines.push(" ".repeat(Math.min(d, 60)) + "·" + (typeof f.type === "string" ? f.type : "host") + " #" + [p.testID, p.accessibilityLabel].filter(x => typeof x === "string").map(x => x.slice(0, 28)).join("|"));
+      if (f.child) stack.push([f.child, nd]); count++;
+    }
+    const text = "reimagined-tree " + VERSION + " route=" + currentRouteName() + " fibers=" + count + "\\n" + lines.join("\\n");
+    if (c?.setString) { c.setString(text); toast("Screen tree copied (" + lines.length + " lines)"); }
+  }
   function copyBlueprint() {
     const c = safe(() => unwrap(api.common.clipboard), null), hub = mod("TableRowGroup", "TableRow");
     const data = { product: "Discord: Reimagined", version: VERSION, kind: "settings-blueprint", hubExports: hub ? Object.keys(hub).slice(0, 120) : null, route: currentRouteName(), routes: blueprint.routes, census: blueprint.census, screens: blueprint.screens, tabBars: blueprint.tabBars, tour: blueprint.tour, search: blueprint.search, searchProbes: blueprint.probes, hubSearchExports: blueprint.hubSearch, patched: { group: health.hooks.NativeSkinTableRowGroup, row: health.hooks.NativeSkinTableRow } };
@@ -451,7 +472,7 @@ swap('cfg("layout") && cfg("startHome") && !autoPresented', 'cfg("layout") && !c
 swap('const launch = this.props.mode === "settings" || !me() ? null', 'const launch = this.props.mode === "settings" || !me() || cfg("nativeScreens") ? null');
 swap('if (!baseRoute || !cfg("layout")) return;', 'if (!baseRoute || !cfg("layout") || cfg("nativeScreens")) return;');
 swap('    push({ screen: "conversation", channel: id }); loadMessages(id);', '    if (cfg("nativeScreens")) { nativeConversation(id); return; }\n    push({ screen: "conversation", channel: id }); loadMessages(id);');
-swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, embeddedRoute = null;
+swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, RowCard, embeddedRoute = null;
   const SCREEN_TAB = { guilds: "home", notifications: "messages", you: "you" };
   // Diagnostic: lists (in the compatibility report) which navigation-related elements Discord really creates, with their prop names.
   let navProbeCount = 0; const treeSeen = new Set();
@@ -473,6 +494,11 @@ swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, embeddedRo
     const type = args?.[0], props = args?.[1];
     if (props && props.__reimaginedRaw) { const { __reimaginedRaw, ...rest } = props; return [type, rest, ...args.slice(2)]; }
     if (live && cfg("nativeScreens") && props && typeof type !== "string") safe(() => navProbe(type, props));
+    // Layout: conversation rows (recognised by their props, since Discord's component names are minified) become spaced cards in place.
+    if (live && cfg("nativeScreens") && RowCard && props && typeof type !== "string" && type !== RowCard && props.channelId != null && Object.keys(props).every(k => k === "key" || k === "channelId")) {
+      health.hooks.NativeRows = "cards";
+      return [RowCard, { ...props, __reimaginedOrig: type }, ...args.slice(2)];
+    }
     if (!live || !cfg("nativeScreens") || !NativeHost || typeof type === "string" || type === NativeHost || !props || !props.route || !props.navigation) return undefined;
     const name = props.route.name, keys = Object.keys(props);
     if (typeof name !== "string") return undefined;
@@ -494,7 +520,17 @@ swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, embeddedRo
     health.hooks.NativeScreens = health.hooks.NativeScreens || (seen.size ? "armed" : "no hook");
   }`);
 swap('    pass("SearchField", "nativeSkin",', '    patchScreens();\n    pass("SearchField", "nativeSkin",');
-swap('    Boundary = class extends React.Component {', `    NativeHost = class extends React.Component {
+swap('    Boundary = class extends React.Component {', `    RowCard = class extends React.Component {
+      constructor(p) { super(p); this.state = { failed: false }; }
+      componentDidCatch() { issue("native-row-failed"); this.setState({ failed: true }); }
+      render() {
+        const { __reimaginedOrig: Orig, ...rest } = this.props, raw = h(Orig, { ...rest, __reimaginedRaw: true });
+        if (!live || this.state.failed || !cfg("nativeScreens")) return raw;
+        const c = colors();
+        return h(RN.View, { style: { marginHorizontal: SPACE.md, marginVertical: 3, borderRadius: RAD.medium, backgroundColor: c.surface, overflow: "hidden" } }, raw);
+      }
+    };
+    NativeHost = class extends React.Component {
       constructor(p) { super(p); this.state = { failed: false, tick: 0, width: safe(() => RN.Dimensions.get("window").width, 390) }; this.refresh = () => this.setState(s => ({ tick: s.tick + 1 })); }
       componentDidMount() { listeners.add(this.refresh); this.focusOff = safe(() => this.props.navigation?.addListener?.("focus", () => this.claim()), null); this.claim(true); loadProfile(accountId); }
       componentWillUnmount() { listeners.delete(this.refresh); if (typeof this.focusOff === "function") this.focusOff(); else this.focusOff?.remove?.(); }
@@ -540,11 +576,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.25',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.27',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.25
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.27
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -590,4 +626,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.25', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.27', sourceSHA256: digest(code), output: out }));
