@@ -1,4 +1,4 @@
-# Discord: Reimagined 0.2.0-alpha.5
+# Discord: Reimagined 0.2.0-alpha.6
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -36,7 +36,7 @@ When Reimagined hands off to a Discord screen (a forum, Settings under the fallb
 
 ## Native skin (beta)
 
-Appearance > Restyle Discord settings (beta) restyles Discord's own settings lists in place (rounded bordered cards with a fade-in) by patching the design-system TableRowGroup. It is off by default, needs no tweak, and switches itself off if a restyled list fails to render. Check the compatibility report for NativeSkinGroup.
+Appearance > Restyle Discord settings (beta) restyles Discord's own settings lists in place (a fade-and-rise entrance; Discord's own card styling is left untouched) by patching the design-system TableRowGroup. It is off by default, needs no tweak, and switches itself off if a restyled list fails to render. Check the compatibility report for NativeSkinGroup.
 
 ## Validation
 
