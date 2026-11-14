@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.29');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.30');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -259,6 +259,27 @@ swap('    Boundary = class extends React.Component {', `    SkinFrame = class ex
     };
     Boundary = class extends React.Component {`);
 swap('  function scan() {', `  let SkinFrame;
+  // Rewrites the native screen components themselves (found by Discord's module file paths, which survive minification) so the Reimagined layout renders in place of their output, inside the native navigator and header.
+  const LAYOUT_TARGETS = [["NativeHome", "modules/main_tabs_v2/native/tabs/messages/Messages.tsx", "guilds", false], ["NativeNotifications", "modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx", "notifications", true], ["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true]];
+  const passthrough = p => p.__out == null ? null : p.__out;
+  function patchLayouts() {
+    if (!live) return;
+    for (const [label, file, route, pushed] of LAYOUT_TARGETS) {
+      const raw = safe(() => api.metro.findByFilePath(file), null);
+      const target = raw && safe(() => renderTarget(raw, "default"), null);
+      if (!target) { health.hooks[label] = "not found"; continue; }
+      const [object, method] = target, seen = targets.get(object) || new Set();
+      if (seen.has("layout:" + route)) { health.hooks[label] = "patched"; continue; }
+      try {
+        api.patcher.after(method, object, (_args, output) => {
+          if (!live || !cfg("nativeScreens") || output == null || !NativeHost) return output;
+          health.hooks[label] = "layout";
+          return h(NativeHost, { route: { name: route }, navigation: safe(() => root(), null), overlay: pushed, __out: output, __reimaginedOrig: passthrough });
+        });
+        seen.add("layout:" + route); targets.set(object, seen); health.hooks[label] = "patched";
+      } catch (_) { issue("hook-failed:" + label); }
+    }
+  }
   function patchNativeSkin() {
     if (!live) return;
     const pass = (name, flag, wrap, before, only) => {
@@ -296,7 +317,7 @@ swap('  function scan() {', `  let SkinFrame;
   }
   function scan() {`);
 swap('api.patcher.after(method, object, (_args, output) => { if (!live || output == null || !me() ||', 'api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint")) safe(() => recordTabBar(name, _args[0])); if (!live || output == null || !me() ||');
-swap('    scan(); syncTheme();', '    scan(); syncTheme(); patchNativeSkin();');
+swap('    scan(); syncTheme();', '    scan(); syncTheme(); patchNativeSkin(); patchLayouts();');
 // Settings blueprint: records a compact structural sample (component names, prop keys, numeric styles; text lengths only) of the native rows and groups so the skin can be designed from real data.
 swap('h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"),', 'h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"), h(Toggle, { name: "blueprint", label: "Record settings blueprint" }), button("Copy settings blueprint", "blueprint", null, { marginTop: SPACE.sm }, "copy-blueprint"), button("Scan whole app (tour)", "tour", null, { marginTop: SPACE.sm }, "scan-app"), button("Copy screen tree", "tree", null, { marginTop: SPACE.sm }, "copy-tree"),');
 swap('else if (action === "report") copyReport();', 'else if (action === "report") copyReport(); else if (action === "blueprint") copyBlueprint(); else if (action === "tour") startTour(); else if (action === "tree") safe(() => copyTree());');
@@ -589,11 +610,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.29',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.30',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.29
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.30
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -639,4 +660,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.29', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.30', sourceSHA256: digest(code), output: out }));
