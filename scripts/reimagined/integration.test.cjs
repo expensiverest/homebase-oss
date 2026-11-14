@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.22');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.24');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -172,6 +172,12 @@ test('native skin wraps the settings SearchField in a pill', async () => {
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {}, SearchField: field } });
   assert.equal(f.plugin.diagnostics().hooks.NativeSkinSearchField, 'patched x1');
   const out = JSON.stringify(field.type()); assert.ok(out.includes('"borderRadius":18') && out.includes('Field')); await f.stop();
+});
+test('native screens restyle design-system cards in place and report hub exports', async () => {
+  const card = { type: () => ({ type: 'View', props: { style: { flex: 1 } } }) };
+  const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {}, Card: card }, screens: true });
+  const d = f.plugin.diagnostics().hooks; assert.equal(d.NativeSkinCard, 'patched x1'); assert.match(d.HubExports, /Card/);
+  const out = JSON.stringify(card.type()); assert.ok(out.includes('"borderRadius":24') && out.includes('"flex":1')); await f.stop();
 });
 test('app tour visits declared routes, skips risky ones and returns', async () => {
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} } });
