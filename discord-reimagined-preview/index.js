@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.4 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.5 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.4", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.5", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, accounts: {} };
@@ -755,16 +755,20 @@
   let SkinFrame;
   function patchNativeSkin() {
     if (!live || !cfg("nativeSkin")) return;
-    const hub = mod("TableRowGroup", "TableRow"), target = hub ? safe(() => renderTarget(hub, "TableRowGroup"), null) : null;
-    if (!target) { health.hooks.NativeSkinGroup = "not found"; return; }
-    const [object, method] = target, seen = targets.get(object) || new Set();
-    if (!seen.has("skin:" + method)) {
+    const hubs = [mod("TableRowGroup", "TableRow"), ...(safe(() => api.metro.findByPropsAll("TableRowGroup"), []) || [])].map(unwrap).filter(Boolean);
+    let patched = 0;
+    for (const hub of new Set(hubs)) {
+      const target = safe(() => renderTarget(hub, "TableRowGroup"), null);
+      if (!target) continue;
+      const [object, method] = target, seen = targets.get(object) || new Set();
+      if (seen.has("skin:" + method)) { patched++; continue; }
       try {
         api.patcher.after(method, object, (_args, output) => (!live || !cfg("nativeSkin") || output == null || !SkinFrame) ? output : h(SkinFrame, null, output));
-        seen.add("skin:" + method); targets.set(object, seen);
-      } catch (_) { issue("hook-failed:NativeSkinGroup"); return; }
+        seen.add("skin:" + method); targets.set(object, seen); patched++;
+      } catch (_) { issue("hook-failed:NativeSkinGroup"); }
     }
-    health.hooks.NativeSkinGroup = "patched";
+    if (!patched) { health.hooks.NativeSkinGroup = hubs.length ? "no patchable group" : "not found"; return; }
+    health.hooks.NativeSkinGroup = "patched x" + patched;
   }
   function scan() { [["YouBar", "dock"], ["YouBarNotificationsButton", "launcher"]].forEach(([name, mode]) => { if (health.hooks[name] === "patched") return; const raw = safe(() => api.metro.findByFileName(name, false), null) || safe(() => api.metro.findByTypeName(name, false), null); if (!patch(raw, name, mode)) health.hooks[name] = "settings entry required"; }); }
   function start(pluginApi) {
