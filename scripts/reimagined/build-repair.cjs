@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.31');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.32');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -260,13 +260,13 @@ swap('    Boundary = class extends React.Component {', `    SkinFrame = class ex
     Boundary = class extends React.Component {`);
 swap('  function scan() {', `  let SkinFrame;
   // Rewrites the native screen components themselves (found by Discord's module file paths, which survive minification) so the Reimagined layout renders in place of their output, inside the native navigator and header.
-  const LAYOUT_TARGETS = [["NativeHome", "modules/main_tabs_v2/native/tabs/messages/Messages.tsx", "messages", false], ["NativeNotifications", "modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx", "notifications", true], ["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true]];
+  const LAYOUT_TARGETS = [["NativeHome", "modules/main_tabs_v2/native/tabs/messages/Messages.tsx", "messages", false], ["NativeNotifications", "modules/main_tabs_v2/native/tabs/notifications/Notifications.tsx", "notifications", true], ["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true], ["NativeGuilds", "modules/main_tabs_v2/native/tabs/guilds/Guilds.tsx", "guilds", false], ["NativeHomePanel", "modules/main_tabs_v2/native/tabs/guilds/HomePanelContent.tsx", "guilds", false], ["NativeForYou", "modules/notification_center/native/NotificationCenterForYou.tsx", "notifications", true, "NotificationCenterForYou"]];
   const passthrough = p => p.__out == null ? null : p.__out;
   function patchLayouts() {
     if (!live) return;
-    for (const [label, file, route, pushed] of LAYOUT_TARGETS) {
+    for (const [label, file, route, pushed, exp = "default"] of LAYOUT_TARGETS) {
       const raw = safe(() => api.metro.findByFilePath(file), null);
-      const target = raw && safe(() => renderTarget(raw, "default"), null);
+      const target = raw && safe(() => renderTarget(raw, exp), null);
       if (!target) { health.hooks[label] = "not found"; continue; }
       const [object, method] = target, seen = targets.get(object) || new Set();
       if (seen.has("layout:" + route)) { health.hooks[label] = "patched"; continue; }
@@ -274,6 +274,7 @@ swap('  function scan() {', `  let SkinFrame;
       try {
         api.patcher.after(method, object, (_args, output) => {
           if (!live || !cfg("nativeScreens") || output == null || !NativeHost) return output;
+          if (route === "you" && currentRouteName() !== "you") return output;
           health.hooks[label] = "layout";
           return h(NativeHost, { route: { name: route }, forceTab: SCREEN_TAB[route] || route, navigation: safe(() => root(), null), overlay: pushed, __out: output, __reimaginedOrig: passthrough });
         });
@@ -611,11 +612,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.31',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.32',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.31
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.32
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -661,4 +662,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.31', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.32', sourceSHA256: digest(code), output: out }));
