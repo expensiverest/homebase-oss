@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.12 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.13 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.12", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.13", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, blueprint: false, accounts: {} };
@@ -755,10 +755,10 @@
   let SkinFrame;
   const skinned = new WeakSet();
   const isEl = x => React.isValidElement(x);
-  function skinSearch(args) {
-    const p = args?.[0], c = colors();
-    if (!p || typeof p.placeholder !== "string" || !/search/i.test(p.placeholder)) return undefined;
-    return [{ ...p, style: [p.style, { borderRadius: RAD.round, backgroundColor: c.elevated, borderColor: c.accentSoft, borderWidth: 1, paddingHorizontal: SPACE.sm }] }, ...args.slice(1)];
+  // Settings search: Discord's SettingSearchBar renders the design hub's SearchField; wrap it in a pill with an accent hairline and clip the inner field to it.
+  function skinSearch(output) {
+    const c = colors();
+    return h(RN.View, { style: { borderRadius: RAD.round, overflow: "hidden", backgroundColor: c.elevated, borderWidth: 1, borderColor: c.accentSoft, marginHorizontal: SPACE.xs } }, output);
   }
   function skinTitle(text) { const c = colors(); return h(RN.Text, { style: { color: c.muted, fontSize: 12, fontWeight: "700", letterSpacing: 0.9, marginLeft: SPACE.md, marginBottom: SPACE.sm, marginTop: SPACE.xs } }, text.toUpperCase()); }
   function skinGroup(output) {
@@ -870,7 +870,7 @@
     pass("TableRowGroup", "nativeSkin", output => SkinFrame ? h(SkinFrame, { fallback: output }, safe(() => skinGroup(output), output)) : output);
     pass("TableRowGroupTitle", "nativeSkin", (output, args) => typeof args?.[0]?.title === "string" ? skinTitle(args[0].title) : output);
     pass("TableRow", "nativeSkinRows", skinRow);
-    pass("TextInput", "nativeSkin", skinSearch, true);
+    pass("SearchField", "nativeSkin", output => SkinFrame ? h(SkinFrame, { fallback: output }, safe(() => skinSearch(output), output)) : output);
     probeSearch();
   }
   function scan() { [["YouBar", "dock"], ["YouBarNotificationsButton", "launcher"]].forEach(([name, mode]) => { if (health.hooks[name] === "patched") return; const raw = safe(() => api.metro.findByFileName(name, false), null) || safe(() => api.metro.findByTypeName(name, false), null); if (!patch(raw, name, mode)) health.hooks[name] = "settings entry required"; }); }
