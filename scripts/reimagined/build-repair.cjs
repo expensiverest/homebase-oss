@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.21');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.22');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -254,7 +254,7 @@ swap('    Boundary = class extends React.Component {', `    SkinFrame = class ex
       render() {
         if (this.state.failed) return this.props.fallback !== undefined ? this.props.fallback : this.props.children;
         if (!this.enter) return this.props.children;
-        return h(RN.Animated.View, { style: { opacity: this.enter, transform: [{ translateY: this.enter.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] } }, this.props.children);
+        return h(RN.Animated.View, { style: { flex: this.props.fill ? 1 : undefined, opacity: this.enter, transform: [{ translateY: this.enter.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] } }, this.props.children);
       }
     };
     Boundary = class extends React.Component {`);
@@ -494,7 +494,7 @@ swap('    Boundary = class extends React.Component {', `    NativeHost = class e
         if (!live || this.state.failed || !cfg("nativeScreens") || !me()) return h(Orig, { ...rest, __reimaginedRaw: true });
         const c = colors(), Safe = RN.SafeAreaView || RN.View, width = Math.min(this.state.width, 820), mine = embeddedRoute === rest.route?.name, tab = mine ? state.tab : SCREEN_TAB[rest.route?.name], screen = mine ? state.screen : "main";
         const content = screen === "media" ? h(Media) : screen === "call" ? h(CallScreen) : screen === "edit-profile" ? h(EditProfile) : screen === "preferences" ? h(Preferences) : screen === "profile" ? h(Profile, { id: state.profile }) : screen === "channels" ? h(Channels) : tab === "servers" ? h(Servers, { width }) : tab === "messages" ? h(Messages) : tab === "you" ? h(Profile, { id: accountId }) : h(Home, { width });
-        return h(Safe, { testID: "reimagined-native-screen", style: { flex: 1, backgroundColor: c.bg, paddingBottom: rest.overlay ? 0 : 84 } }, h(Boundary, { key: screen + ":" + tab }, h(SkinFrame, null, content)), state.drawer && mine ? h(ServerDrawer, { width }) : null);
+        return h(Safe, { testID: "reimagined-native-screen", style: { flex: 1, backgroundColor: c.bg, paddingBottom: rest.overlay ? 0 : 84 } }, h(Boundary, { key: screen + ":" + tab }, h(SkinFrame, { fill: true }, content)), state.drawer && mine ? h(ServerDrawer, { width }) : null);
       }
     };
     // Discord renders one persistent shell for every tab, so there is no per-screen element to swap: the Reimagined content is laid over the shell, above the YouBar's top edge.
@@ -508,8 +508,16 @@ swap('    Boundary = class extends React.Component {', `    NativeHost = class e
         if (!live || !cfg("nativeScreens") || !SCREEN_TAB[route] || !box) return anchor;
         const win = safe(() => RN.Dimensions.get("window"), { width: 390, height: 844 }), top = box.y >= 40 ? box.y : win.height - 84;
         health.hooks.NativeScreens = "overlay " + route;
+        const content = h(NativeHost, { route: { name: route }, navigation: safe(() => root(), null), overlay: true, __reimaginedOrig: () => null });
+        // The You and Notifications routes are pushed screens that cover the YouBar, so they get a full-screen layer with a way back.
+        if (route !== "guilds") {
+          const c = colors(), back = () => safe(() => root()?.goBack?.());
+          return h(React.Fragment, null, anchor, RN.Modal ? h(RN.Modal, { visible: true, presentationStyle: "fullScreen", animationType: "fade", onRequestClose: back },
+            h(RN.View, { testID: "reimagined-native-overlay", style: { flex: 1, backgroundColor: c.bg } }, content,
+              h(RN.Pressable, { onPress: back, accessibilityRole: "button", accessibilityLabel: "Back", style: { position: "absolute", bottom: 34, alignSelf: "center", paddingHorizontal: SPACE.xl, paddingVertical: SPACE.md, borderRadius: RAD.round, backgroundColor: c.elevated, borderWidth: 1, borderColor: c.line } }, t("Back", { fontSize: 15, fontWeight: "600", color: c.ink })))) : null);
+        }
         return h(React.Fragment, null, anchor, h(RN.View, { testID: "reimagined-native-overlay", pointerEvents: "box-none", style: { position: "absolute", left: -box.x, top: -box.y, width: win.width, height: top, zIndex: 50 } },
-          h(NativeHost, { route: { name: route }, navigation: safe(() => root(), null), overlay: true, __reimaginedOrig: () => null })));
+          content));
       }
     };
     Boundary = class extends React.Component {`);
@@ -521,11 +529,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.21',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.22',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.21
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.22
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -571,4 +579,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.21', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.22', sourceSHA256: digest(code), output: out }));
