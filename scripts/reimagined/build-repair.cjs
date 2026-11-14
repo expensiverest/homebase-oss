@@ -214,6 +214,32 @@ swap('return h(Page, { title: "Home" },\n      h(Search, { placeholder: "Search"
 swap('{ id: "unread", name: "Unread" }, { id: "pinned", name: "Pinned" }]', '{ id: "unread", name: "Unread" }, { id: "mentions", name: "Mentions" }, { id: "pinned", name: "Pinned" }]');
 swap('(state.filter !== "unread" || d.unread) &&', '(state.filter !== "unread" || d.unread) && (state.filter !== "mentions" || d.mentions > 0) &&');
 swap('toast("Forum and media-channel layouts are not replaced in this build."); return;', 'toast("Opening this forum in Discord. Use Return to Reimagined to come back."); nativeConversation(id); return;');
+// Seamless return: after handing off to a native screen, reopen Reimagined once the user is back on the route they started from.
+swap('  function nativeConversation(id) {', `  let baseRoute = null, returnTimer = null;
+  const customRouteName = "DISTRA_CUSTOM_PAGE";
+  const currentRouteName = () => safe(() => { const r = root(); return (r.getCurrentRoute?.() || null)?.name || null; }, null);
+  function stopReturnWatch() { if (returnTimer !== null) clearTimeout(returnTimer); returnTimer = null; }
+  function watchReturn() {
+    stopReturnWatch();
+    if (!baseRoute || !cfg("layout")) return;
+    let away = false; const armedAt = Date.now();
+    const tick = () => {
+      returnTimer = null; if (!live || !cfg("layout")) return;
+      const name = currentRouteName();
+      if (name && name !== customRouteName && name !== baseRoute) away = true;
+      else if (away && name === baseRoute) { returnTimer = setTimeout(() => { returnTimer = null; if (live && cfg("layout")) present(); }, 250); return; }
+      // Give up if the handoff never left the starting route.
+      if (!away && Date.now() - armedAt > 20000) return;
+      returnTimer = setTimeout(tick, 350);
+    };
+    returnTimer = setTimeout(tick, 350);
+  }
+  function nativeConversation(id) {`);
+swap('    presenter.dismiss(() => {\n      if (!live) return;\n      try {\n        if (isPrivate(c))', '    presenter.dismiss(() => {\n      if (!live) return;\n      watchReturn();\n      try {\n        if (isPrivate(c))');
+swap('    const invoke = () => {\n      if (!live) return;\n      try {\n        const r = root();', '    const invoke = () => {\n      if (!live) return;\n      if (!(presenter.snapshot().mode === "route")) watchReturn();\n      try {\n        const r = root();');
+swap('  function present(tab) {\n    if (!live || !me()) return;', '  function present(tab) {\n    if (!live || !me()) return;\n    stopReturnWatch(); { const n = currentRouteName(); if (n && n !== customRouteName) baseRoute = n; }');
+swap('  function restoreOriginal() {\n    api.storage.layout = false;', '  function restoreOriginal() {\n    stopReturnWatch(); api.storage.layout = false;');
+swap('async function stop() { presenter?.stop();', 'async function stop() { stopReturnWatch(); presenter?.stop();');
 fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
@@ -253,6 +279,10 @@ Home now opens with a greeting, an unread/mention summary and a Jump back in row
 ## Replaced vs. native
 
 Replaced: Home, Servers, server channels, Messages, conversations, voice call controls, media viewer, profiles, profile editor, appearance and server drawer. Still native because Discord exposes no safe hook: Settings (shown as a sheet), the call media engine and video, uploads and pickers, forum/media-channel browsing, NSFW age gates.
+
+## Returning from native screens
+
+When Reimagined hands off to a Discord screen (a forum, Settings under the fallback modal, a conversation), it watches navigation and reopens itself once you are back on the route you started from.
 
 ## Validation
 

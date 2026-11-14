@@ -135,6 +135,13 @@ test('Home renders the glance summary and the Mentions filter exists', async () 
   assert.equal(glance.length, 1);
   f.press(controlInScene(scene, 'tab-messages')); assert.ok(controlInScene(scene, 'filter-mentions')); await f.stop();
 });
+test('returns to Reimagined after leaving a native Settings screen', async () => {
+  const f = fixture({ noRoute: true }); f.launch(); const scene = f.mountModalScene();
+  f.press(controlInScene(scene, 'open-settings')); f.modal().props.onDismiss();
+  assert.equal(f.settingsOpened(), 1); assert.equal(f.modal().props.visible, false);
+  f.focused({ name: 'settings' }); f.advance(800); f.focused({ name: 'home' }); f.advance(1000);
+  assert.equal(f.modal().props.visible, true); await f.stop();
+});
 test('teardown preserves the original component rather than leaving a dead custom dock', async () => {
   const f = fixture(); f.launch(); await f.stop(); assert.equal(f.host.render(), f.original); f.advance(5000); assert.equal(f.plugin.diagnostics().presentation.mode, 'stopped');
 });
