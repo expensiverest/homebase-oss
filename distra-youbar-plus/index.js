@@ -9,6 +9,7 @@
     showDMButton: true,
     showSettingsButton: true,
     showFavoritesButton: true,
+    diagnostics: false,
   });
   const OPTIONS = [
     { key: "showDMButton", label: "Direct Messages", icon: "ChatIcon", description: "Add a DM shortcut to the You Bar.", dest: "@me" },
@@ -68,6 +69,17 @@
     return undefined;
   }
 
+  function activate(option) {
+    // Diagnostic mode tells us which element actually received the native tap.
+    // It deliberately does not navigate, making hit-box problems observable.
+    if (enabled("diagnostics")) {
+      api?.toasts?.showToast?.(`YouBar+ tapped: ${option.label}`);
+      api?.logger?.info?.(`Tap diagnostics: ${option.label}`);
+      return;
+    }
+    navigate(option.dest);
+  }
+
   function navigate(destination) {
     if (!api) return;
     try {
@@ -117,30 +129,51 @@
     if (!output || !child || Array.isArray(child) || !child.type || !output.type) return output;
 
     const IconButton = child.type;
-    const Container = output.type;
+    const RN = api.common.ReactNative;
+    if (!RN?.Pressable || !RN?.View) {
+      setStatus("React Native Pressable was not found; keeping native You Bar unchanged.");
+      return output;
+    }
     const originalProps = child.props ?? {};
     const extraButtons = [];
     for (const option of OPTIONS) {
       if (!enabled(option.key)) continue;
       const asset = iconId(option.icon);
       if (asset === undefined) continue;
-      const icon = React.createElement(IconButton, {
-        key: `distra-youbar-icon-${option.key}`,
-        accessibilityLabel: option.label,
-        accessibilityRole: "button",
+
+      // v0.1-v0.2 wrapped each icon in the SAME Discord component that
+      // renders Notifications. On iPhone, those wrappers apparently created
+      // overlapping hit targets: every tap landed on the LAST button.
+      // v0.3 makes each hit target a distinct, fixed-width RN Pressable.
+      // The Discord IconButton remains the visual only, and cannot intercept.
+      const visual = React.createElement(IconButton, {
         variant: originalProps.variant ?? "tertiary",
         size: originalProps.size ?? "sm",
         icon: asset,
-        onPress: () => navigate(option.dest),
+        onPress: () => {},
       });
-      // The original container may have its own onPress, navigation state, or
-      // pointer handlers. Copying those props made every injected button behave
-      // like the original (e.g. opening Favorites) instead of its own shortcut.
-      // Like the Valenced source, render a FRESH container with only our child.
-      const wrapper = React.createElement(Container, {
-        key: `distra-youbar-wrapper-${option.key}`,
-      }, icon);
-      extraButtons.push(wrapper);
+      const inertVisual = React.createElement(RN.View, {
+        pointerEvents: "none",
+        collapsable: false,
+      }, visual);
+      const control = React.createElement(RN.Pressable, {
+        key: `distra-youbar-control-${option.key}`,
+        accessibilityLabel: option.label,
+        accessibilityRole: "button",
+        onPress: () => activate(option),
+        hitSlop: 0,
+        style: {
+          width: 40,
+          minWidth: 40,
+          height: 40,
+          flexShrink: 0,
+          flexGrow: 0,
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "hidden",
+        },
+      }, inertVisual);
+      extraButtons.push(control);
     }
     return extraButtons.length ? React.createElement(React.Fragment, null, ...extraButtons, output) : output;
   }
@@ -195,7 +228,7 @@
     // proxy as callable, then its apply trap throws "target is not callable".
     // Resolve the actual Discord component types from Metro before rendering.
     const design = api.metro.findByProps("TableRowGroup", "TableSwitchRow");
-    const note = "The new buttons appear after a Discord restart. Only enable one YouBar+ plugin at a time. Favorites requires support from your current Discord build.";
+    const note = "Shortcuts use independent 40px touch targets. Turn on Tap diagnostics to show which button receives a tap without navigating. Restart Discord after updating; only one YouBar+ plugin should be enabled.";
     const inset = { paddingHorizontal: 12, paddingVertical: 24, paddingBottom: 48 };
 
     if (design?.TableRowGroup && design?.TableSwitchRow) {
@@ -217,6 +250,14 @@
             onValueChange: value => { api.storage[option.key] = !!value; emit(); },
           })),
         ),
+        React.createElement(design.TableRowGroup, { title: "Tap troubleshooting" },
+          React.createElement(design.TableSwitchRow, {
+            label: "Tap diagnostics (no navigation)",
+            subLabel: "Tap a shortcut to display its actual pressed label instead of opening a page.",
+            value: enabled("diagnostics"),
+            onValueChange: value => { api.storage.diagnostics = !!value; emit(); },
+          }),
+        ),
         React.createElement(design.TableRowGroup, { title: "Compatibility" }, retry),
         React.createElement(RN.Text, { style: { paddingHorizontal: 10, marginTop: 18, opacity: 0.7, fontSize: 12, lineHeight: 18 } }, note),
       );
@@ -236,6 +277,14 @@
         React.createElement(RN.Switch, { accessibilityLabel: option.label, value: enabled(option.key),
           onValueChange: value => { api.storage[option.key] = !!value; emit(); } }),
       )),
+      React.createElement(RN.View, { style: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 16 } },
+        React.createElement(RN.Text, null, "Tap diagnostics (no navigation)"),
+        React.createElement(RN.Switch, {
+          accessibilityLabel: "Tap diagnostics",
+          value: enabled("diagnostics"),
+          onValueChange: value => { api.storage.diagnostics = !!value; emit(); },
+        }),
+      ),
       React.createElement(RN.Pressable, { onPress: tryPatch, style: { marginTop: 16, paddingVertical: 14 } },
         React.createElement(RN.Text, null, `Retry patch - ${status}`)),
       React.createElement(RN.Text, { style: { marginTop: 18, opacity: 0.7, fontSize: 12 } }, note),
@@ -283,4 +332,3 @@
     SettingsComponent,
   });
 })()
-
