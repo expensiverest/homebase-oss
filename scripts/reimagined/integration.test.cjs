@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.17');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.18');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -184,7 +184,8 @@ test('native screens swap only exact screen roots on mapped routes and fail open
   const create = f.api.common.React.createElement, Screen = function Screen() { return null; };
   const swapped = create(Screen, { route: { name: 'guilds' }, navigation: {} });
   assert.notEqual(swapped.type, Screen); assert.equal(swapped.props.__reimaginedOrig, Screen);
-  assert.equal(create(Screen, { route: { name: 'guilds' }, navigation: {}, extra: 1 }).type, Screen);
+  assert.notEqual(create(Screen, { route: { name: 'guilds' }, navigation: {}, extra: 1 }).type, Screen);
+  assert.equal(create(Screen, { route: { name: 'guilds' }, navigation: {}, screen: {} }).type, Screen); assert.match(f.plugin.diagnostics().hooks['Screen:guilds'], /navigator-internal/);
   assert.equal(create(Screen, { route: { name: 'channel' }, navigation: {} }).type, Screen);
   assert.equal(create(Screen, { route: { name: 'guilds' }, navigation: {}, __reimaginedRaw: true }).props.__reimaginedRaw, undefined);
   f.api.storage.nativeScreens = false; assert.equal(create(Screen, { route: { name: 'guilds' }, navigation: {} }).type, Screen); await f.stop();
