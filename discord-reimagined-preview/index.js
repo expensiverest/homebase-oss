@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.14 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.15 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.14", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.15", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, blueprint: false, accounts: {} };
@@ -853,21 +853,28 @@
   function stopTour() { if (tourTimer !== null) clearTimeout(tourTimer); tourTimer = null; tourToken++; }
   function tourRoutes(nav) {
     const names = new Set();
-    (function visit(s, depth) { if (!s || depth > 8) return; (s.routeNames || []).forEach(n => names.add(n)); (s.routes || []).forEach(r => visit(r.state, depth + 1)); })(routeState(nav), 0);
-    return [...names].filter(n => typeof n === "string" && !/^DISTRA_CUSTOM_PAGE$|call|voice-?chat|camera|login|logout|sign|delete|purchase|checkout|payment|captcha|verify|webview|oauth/i.test(n));
+    // Only siblings of the focused screen: they share its navigator, which is far less likely to need route params.
+    let s = routeState(nav), last = s;
+    for (let d = 0; s && d < 10; d++) { if (Array.isArray(s.routeNames)) last = s; s = s.routes?.[s.index ?? 0]?.state; }
+    (last?.routeNames || []).forEach(n => names.add(n));
+    const bad = Array.isArray(api.storage.tourBad) ? api.storage.tourBad : [];
+    return [...names].filter(n => typeof n === "string" && !bad.includes(n) && !/^DISTRA_CUSTOM_PAGE$|search|call|voice|camera|login|logout|sign|delete|purchase|checkout|payment|captcha|verify|webview|oauth|profile|channel|guild|thread|message|user|invite|gift|member|report|modal|sheet|picker|share|lightbox|media|forum|stage|event/i.test(n));
   }
   function startTour() {
     const nav = root();
     if (!nav?.navigate) { toast("Tour unavailable: no navigation"); return; }
-    stopTour(); api.storage.blueprint = true; patchNativeSkin();
+    stopTour();
+    if (api.storage.tourPending) { api.storage.tourBad = (Array.isArray(api.storage.tourBad) ? api.storage.tourBad : []).concat(api.storage.tourPending); api.storage.tourPending = null; toast("Skipping " + api.storage.tourBad.slice(-1)[0] + " (it crashed last time)"); }
+    api.storage.blueprint = true; patchNativeSkin();
     const origin = currentRouteName(), queue = tourRoutes(nav), token = tourToken; blueprint.tour = [];
     toast("Touring " + queue.length + " screens…");
     const step = () => {
       if (!live || token !== tourToken) return;
       const name = queue.shift();
-      if (!name) { if (origin) safe(() => nav.navigate(origin)); tourTimer = null; toast("Tour done. Copy the blueprint."); return; }
+      if (!name) { api.storage.tourPending = null; if (origin) safe(() => nav.navigate(origin)); tourTimer = null; toast("Tour done. Copy the blueprint."); return; }
+      api.storage.tourPending = name;
       let ok = true; try { nav.navigate(name); } catch (_) { ok = false; }
-      tourTimer = setTimeout(() => { blueprint.tour.push({ name, ok, landed: currentRouteName() }); step(); }, 900);
+      tourTimer = setTimeout(() => { api.storage.tourPending = null; blueprint.tour.push({ name, ok, landed: currentRouteName() }); step(); }, 900);
     };
     tourTimer = setTimeout(step, 300);
   }
