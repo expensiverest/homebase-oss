@@ -35,9 +35,9 @@ function fixture(options = {}) {
   const scoped = { isFocused: () => focusedRoute.name === 'DISTRA_CUSTOM_PAGE', getState: () => ({ routes: [focusedRoute], index: 0 }), canGoBack: () => true, goBack: () => nav.goBack(), addListener: () => () => {} };
   const stores = { UserStore: { getCurrentUser: () => getUser(), getUser: () => getUser() }, UserProfileStore: { getUserProfile: () => ({ bio: 'fixture' }) } };
   const api = {
-    storage: { startHome: !!options.autoStart, nativePalette: false, accounts: {} },
+    storage: { startHome: !!options.autoStart, nativePalette: false, nativeSkin: !!options.hub, accounts: {} },
     common: { React, ReactNative: RN, tabsNavigationRef: { getRootNavigationRef: () => options.noRoot ? null : nav }, NavigationNative: { useNavigation: () => scoped }, constants: { Permissions: {} } },
-    metro: { findByStoreName: name => stores[name] || {}, findByProps: (...keys) => keys[0] === 'openUserSettings' && !options.noSettingsAction ? { openUserSettings: () => settingsOpened++ } : undefined,
+    metro: { findByStoreName: name => stores[name] || {}, findByProps: (...keys) => keys[0] === 'TableRowGroup' ? options.hub : keys[0] === 'openUserSettings' && !options.noSettingsAction ? { openUserSettings: () => settingsOpened++ } : undefined,
       findByFileName: name => name === 'YouBar' ? target : null, findByTypeName: () => null },
     patcher: { after(method, object, cb) { const orig = object[method]; object[method] = (...args) => cb(args, orig(...args)); cleanups.push(() => object[method] = orig); } },
     logger: { warn: s => issues.push(s) }, toasts: { showToast() {} }
@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.3');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.4');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -141,6 +141,13 @@ test('returns to Reimagined after leaving a native Settings screen', async () =>
   assert.equal(f.settingsOpened(), 1); assert.equal(f.modal().props.visible, false);
   f.focused({ name: 'settings' }); f.advance(800); f.focused({ name: 'home' }); f.advance(1000);
   assert.equal(f.modal().props.visible, true); await f.stop();
+});
+test('native skin wraps design-system groups and is inert when disabled', async () => {
+  const group = { default: { type: () => ({ type: 'RowGroup', props: {} }) } };
+  const f = fixture({ hub: { TableRowGroup: group.default, TableRow: {} } });
+  assert.equal(f.plugin.diagnostics().hooks.NativeSkinGroup, 'patched');
+  const wrapped = group.default.type(); assert.equal(typeof wrapped.type, 'function'); assert.equal(wrapped.props.children.type, 'RowGroup');
+  f.api.storage.nativeSkin = false; assert.equal(group.default.type().type, 'RowGroup'); await f.stop();
 });
 test('teardown preserves the original component rather than leaving a dead custom dock', async () => {
   const f = fixture(); f.launch(); await f.stop(); assert.equal(f.host.render(), f.original); f.advance(5000); assert.equal(f.plugin.diagnostics().presentation.mode, 'stopped');
