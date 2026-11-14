@@ -35,11 +35,11 @@ function fixture(options = {}) {
   const scoped = { isFocused: () => focusedRoute.name === 'DISTRA_CUSTOM_PAGE', getState: () => ({ routes: [focusedRoute], index: 0 }), canGoBack: () => true, goBack: () => nav.goBack(), addListener: () => () => {} };
   const stores = { UserStore: { getCurrentUser: () => getUser(), getUser: () => getUser() }, UserProfileStore: { getUserProfile: () => ({ bio: 'fixture' }) } };
   const api = {
-    storage: { startHome: !!options.autoStart, nativePalette: false, nativeSkin: !!options.hub, nativeSkinRows: !!options.rows, accounts: {} },
+    storage: { startHome: !!options.autoStart, nativePalette: false, nativeSkin: !!options.hub, nativeSkinRows: !!options.rows, blueprint: !!options.blueprint, accounts: {} },
     common: { React, ReactNative: RN, tabsNavigationRef: { getRootNavigationRef: () => options.noRoot ? null : nav }, NavigationNative: { useNavigation: () => scoped }, constants: { Permissions: {} } },
     metro: { findByStoreName: name => stores[name] || {}, findByProps: (...keys) => keys[0] === 'TableRowGroup' ? options.hub : keys[0] === 'openUserSettings' && !options.noSettingsAction ? { openUserSettings: () => settingsOpened++ } : undefined,
       findByFileName: name => name === 'YouBar' ? target : null, findByTypeName: () => null },
-    patcher: { after(method, object, cb) { const orig = object[method]; object[method] = (...args) => cb(args, orig(...args)); cleanups.push(() => object[method] = orig); } },
+    patcher: { after(method, object, cb) { const orig = object[method]; object[method] = (...args) => cb(args, orig(...args)); cleanups.push(() => object[method] = orig); }, before(method, object, cb) { const orig = object[method]; object[method] = (...args) => { const r = cb(args); return orig(...(r || args)); }; cleanups.push(() => object[method] = orig); } },
     logger: { warn: s => issues.push(s) }, toasts: { showToast() {} }
   };
   const sandbox = { definePlugin: x => x, console, setTimeout: (fn, ms = 0) => { const id = ++nextTimer; timers.set(id, { at: now + ms, fn }); return id; }, clearTimeout: id => timers.delete(id) };
@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.11');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.12');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -166,6 +166,11 @@ test('blueprint recording observes rows without altering them', async () => {
   f.api.storage.nativeSkin = false; f.api.storage.nativeSkinRows = false; f.api.storage.blueprint = true;
   f.api.storage.nativeSkinRows = true; f.api.storage.nativeSkinRows = false;
   const out = row.default.type(); assert.equal(out.type, 'Row'); assert.equal(out.props.style.height, 40); await f.stop();
+});
+test('blueprint search probe captures search elements', async () => {
+  const f = fixture({ hub: { TableRowGroup: () => null, TableRow: () => null }, blueprint: true });
+  f.api.common.React.createElement(function SearchBar() { return null; }, { placeholder: 'Search', style: { height: 36 } });
+  assert.match(f.plugin.diagnostics().hooks.SearchProbe, /1 samples/); await f.stop();
 });
 test('teardown preserves the original component rather than leaving a dead custom dock', async () => {
   const f = fixture(); f.launch(); await f.stop(); assert.equal(f.host.render(), f.original); f.advance(5000); assert.equal(f.plugin.diagnostics().presentation.mode, 'stopped');
