@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.18 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.19 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.18", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.19", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
@@ -769,9 +769,20 @@
     try { api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint")) safe(() => recordTabBar(name, _args[0])); if (!live || output == null || !me() || (mode === "launcher" && health.hooks.YouBar === "patched")) return output; return h(DockHost, { original: output, mode }); }); seen.add(method); targets.set(object, seen); health.hooks[name] = "patched"; return true; } catch (_) { issue("hook-failed:" + name); return false; } }
   let SkinFrame, NativeHost, embeddedRoute = null;
   const SCREEN_TAB = { guilds: "home", notifications: "messages", you: "you" };
+  // Diagnostic: lists (in the compatibility report) which navigation-related elements Discord really creates, with their prop names.
+  let navProbeCount = 0;
+  function navProbe(type, props) {
+    const name = typeName(type), keys = Object.keys(props);
+    const hit = props.route || props.navigation || props.descriptors || props.state || /screen|scene|navigator|stack|route|tab|pager|layout/i.test(name);
+    if (!hit) return;
+    const key = "Nav:" + name; if (health.hooks[key] || navProbeCount >= 24) return;
+    navProbeCount++;
+    health.hooks[key] = "{" + keys.slice(0, 10).join(",") + "}" + (props.route && typeof props.route.name === "string" ? " route=" + props.route.name : "") + (typeof props.children === "function" ? " children=fn" : "");
+  }
   function swapScreen(args) {
     const type = args?.[0], props = args?.[1];
     if (props && props.__reimaginedRaw) { const { __reimaginedRaw, ...rest } = props; return [type, rest, ...args.slice(2)]; }
+    if (live && cfg("nativeScreens") && props && typeof type !== "string") safe(() => navProbe(type, props));
     if (!live || !cfg("nativeScreens") || !NativeHost || typeof type === "string" || type === NativeHost || !props || !props.route || !props.navigation) return undefined;
     const name = props.route.name, keys = Object.keys(props);
     if (typeof name !== "string") return undefined;
