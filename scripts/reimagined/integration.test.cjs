@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.7');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.8');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -148,6 +148,13 @@ test('native skin wraps design-system groups and is inert when disabled', async 
   assert.equal(f.plugin.diagnostics().hooks.NativeSkinTableRowGroup, 'patched x1');
   const wrapped = group.default.type(); assert.equal(typeof wrapped.type, 'function'); assert.equal(wrapped.props.children.type, 'RowGroup');
   f.api.storage.nativeSkin = false; assert.equal(group.default.type().type, 'RowGroup'); await f.stop();
+});
+test('blueprint recording observes rows without altering them', async () => {
+  const row = { default: { type: () => ({ type: 'Row', props: { style: { height: 40 } } }) } };
+  const f = fixture({ hub: { TableRowGroup: { default: { type: () => ({ type: 'G', props: {} }) } }.default, TableRow: row.default } });
+  f.api.storage.nativeSkin = false; f.api.storage.nativeSkinRows = false; f.api.storage.blueprint = true;
+  f.api.storage.nativeSkinRows = true; f.api.storage.nativeSkinRows = false;
+  const out = row.default.type(); assert.equal(out.type, 'Row'); assert.equal(out.props.style.height, 40); await f.stop();
 });
 test('teardown preserves the original component rather than leaving a dead custom dock', async () => {
   const f = fixture(); f.launch(); await f.stop(); assert.equal(f.host.render(), f.original); f.advance(5000); assert.equal(f.plugin.diagnostics().presentation.mode, 'stopped');
