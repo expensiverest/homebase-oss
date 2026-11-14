@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.15 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.16 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.15", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.16", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, blueprint: false, accounts: {} };
@@ -751,7 +751,7 @@
   }
   function renderTarget(raw, name) { for (const value of [raw?.[name], raw?.default, raw]) { let node = unwrap(value); if (!node) continue; if (typeof node === "function" && node.prototype?.render) return [node.prototype, "render"]; if (typeof node === "function") { if (raw?.[name] === node) return [raw, name]; if (raw?.default === node) return [raw, "default"]; } for (let i = 0; node && i < 5; i++) { if (typeof node.type === "function") return [node, "type"]; if (typeof node.render === "function") return [node, "render"]; node = node.type; } } return null; }
   function patch(raw, name, mode) { const target = safe(() => renderTarget(raw, name), null); if (!live || !target) return false; const [object, method] = target, seen = targets.get(object) || new Set(); if (seen.has(method)) return true;
-    try { api.patcher.after(method, object, (_args, output) => { if (!live || output == null || !me() || (mode === "launcher" && health.hooks.YouBar === "patched")) return output; return h(DockHost, { original: output, mode }); }); seen.add(method); targets.set(object, seen); health.hooks[name] = "patched"; return true; } catch (_) { issue("hook-failed:" + name); return false; } }
+    try { api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint")) safe(() => recordTabBar(name, _args[0])); if (!live || output == null || !me() || (mode === "launcher" && health.hooks.YouBar === "patched")) return output; return h(DockHost, { original: output, mode }); }); seen.add(method); targets.set(object, seen); health.hooks[name] = "patched"; return true; } catch (_) { issue("hook-failed:" + name); return false; } }
   let SkinFrame;
   const skinned = new WeakSet();
   const isEl = x => React.isValidElement(x);
@@ -788,7 +788,7 @@
     const kids = React.Children.toArray(output.props.children);
     return kids.length ? React.cloneElement(output, null, ...kids.map(skinCard)) : output;
   }
-  const blueprint = { hub: null, routes: {}, samples: 0, search: [], probes: [], hubSearch: null, census: {}, tour: [] };
+  const blueprint = { hub: null, routes: {}, samples: 0, search: [], probes: [], hubSearch: null, census: {}, tour: [], screens: {}, tabBars: {} };
   const TEXTY = /title|label|text|children|description|subtitle|placeholder|accessibilityLabel/i;
   function typeName(t) { return typeof t === "string" ? t : t?.displayName || t?.name || t?.type?.displayName || t?.type?.name || t?.render?.displayName || t?.render?.name || (t ? "anonymous" : "null"); }
   function flat(style, out = {}, depth = 0) {
@@ -833,6 +833,8 @@
       if (!live || !cfg("blueprint")) return;
       const type = args?.[0], props = args?.[1] || {}, name = typeName(type);
       if (typeof type !== "string" && name !== "anonymous") {
+        const list = blueprint.screens[currentRouteName() || "unknown"] || (blueprint.screens[currentRouteName() || "unknown"] = []);
+        if (list.length < 40 && !list.includes(name)) list.push(name);
         const route = currentRouteName() || "unknown", key = name, row = blueprint.census[key] || (Object.keys(blueprint.census).length < 400 ? (blueprint.census[key] = { n: 0, routes: [], keys: Object.keys(props).slice(0, 14), sample: null }) : null);
         if (row) { row.n++; if (row.routes.length < 6 && !row.routes.includes(route)) row.routes.push(route); if (!row.sample && /^(Card|Table|Button|Icon|Text|Heading|Header|Nav|Tab|Bar|Search|Field|Input|Toggle|Switch|Avatar|Badge|Sheet|List|Row|Section|Modal|Menu)/.test(name)) row.sample = safe(() => describe({ type, props: { ...props, children: undefined } }, 0, { n: 14 })?.p, null); }
       }
@@ -878,9 +880,15 @@
     };
     tourTimer = setTimeout(step, 300);
   }
+  // Records how Discord's tab bar is wired (route names, descriptor keys, option keys) so native tab screens can be targeted precisely.
+  function recordTabBar(name, props) {
+    if (!props || blueprint.tabBars[name]) return;
+    const st = props.state || {}, d = props.descriptors || {}, first = d[Object.keys(d)[0]] || {};
+    blueprint.tabBars[name] = { propKeys: Object.keys(props).slice(0, 24), routes: (st.routes || []).map(r => r.name), index: st.index, routeNames: st.routeNames, descriptorKeys: Object.keys(first).slice(0, 16), optionKeys: Object.keys(first.options || {}).slice(0, 24), renderIsFn: typeof first.render === "function", navigationKeys: Object.keys(props.navigation || {}).slice(0, 24) };
+  }
   function copyBlueprint() {
     const c = safe(() => unwrap(api.common.clipboard), null), hub = mod("TableRowGroup", "TableRow");
-    const data = { product: "Discord: Reimagined", version: VERSION, kind: "settings-blueprint", hubExports: hub ? Object.keys(hub).slice(0, 120) : null, route: currentRouteName(), routes: blueprint.routes, census: blueprint.census, tour: blueprint.tour, search: blueprint.search, searchProbes: blueprint.probes, hubSearchExports: blueprint.hubSearch, patched: { group: health.hooks.NativeSkinTableRowGroup, row: health.hooks.NativeSkinTableRow } };
+    const data = { product: "Discord: Reimagined", version: VERSION, kind: "settings-blueprint", hubExports: hub ? Object.keys(hub).slice(0, 120) : null, route: currentRouteName(), routes: blueprint.routes, census: blueprint.census, screens: blueprint.screens, tabBars: blueprint.tabBars, tour: blueprint.tour, search: blueprint.search, searchProbes: blueprint.probes, hubSearchExports: blueprint.hubSearch, patched: { group: health.hooks.NativeSkinTableRowGroup, row: health.hooks.NativeSkinTableRow } };
     if (c?.setString) { c.setString(JSON.stringify(data)); toast("Settings blueprint copied"); }
   }
   function patchNativeSkin() {
