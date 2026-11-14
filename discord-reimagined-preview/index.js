@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.27 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.28 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.27", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.28", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
@@ -985,9 +985,17 @@
   // Walks the mounted React tree from a class instance we own (its _reactInternals is a fiber) and copies an indented outline of composite components, so native screens can be targeted without guessing.
   let treeHost = null;
   function copyTree() {
-    const c = safe(() => unwrap(api.common.clipboard), null), start = treeHost && (treeHost._reactInternals || treeHost._reactInternalFiber);
-    if (!start) { toast("Tree unavailable: no mounted dock"); return; }
-    let root = start; while (root.return) root = root.return;
+    const c = safe(() => unwrap(api.common.clipboard), null);
+    // Hosts that were unmounted keep a detached fiber, so only accept one that climbs to a HostRoot, then read its current tree.
+    let root = null;
+    for (const host of [...presentationHosts, treeHost]) {
+      for (let f of [host?._reactInternals || host?._reactInternalFiber, host?._reactInternals?.alternate]) {
+        let top = f; while (top?.return) top = top.return;
+        if (top && top.tag === 3) { root = top.stateNode?.current || top; break; }
+      }
+      if (root) break;
+    }
+    if (!root) { toast("Tree unavailable: no mounted dock"); return; }
     const nameOf = f => { const t = f.type; if (!t || typeof t === "string") return null; if (f.tag === 5 || f.tag === 6) return null; const n = t.displayName || t.name || t.render?.displayName || t.render?.name || t.type?.displayName || t.type?.name; return (f.tag === 14 || f.tag === 15 ? "memo:" : f.tag === 11 ? "fwd:" : "") + (n || "anonymous"); };
     const lines = [], stack = [[root, 0]]; let count = 0;
     while (stack.length && lines.length < 3500) {
