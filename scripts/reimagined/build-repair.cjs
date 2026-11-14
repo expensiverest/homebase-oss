@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.8');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.9');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -249,7 +249,8 @@ swap('    Boundary = class extends React.Component {', `    SkinFrame = class ex
       componentDidMount() { if (this.enter) safe(() => RN.Animated.timing(this.enter, { toValue: 1, duration: 260, useNativeDriver: true }).start()); }
       componentDidCatch() { issue("skin-render-failed"); api.storage.nativeSkin = false; this.setState({ failed: true }); }
       render() {
-        if (this.state.failed || !this.enter) return this.props.children;
+        if (this.state.failed) return this.props.fallback !== undefined ? this.props.fallback : this.props.children;
+        if (!this.enter) return this.props.children;
         return h(RN.Animated.View, { style: { opacity: this.enter, transform: [{ translateY: this.enter.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] } }, this.props.children);
       }
     };
@@ -273,8 +274,8 @@ swap('  function scan() {', `  let SkinFrame;
       }
       health.hooks["NativeSkin" + name] = patched ? "patched x" + patched : hubs.length ? "no patchable " + name : "not found";
     };
-    pass("TableRowGroup", "nativeSkin", output => SkinFrame ? h(SkinFrame, null, output) : output);
-    pass("TableRow", "nativeSkinRows", output => React.isValidElement(output) ? React.cloneElement(output, { style: [output.props.style, { minHeight: 60, paddingVertical: SPACE.xs }] }) : output);
+    pass("TableRowGroup", "nativeSkin", output => SkinFrame ? h(SkinFrame, { fallback: output }, safe(() => skinGroup(output), output)) : output);
+    pass("TableRow", "nativeSkinRows", skinRow);
   }
   function scan() {`);
 swap('    scan(); syncTheme();', '    scan(); syncTheme(); patchNativeSkin();');
@@ -325,15 +326,45 @@ swap('  let SkinFrame;', `  let SkinFrame;
     const data = { product: "Discord: Reimagined", version: VERSION, kind: "settings-blueprint", hubExports: hub ? Object.keys(hub).slice(0, 120) : null, route: currentRouteName(), routes: blueprint.routes, patched: { group: health.hooks.NativeSkinTableRowGroup, row: health.hooks.NativeSkinTableRow } };
     if (c?.setString) { c.setString(JSON.stringify(data)); toast("Settings blueprint copied"); }
   }`);
+// Native skin visuals, derived from the settings blueprint: group = Provider > View > [TableRowGroupTitle?, rounded clipped View > rows]; row = Card > TableRowInner (optionally followed by a TableRowDivider in a fragment).
+swap('  let SkinFrame;', `  let SkinFrame;
+  const skinned = new WeakSet();
+  const isEl = x => React.isValidElement(x);
+  function skinGroup(output) {
+    if (!isEl(output) || !isEl(output.props.children)) return output;
+    const c = colors(), view = output.props.children;
+    const kids = React.Children.toArray(view.props.children).map(kid => {
+      if (!isEl(kid)) return kid;
+      const name = typeName(kid.type), style = flat(kid.props.style);
+      if (name === "TableRowGroupTitle" && typeof kid.props.title === "string") return h(RN.Text, { key: kid.key, style: { color: c.muted, fontSize: 12, fontWeight: "700", letterSpacing: 0.9, marginLeft: SPACE.md, marginBottom: SPACE.sm, marginTop: SPACE.xs } }, kid.props.title.toUpperCase());
+      if (style.borderRadius === 12 && style.overflow === "hidden") return React.cloneElement(kid, { style: [kid.props.style, { borderRadius: RAD.medium, borderWidth: RN.StyleSheet?.hairlineWidth || 1, borderColor: c.line }] });
+      return kid;
+    });
+    return React.cloneElement(output, null, React.cloneElement(view, { style: [view.props.style, { marginBottom: SPACE.sm }] }, ...kids));
+  }
+  function skinCard(card) {
+    if (!isEl(card) || typeName(card.type) !== "Card" || skinned.has(card)) return card;
+    const c = colors(), inner = card.props.children, trailing = inner?.props?.trailing, icon = inner?.props?.icon;
+    const selected = isEl(trailing) && typeName(trailing.type) === "FormRadio" && trailing.props.selected === true;
+    const child = isEl(inner) && isEl(icon) && typeName(icon.type) === "TableRowIcon" && icon.props.variant == null ? React.cloneElement(inner, { icon: React.cloneElement(icon, { variant: "translucent" }) }) : inner;
+    const out = React.cloneElement(card, { style: [card.props.style, { minHeight: 56 }, selected ? { backgroundColor: c.accentSoft } : null] }, child);
+    skinned.add(out); return out;
+  }
+  function skinRow(output) {
+    if (!isEl(output)) return output;
+    if (typeName(output.type) === "Card") return skinCard(output);
+    const kids = React.Children.toArray(output.props.children);
+    return kids.length ? React.cloneElement(output, null, ...kids.map(skinCard)) : output;
+  }`);
 fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.8',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.9',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.8
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.9
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -371,7 +402,7 @@ When Reimagined hands off to a Discord screen (a forum, Settings under the fallb
 
 ## Native skin (beta)
 
-Appearance > Restyle Discord settings (beta) restyles Discord's own settings lists in place (a fade-and-rise entrance; Discord's own card styling is left untouched) by patching the design-system TableRowGroup. It is off by default, needs no tweak, and switches itself off if a restyled list fails to render. Appearance > Roomier settings rows (beta) separately gives each TableRow more height. Appearance > Record settings blueprint, then Copy settings blueprint, captures a text-free structural sample (component names, prop keys, numeric styles) of the rows and groups on each screen you visit so the skin can be designed from real data. Check the compatibility report for NativeSkinTableRowGroup and NativeSkinTableRow.
+Appearance > Restyle Discord settings (beta) restyles Discord's own settings lists in place (a fade-and-rise entrance; Discord's own card styling is left untouched) by patching the design-system TableRowGroup. It is off by default, needs no tweak, and switches itself off if a restyled list fails to render. Appearance > Roomier settings rows (beta) restyles each TableRow (taller, translucent icon tiles, accent-tinted selected radio rows); the group skin adds a rounded hairline-bordered card with small-caps section titles. Appearance > Record settings blueprint, then Copy settings blueprint, captures a text-free structural sample (component names, prop keys, numeric styles) of the rows and groups on each screen you visit so the skin can be designed from real data. Check the compatibility report for NativeSkinTableRowGroup and NativeSkinTableRow.
 
 ## Validation
 
@@ -379,4 +410,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.8', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.9', sourceSHA256: digest(code), output: out }));
