@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.20');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.21');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -141,7 +141,8 @@ region('    DockHost = class extends React.Component {', '    // Plugin settings
         // Original navigation remains intact; the custom dock belongs inside Scene.
         const launch = this.props.mode !== "settings" && cfg("layout") && me()
           ? button("Reimagined", null, null, { marginHorizontal: SPACE.lg }, "reimagined-launcher", () => present()) : null;
-        return h(React.Fragment, null, this.props.original, launch,
+        const overlay = this.props.mode !== "settings" && cfg("nativeScreens") && me() && NativeOverlay ? h(NativeOverlay) : null;
+        return h(React.Fragment, null, this.props.original, launch, overlay,
           RN.Modal ? h(RN.Modal, { visible: p.modal && modalOwner === this,
             presentationStyle: "fullScreen", animationType: "none",
             onShow: () => presenter.modalShown(p.ticket),
@@ -440,7 +441,7 @@ swap('cfg("layout") && cfg("startHome") && !autoPresented', 'cfg("layout") && !c
 swap('const launch = this.props.mode === "settings" || !me() ? null', 'const launch = this.props.mode === "settings" || !me() || cfg("nativeScreens") ? null');
 swap('if (!baseRoute || !cfg("layout")) return;', 'if (!baseRoute || !cfg("layout") || cfg("nativeScreens")) return;');
 swap('    push({ screen: "conversation", channel: id }); loadMessages(id);', '    if (cfg("nativeScreens")) { nativeConversation(id); return; }\n    push({ screen: "conversation", channel: id }); loadMessages(id);');
-swap('  let SkinFrame;', `  let SkinFrame, NativeHost, embeddedRoute = null;
+swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, embeddedRoute = null;
   const SCREEN_TAB = { guilds: "home", notifications: "messages", you: "you" };
   // Diagnostic: lists (in the compatibility report) which navigation-related elements Discord really creates, with their prop names.
   let navProbeCount = 0;
@@ -493,7 +494,22 @@ swap('    Boundary = class extends React.Component {', `    NativeHost = class e
         if (!live || this.state.failed || !cfg("nativeScreens") || !me()) return h(Orig, { ...rest, __reimaginedRaw: true });
         const c = colors(), Safe = RN.SafeAreaView || RN.View, width = Math.min(this.state.width, 820), mine = embeddedRoute === rest.route?.name, tab = mine ? state.tab : SCREEN_TAB[rest.route?.name], screen = mine ? state.screen : "main";
         const content = screen === "media" ? h(Media) : screen === "call" ? h(CallScreen) : screen === "edit-profile" ? h(EditProfile) : screen === "preferences" ? h(Preferences) : screen === "profile" ? h(Profile, { id: state.profile }) : screen === "channels" ? h(Channels) : tab === "servers" ? h(Servers, { width }) : tab === "messages" ? h(Messages) : tab === "you" ? h(Profile, { id: accountId }) : h(Home, { width });
-        return h(Safe, { testID: "reimagined-native-screen", style: { flex: 1, backgroundColor: c.bg, paddingBottom: 84 } }, h(Boundary, { key: screen + ":" + tab }, h(SkinFrame, null, content)), state.drawer && mine ? h(ServerDrawer, { width }) : null);
+        return h(Safe, { testID: "reimagined-native-screen", style: { flex: 1, backgroundColor: c.bg, paddingBottom: rest.overlay ? 0 : 84 } }, h(Boundary, { key: screen + ":" + tab }, h(SkinFrame, null, content)), state.drawer && mine ? h(ServerDrawer, { width }) : null);
+      }
+    };
+    // Discord renders one persistent shell for every tab, so there is no per-screen element to swap: the Reimagined content is laid over the shell, above the YouBar's top edge.
+    NativeOverlay = class extends React.Component {
+      constructor(p) { super(p); this.state = { route: null, win: null, box: null }; this.anchor = null; this.onLayout = () => safe(() => this.anchor?.measureInWindow?.((x, y, w, hh) => this.setState({ box: { x, y, w, h: hh } }))); }
+      componentDidMount() { this.poll = setInterval(() => { const r = currentRouteName(); if (r !== this.state.route) this.setState({ route: r }); }, 350); }
+      componentWillUnmount() { clearInterval(this.poll); }
+      render() {
+        const anchor = h(RN.View, { key: "anchor", ref: r => { this.anchor = r; }, onLayout: this.onLayout, pointerEvents: "none", style: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0 } });
+        const { route, box } = this.state;
+        if (!live || !cfg("nativeScreens") || !SCREEN_TAB[route] || !box) return anchor;
+        const win = safe(() => RN.Dimensions.get("window"), { width: 390, height: 844 }), top = box.y >= 40 ? box.y : win.height - 84;
+        health.hooks.NativeScreens = "overlay " + route;
+        return h(React.Fragment, null, anchor, h(RN.View, { testID: "reimagined-native-overlay", pointerEvents: "box-none", style: { position: "absolute", left: -box.x, top: -box.y, width: win.width, height: top, zIndex: 50 } },
+          h(NativeHost, { route: { name: route }, navigation: safe(() => root(), null), overlay: true, __reimaginedOrig: () => null })));
       }
     };
     Boundary = class extends React.Component {`);
@@ -505,11 +521,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.20',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.21',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.20
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.21
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -555,4 +571,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.20', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.21', sourceSHA256: digest(code), output: out }));
