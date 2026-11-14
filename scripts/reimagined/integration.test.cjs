@@ -35,7 +35,7 @@ function fixture(options = {}) {
   const scoped = { isFocused: () => focusedRoute.name === 'DISTRA_CUSTOM_PAGE', getState: () => ({ routes: [focusedRoute], index: 0 }), canGoBack: () => true, goBack: () => nav.goBack(), addListener: () => () => {} };
   const stores = { UserStore: { getCurrentUser: () => getUser(), getUser: () => getUser() }, UserProfileStore: { getUserProfile: () => ({ bio: 'fixture' }) } };
   const api = {
-    storage: { startHome: !!options.autoStart, nativePalette: false, nativeSkin: !!options.hub, nativeSkinRows: !!options.rows, blueprint: !!options.blueprint, accounts: {} },
+    storage: { startHome: !!options.autoStart, nativePalette: false, nativeSkin: !!options.hub, nativeSkinRows: !!options.rows, blueprint: !!options.blueprint, nativeScreens: !!options.screens, accounts: {} },
     common: { React, ReactNative: RN, tabsNavigationRef: { getRootNavigationRef: () => options.noRoot ? null : nav }, NavigationNative: { useNavigation: () => scoped }, constants: { Permissions: {} } },
     metro: { findByStoreName: name => stores[name] || {}, findByProps: (...keys) => keys[0] === 'TableRowGroup' ? options.hub : keys[0] === 'openUserSettings' && !options.noSettingsAction ? { openUserSettings: () => settingsOpened++ } : undefined,
       findByFileName: name => name === 'YouBar' ? target : null, findByTypeName: () => null },
@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.16');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.17');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -178,6 +178,16 @@ test('app tour visits declared routes, skips risky ones and returns', async () =
   f.plugin.scanApp(); f.advance(300); for (let i = 0; i < 6; i++) f.advance(900);
   const names = f.navigations.map(n => n.name);
   assert.ok(names.includes('settings')); assert.ok(!names.includes('DISTRA_CUSTOM_PAGE')); assert.equal(names[names.length - 1], 'home'); await f.stop();
+});
+test('native screens swap only exact screen roots on mapped routes and fail open', async () => {
+  const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} }, screens: true });
+  const create = f.api.common.React.createElement, Screen = function Screen() { return null; };
+  const swapped = create(Screen, { route: { name: 'guilds' }, navigation: {} });
+  assert.notEqual(swapped.type, Screen); assert.equal(swapped.props.__reimaginedOrig, Screen);
+  assert.equal(create(Screen, { route: { name: 'guilds' }, navigation: {}, extra: 1 }).type, Screen);
+  assert.equal(create(Screen, { route: { name: 'channel' }, navigation: {} }).type, Screen);
+  assert.equal(create(Screen, { route: { name: 'guilds' }, navigation: {}, __reimaginedRaw: true }).props.__reimaginedRaw, undefined);
+  f.api.storage.nativeScreens = false; assert.equal(create(Screen, { route: { name: 'guilds' }, navigation: {} }).type, Screen); await f.stop();
 });
 test('blueprint search probe captures search elements', async () => {
   const f = fixture({ hub: { TableRowGroup: () => null, TableRow: () => null }, blueprint: true });
