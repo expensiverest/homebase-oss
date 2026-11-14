@@ -1,0 +1,9 @@
+{
+  "name": "Discord: Reimagined",
+  "description": "An original Home, Spaces, Chats and You interface for Distra, with a server drawer and coordinated palettes. Experimental alpha.",
+  "authors": [{ "name": "expensiverest" }],
+  "version": "0.1.0-alpha.1",
+  "main": "index.js",
+  "hash": "c1f58d54791466bf4dad42b2f79ec2ee418854cb1c008e1c5eaf88ab6804ab81",
+  "distra": { "spec": 1 }
+}
