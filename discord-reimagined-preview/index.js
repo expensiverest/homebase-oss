@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.9 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.10 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.9", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.10", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, blueprint: false, accounts: {} };
@@ -755,14 +755,15 @@
   let SkinFrame;
   const skinned = new WeakSet();
   const isEl = x => React.isValidElement(x);
+  function skinTitle(text) { const c = colors(); return h(RN.Text, { style: { color: c.muted, fontSize: 12, fontWeight: "700", letterSpacing: 0.9, marginLeft: SPACE.md, marginBottom: SPACE.sm, marginTop: SPACE.xs } }, text.toUpperCase()); }
   function skinGroup(output) {
     if (!isEl(output) || !isEl(output.props.children)) return output;
     const c = colors(), view = output.props.children;
     const kids = React.Children.toArray(view.props.children).map(kid => {
       if (!isEl(kid)) return kid;
       const name = typeName(kid.type), style = flat(kid.props.style);
-      if (name === "TableRowGroupTitle" && typeof kid.props.title === "string") return h(RN.Text, { key: kid.key, style: { color: c.muted, fontSize: 12, fontWeight: "700", letterSpacing: 0.9, marginLeft: SPACE.md, marginBottom: SPACE.sm, marginTop: SPACE.xs } }, kid.props.title.toUpperCase());
-      if (style.borderRadius === 12 && style.overflow === "hidden") return React.cloneElement(kid, { style: [kid.props.style, { borderRadius: RAD.medium, borderWidth: RN.StyleSheet?.hairlineWidth || 1, borderColor: c.line }] });
+      if (name === "TableRowGroupTitle" && typeof kid.props.title === "string") return React.cloneElement(skinTitle(kid.props.title), { key: kid.key });
+      if (style.borderRadius === 12 && style.overflow === "hidden") return React.cloneElement(kid, { style: [kid.props.style, { borderRadius: RAD.large, borderWidth: RN.StyleSheet?.hairlineWidth || 1, borderColor: c.line }] });
       return kid;
     });
     return React.cloneElement(output, null, React.cloneElement(view, { style: [view.props.style, { marginBottom: SPACE.sm }] }, ...kids));
@@ -771,8 +772,9 @@
     if (!isEl(card) || typeName(card.type) !== "Card" || skinned.has(card)) return card;
     const c = colors(), inner = card.props.children, trailing = inner?.props?.trailing, icon = inner?.props?.icon;
     const selected = isEl(trailing) && typeName(trailing.type) === "FormRadio" && trailing.props.selected === true;
-    const child = isEl(inner) && isEl(icon) && typeName(icon.type) === "TableRowIcon" && icon.props.variant == null ? React.cloneElement(inner, { icon: React.cloneElement(icon, { variant: "translucent" }) }) : inner;
-    const out = React.cloneElement(card, { style: [card.props.style, { minHeight: 56 }, selected ? { backgroundColor: c.accentSoft } : null] }, child);
+    const tile = isEl(icon) ? h(RN.View, { style: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: c.accentSoft } }, icon) : icon;
+    const child = isEl(inner) && icon && inner.props.icon !== tile ? React.cloneElement(inner, { icon: tile }) : inner;
+    const out = React.cloneElement(card, { radius: RAD.large, style: [card.props.style, { minHeight: 64, backgroundColor: selected ? c.accentSoft : c.surface }] }, child);
     skinned.add(out); return out;
   }
   function skinRow(output) {
@@ -835,13 +837,14 @@
         const [object, method] = target, seen = targets.get(object) || new Set();
         if (seen.has("skin:" + name)) { patched++; continue; }
         try {
-          api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint") && output != null) safe(() => record(name, _args, output)); return (!live || !cfg(flag) || output == null) ? output : safe(() => wrap(output), output); });
+          api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint") && output != null) safe(() => record(name, _args, output)); return (!live || !cfg(flag) || output == null) ? output : safe(() => wrap(output, _args), output); });
           seen.add("skin:" + name); targets.set(object, seen); patched++;
         } catch (_) { issue("hook-failed:NativeSkin" + name); }
       }
       health.hooks["NativeSkin" + name] = patched ? "patched x" + patched : hubs.length ? "no patchable " + name : "not found";
     };
     pass("TableRowGroup", "nativeSkin", output => SkinFrame ? h(SkinFrame, { fallback: output }, safe(() => skinGroup(output), output)) : output);
+    pass("TableRowGroupTitle", "nativeSkin", (output, args) => typeof args?.[0]?.title === "string" ? skinTitle(args[0].title) : output);
     pass("TableRow", "nativeSkinRows", skinRow);
   }
   function scan() { [["YouBar", "dock"], ["YouBarNotificationsButton", "launcher"]].forEach(([name, mode]) => { if (health.hooks[name] === "patched") return; const raw = safe(() => api.metro.findByFileName(name, false), null) || safe(() => api.metro.findByTypeName(name, false), null); if (!patch(raw, name, mode)) health.hooks[name] = "settings entry required"; }); }
