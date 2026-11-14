@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.25 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.26 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.25", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.26", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
@@ -704,6 +704,16 @@
         return h(RN.Animated.View, { style: { flex: this.props.fill ? 1 : undefined, opacity: this.enter, transform: [{ translateY: this.enter.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] } }, this.props.children);
       }
     };
+    RowCard = class extends React.Component {
+      constructor(p) { super(p); this.state = { failed: false }; }
+      componentDidCatch() { issue("native-row-failed"); this.setState({ failed: true }); }
+      render() {
+        const { __reimaginedOrig: Orig, ...rest } = this.props, raw = h(Orig, { ...rest, __reimaginedRaw: true });
+        if (!live || this.state.failed || !cfg("nativeScreens")) return raw;
+        const c = colors();
+        return h(RN.View, { style: { marginHorizontal: SPACE.md, marginVertical: 3, borderRadius: RAD.medium, backgroundColor: c.surface, overflow: "hidden" } }, raw);
+      }
+    };
     NativeHost = class extends React.Component {
       constructor(p) { super(p); this.state = { failed: false, tick: 0, width: safe(() => RN.Dimensions.get("window").width, 390) }; this.refresh = () => this.setState(s => ({ tick: s.tick + 1 })); }
       componentDidMount() { listeners.add(this.refresh); this.focusOff = safe(() => this.props.navigation?.addListener?.("focus", () => this.claim()), null); this.claim(true); loadProfile(accountId); }
@@ -791,7 +801,7 @@
   function renderTarget(raw, name) { for (const value of [raw?.[name], raw?.default, raw]) { let node = unwrap(value); if (!node) continue; if (typeof node === "function" && node.prototype?.render) return [node.prototype, "render"]; if (typeof node === "function") { if (raw?.[name] === node) return [raw, name]; if (raw?.default === node) return [raw, "default"]; } for (let i = 0; node && i < 5; i++) { if (typeof node.type === "function") return [node, "type"]; if (typeof node.render === "function") return [node, "render"]; node = node.type; } } return null; }
   function patch(raw, name, mode) { const target = safe(() => renderTarget(raw, name), null); if (!live || !target) return false; const [object, method] = target, seen = targets.get(object) || new Set(); if (seen.has(method)) return true;
     try { api.patcher.after(method, object, (_args, output) => { if (live && cfg("blueprint")) safe(() => recordTabBar(name, _args[0])); if (!live || output == null || !me() || (mode === "launcher" && health.hooks.YouBar === "patched")) return output; return h(DockHost, { original: output, mode }); }); seen.add(method); targets.set(object, seen); health.hooks[name] = "patched"; return true; } catch (_) { issue("hook-failed:" + name); return false; } }
-  let SkinFrame, NativeHost, NativeOverlay, embeddedRoute = null;
+  let SkinFrame, NativeHost, NativeOverlay, RowCard, embeddedRoute = null;
   const SCREEN_TAB = { guilds: "home", notifications: "messages", you: "you" };
   // Diagnostic: lists (in the compatibility report) which navigation-related elements Discord really creates, with their prop names.
   let navProbeCount = 0; const treeSeen = new Set();
@@ -813,6 +823,11 @@
     const type = args?.[0], props = args?.[1];
     if (props && props.__reimaginedRaw) { const { __reimaginedRaw, ...rest } = props; return [type, rest, ...args.slice(2)]; }
     if (live && cfg("nativeScreens") && props && typeof type !== "string") safe(() => navProbe(type, props));
+    // Layout: conversation rows (recognised by their props, since Discord's component names are minified) become spaced cards in place.
+    if (live && cfg("nativeScreens") && RowCard && props && typeof type !== "string" && type !== RowCard && props.channelId != null && Object.keys(props).every(k => k === "key" || k === "channelId")) {
+      health.hooks.NativeRows = "cards";
+      return [RowCard, { ...props, __reimaginedOrig: type }, ...args.slice(2)];
+    }
     if (!live || !cfg("nativeScreens") || !NativeHost || typeof type === "string" || type === NativeHost || !props || !props.route || !props.navigation) return undefined;
     const name = props.route.name, keys = Object.keys(props);
     if (typeof name !== "string") return undefined;

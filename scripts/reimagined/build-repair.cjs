@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.25');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.26');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -451,7 +451,7 @@ swap('cfg("layout") && cfg("startHome") && !autoPresented', 'cfg("layout") && !c
 swap('const launch = this.props.mode === "settings" || !me() ? null', 'const launch = this.props.mode === "settings" || !me() || cfg("nativeScreens") ? null');
 swap('if (!baseRoute || !cfg("layout")) return;', 'if (!baseRoute || !cfg("layout") || cfg("nativeScreens")) return;');
 swap('    push({ screen: "conversation", channel: id }); loadMessages(id);', '    if (cfg("nativeScreens")) { nativeConversation(id); return; }\n    push({ screen: "conversation", channel: id }); loadMessages(id);');
-swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, embeddedRoute = null;
+swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, RowCard, embeddedRoute = null;
   const SCREEN_TAB = { guilds: "home", notifications: "messages", you: "you" };
   // Diagnostic: lists (in the compatibility report) which navigation-related elements Discord really creates, with their prop names.
   let navProbeCount = 0; const treeSeen = new Set();
@@ -473,6 +473,11 @@ swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, embeddedRo
     const type = args?.[0], props = args?.[1];
     if (props && props.__reimaginedRaw) { const { __reimaginedRaw, ...rest } = props; return [type, rest, ...args.slice(2)]; }
     if (live && cfg("nativeScreens") && props && typeof type !== "string") safe(() => navProbe(type, props));
+    // Layout: conversation rows (recognised by their props, since Discord's component names are minified) become spaced cards in place.
+    if (live && cfg("nativeScreens") && RowCard && props && typeof type !== "string" && type !== RowCard && props.channelId != null && Object.keys(props).every(k => k === "key" || k === "channelId")) {
+      health.hooks.NativeRows = "cards";
+      return [RowCard, { ...props, __reimaginedOrig: type }, ...args.slice(2)];
+    }
     if (!live || !cfg("nativeScreens") || !NativeHost || typeof type === "string" || type === NativeHost || !props || !props.route || !props.navigation) return undefined;
     const name = props.route.name, keys = Object.keys(props);
     if (typeof name !== "string") return undefined;
@@ -494,7 +499,17 @@ swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, embeddedRo
     health.hooks.NativeScreens = health.hooks.NativeScreens || (seen.size ? "armed" : "no hook");
   }`);
 swap('    pass("SearchField", "nativeSkin",', '    patchScreens();\n    pass("SearchField", "nativeSkin",');
-swap('    Boundary = class extends React.Component {', `    NativeHost = class extends React.Component {
+swap('    Boundary = class extends React.Component {', `    RowCard = class extends React.Component {
+      constructor(p) { super(p); this.state = { failed: false }; }
+      componentDidCatch() { issue("native-row-failed"); this.setState({ failed: true }); }
+      render() {
+        const { __reimaginedOrig: Orig, ...rest } = this.props, raw = h(Orig, { ...rest, __reimaginedRaw: true });
+        if (!live || this.state.failed || !cfg("nativeScreens")) return raw;
+        const c = colors();
+        return h(RN.View, { style: { marginHorizontal: SPACE.md, marginVertical: 3, borderRadius: RAD.medium, backgroundColor: c.surface, overflow: "hidden" } }, raw);
+      }
+    };
+    NativeHost = class extends React.Component {
       constructor(p) { super(p); this.state = { failed: false, tick: 0, width: safe(() => RN.Dimensions.get("window").width, 390) }; this.refresh = () => this.setState(s => ({ tick: s.tick + 1 })); }
       componentDidMount() { listeners.add(this.refresh); this.focusOff = safe(() => this.props.navigation?.addListener?.("focus", () => this.claim()), null); this.claim(true); loadProfile(accountId); }
       componentWillUnmount() { listeners.delete(this.refresh); if (typeof this.focusOff === "function") this.focusOff(); else this.focusOff?.remove?.(); }
@@ -540,11 +555,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.25',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.26',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.25
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.26
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -590,4 +605,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.25', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.26', sourceSHA256: digest(code), output: out }));
