@@ -1,4 +1,4 @@
-# Discord: Reimagined 0.2.0-alpha.9
+# Discord: Reimagined 0.2.0-alpha.10
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 

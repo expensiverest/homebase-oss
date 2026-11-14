@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.9');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.10');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -156,8 +156,8 @@ test('native skin restyles group titles, containers, rows and selected radios', 
   const f = fixture({ hub, rows: true });
   const g = hub.TableRowGroup.type();
   const flatText = JSON.stringify(g);
-  assert.ok(flatText.includes('DEVICES')); assert.ok(flatText.includes('"borderRadius":18'));
-  const r = hub.TableRow.type(); assert.ok(JSON.stringify(r).includes('"minHeight":56') && JSON.stringify(r).includes('backgroundColor'));
+  assert.ok(flatText.includes('DEVICES')); assert.ok(flatText.includes('"borderRadius":24'));
+  const r = hub.TableRow.type(); assert.ok(JSON.stringify(r).includes('"minHeight":64') && JSON.stringify(r).includes('backgroundColor'));
   await f.stop();
 });
 test('blueprint recording observes rows without altering them', async () => {
