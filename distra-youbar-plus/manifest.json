@@ -1,6 +1,6 @@
 {
   "name": "YouBar+ for Distra",
-  "description": "Configurable DMs, Settings, Favorites You Bar buttons; safe rendering and independent navigation.",
+  "description": "Separate tap targets for DMs, Settings and Favorites with optional on-device tap diagnostics.",
   "authors": [
     {
       "name": "Purple_Ξye™ (original)"
@@ -12,9 +12,9 @@
       "name": "Rosie (startup-race research)"
     }
   ],
-  "version": "0.2.0",
+  "version": "0.3.0",
   "main": "index.js",
-  "hash": "7af87d4f07c23477427b62ed814a346adaf501ae81ab8ad7d964432d87c3f3a7",
+  "hash": "4ab822ae14a46f18b5fc69b6bc3832a22b86a682528be78f61afcd832a4b72e1",
   "distra": {
     "spec": 1
   }
