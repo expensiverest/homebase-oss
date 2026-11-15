@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.38');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.39');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -264,6 +264,20 @@ swap('  function scan() {', `  let SkinFrame;
   const stripPos = () => { const v = cfg("stripPosition"); return v === "left" || v === "right" || v === "bottom" ? v : "top"; };
   const paneOffsets = pos => pos === "left" ? { left: STRIP_W, right: 0, top: 0 } : pos === "right" ? { left: 0, right: STRIP_W, top: 0 } : pos === "bottom" ? { left: 0, top: 0, bottom: STRIP_H + STRIP_LIFT } : { left: 0, top: STRIP_H };
   // The messages pane next to the strip: re-offset live when the strip position setting changes, without waiting for Discord to re-render the panel.
+  // Discord outlines the pane with a separate non-interactive overlay (framedBorder: a hairline left and top edge with the drawer corner radius).
+  // It follows the strip like the pane: outline and rounded corner on the strip's side, both under a top strip, none above the YouBar.
+  function isFrame(n) {
+    if (n.props?.pointerEvents !== "none" || n.props.children != null) return false;
+    const st = safe(() => RN.StyleSheet.flatten(n.props.style), null) || {};
+    return st.position === "absolute" && (st.borderTopLeftRadius > 0 || st.borderTopRightRadius > 0) && (st.borderTopWidth > 0 || st.borderLeftWidth > 0);
+  }
+  function frameRestyle(n, pos, sibling) {
+    const st = safe(() => RN.StyleSheet.flatten(n.props.style), null) || {}, r = st.borderTopLeftRadius || st.borderTopRightRadius || RAD.sheet, w = st.borderTopWidth || st.borderLeftWidth || hairline();
+    health.hooks.PaneFrame = pos + (sibling ? " sibling" : " inner");
+    if (pos === "bottom") return addStyle(n, { borderWidth: 0, borderTopWidth: 0, borderLeftWidth: 0, borderRightWidth: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0, opacity: 0 });
+    const offs = sibling ? (pos === "left" ? { left: STRIP_W, right: 0 } : pos === "right" ? { left: 0, right: STRIP_W } : { left: 0, right: 0, top: STRIP_H }) : {};
+    return addStyle(n, { ...offs, borderTopWidth: w, borderLeftWidth: pos === "right" ? 0 : w, borderRightWidth: pos === "left" ? 0 : w, borderTopLeftRadius: pos === "right" ? 0 : r, borderTopRightRadius: pos === "left" ? 0 : r });
+  }
   let StripPane = null, StripGuard = null;
   function stripClasses() {
   if (StripPane) return;
@@ -276,9 +290,13 @@ swap('  function scan() {', `  let SkinFrame;
       this.sig = cfg("serverStrip") + ":" + stripPos();
       const el = this.props.el;
       if (!cfg("serverStrip")) return el;
-      const pos = stripPos(), flat = safe(() => RN.StyleSheet.flatten(el.props.style), null) || {}, r = flat.borderTopLeftRadius || flat.borderTopRightRadius || flat.borderRadius || RAD.sheet;
+      const pos = stripPos();
+      if (this.props.frame) return frameRestyle(el, pos, true);
+      const flat = safe(() => RN.StyleSheet.flatten(el.props.style), null) || {}, r = flat.borderTopLeftRadius || flat.borderTopRightRadius || flat.borderRadius || RAD.sheet;
       health.hooks.PaneCorners = pos + " r=" + r;
-      return addStyle(el, { ...paneOffsets(pos), borderRadius: 0, borderTopLeftRadius: pos === "left" || pos === "top" ? r : 0, borderTopRightRadius: pos === "right" || pos === "top" ? r : 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, overflow: "hidden" });
+      const inner = mapTree(el.props.children, isFrame, n => frameRestyle(n, pos, false));
+      const body = inner === el.props.children ? el : React.cloneElement(el, null, ...(Array.isArray(inner) ? inner : [inner]));
+      return addStyle(body, { ...paneOffsets(pos), borderRadius: 0, borderTopLeftRadius: pos === "left" || pos === "top" ? r : 0, borderTopRightRadius: pos === "right" || pos === "top" ? r : 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, overflow: "hidden" });
     }
   };
   // A failing strip (missing hook, store or context) takes itself out and hands servers back to Discord's rail on the next render instead of taking the panel down.
@@ -411,7 +429,7 @@ swap('  function scan() {', `  let SkinFrame;
     let found = false;
     const next = mapTree(out, n => Array.isArray(n.props?.children) && n.props.children.some(isPane), n => {
       found = true;
-      const kids = n.props.children.filter(k => !(isEl(k) && homePanelType && (k.type === homePanelType || baseType(k.type) === baseType(homePanelType)))).map(k => isPane(k) ? h(StripPane, { key: k.key == null ? "reimagined-pane" : k.key, el: k }) : k);
+      const kids = n.props.children.filter(k => !(isEl(k) && homePanelType && (k.type === homePanelType || baseType(k.type) === baseType(homePanelType)))).map((k, i) => isPane(k) ? h(StripPane, { key: k.key == null ? "reimagined-pane" : k.key, el: k }) : isEl(k) && isFrame(k) ? h(StripPane, { key: k.key == null ? "reimagined-frame" + i : k.key, el: k, frame: true }) : k);
       return React.cloneElement(n, null, ...kids, h(StripGuard, { key: "reimagined-strip" }, h(ServerStrip)));
     });
     if (found) { health.hooks.ServerStrip = homePanelType ? "applied" : "applied (rail kept)"; return next; }
@@ -467,11 +485,14 @@ swap('  function scan() {', `  let SkinFrame;
     const composerSplit = row => {
       const kids = React.Children.toArray(row.props.children), rs = flatStyle(row.props.style), lead = [], tail = [], field = [];
       let send = null;
+      // Discord wraps the tools in alignment Views, so each child is classified by what it contains; moved wrappers drop their field-alignment padding.
+      const has = (n, test, d = 0) => d > 6 || n == null || typeof n !== "object" ? false : Array.isArray(n) ? n.some(x => has(x, test, d + 1)) : isEl(n) && (test(n.props || {}) || has(n.props?.children, test, d + 1));
+      const isLead = p => "onPressAction" in p && !("onPressExpression" in p) && ("canUpload" in p || "shouldPhotosButtonBeDisabled" in p || "isAppLauncherEnabled" in p), isTail = p => "onPressExpression" in p, isSend = p => "onSendMessage" in p;
+      const tool = k => isEl(k) && k.props?.style != null ? addStyle(k, { paddingBottom: 0, paddingLeft: 0, marginBottom: 0 }) : k;
       for (const k of kids) {
-        const p = isEl(k) ? k.props || {} : {};
-        if ("onPressAction" in p && ("canUpload" in p || "shouldPhotosButtonBeDisabled" in p || "isAppLauncherEnabled" in p)) lead.push(k);
-        else if ("onPressExpression" in p) tail.push(k);
-        else if ("onSendMessage" in p) send = k;
+        if (has(k, isSend) && !has(k, isTail) && !has(k, isLead)) send = tool(k);
+        else if (has(k, isTail) && !has(k, isLead)) tail.push(tool(k));
+        else if (has(k, isLead) && !has(k, isTail)) lead.push(tool(k));
         else field.push(k);
       }
       health.hooks.NativeComposerLayout = lead.length || tail.length || send ? "two-tier" : "field-only";
@@ -489,15 +510,14 @@ swap('  function scan() {', `  let SkinFrame;
     const titlePill = output => { const c = colors(); return styleRoot(output, { backgroundColor: c.surface, borderRadius: RAD.round, paddingHorizontal: SPACE.md, paddingVertical: 4, overflow: "hidden" }); };
     hookExport("NativeDmHeader", CH + "PrivateChannelHeader.tsx", ["default"], titlePill);
     hookExport("NativeChannelHeader", CH + "GuildChannelHeader.tsx", ["default"], titlePill);
-    // The server screen: the guild banner gets rounded lower corners and channels become rounded pills inside Discord's measured row heights.
-    hookExport("NativeGuildHeader", "modules/channel_list_v2/native/RedesignGuildHeader.tsx", ["default"], output => styleRoot(output, { borderBottomLeftRadius: RAD.sheet, borderBottomRightRadius: RAD.sheet, overflow: "hidden" }));
-    // Channel rows are Discord's own memo components (text, voice, thread); each becomes an inset rounded pill and the selected one a tinted
-    // card (Discord's unread and selection indicators are kept). Row heights are untouched, so the list's measured layout stays valid.
+        // Channel rows are Discord's own memo components (text, voice, thread); Discord's own geometry and selection layer are kept
+    // (so rows stay aligned with the header); the selection layer becomes a Reimagined tinted card with an accent hairline.
     const CL = "modules/channel_list_v2/native/items/";
     const channelPill = (output, args) => {
       if (!isEl(output)) return output;
-      const p = args?.[0] || {}, c = colors(), id = p.channel?.id || p.channelId, on = p.selected === true || p.isChannelSelected === true || (!!id && call(stores.SelectedChannelStore, "getChannelId", [], null) === id);
-      return styleRoot(output, { marginHorizontal: SPACE.sm, borderRadius: RAD.medium, overflow: "hidden", backgroundColor: on ? c.accentSoft : "transparent" });
+      const c = colors();
+      const lit = mapTree(output, n => n.props?.children == null && typeof n.type !== "function" && (st => st.position === "absolute" && st.top === 0 && st.bottom === 0 && st.left === 0 && st.right === 0)(flatStyle(n.props?.style)), n => addStyle(n, { backgroundColor: c.accentSoft, borderRadius: RAD.medium, borderWidth: hairline(), borderColor: c.accent + "66" }));
+      return styleRoot(lit, { borderRadius: RAD.medium });
     };
     hookExport("NativeChannelRows", CL + "TextChannel.tsx", ["default"], channelPill);
     hookExport("NativeVoiceRows", CL + "VoiceChannel.tsx", ["default"], channelPill);
@@ -1093,11 +1113,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.38',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.39',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.38
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.39
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -1135,7 +1155,7 @@ When Reimagined hands off to a Discord screen (a forum, Settings under the fallb
 
 ## Native skin (beta)
 
-Appearance > Reimagined inside native screens (beta) redesigns Discord's own Messages, Notifications and server navigation in place. Servers become a horizontally scrolling strip across the top (Home/DMs, guild icons with selected and unread indicators and mention badges, folders that expand inline, Add a Server; tap uses Discord's own guild navigation, long press opens Discord's guild sheet; Appearance > Server strip instead of the rail turns it off and restores the rail; the strip can sit at the Top, down the Left or Right side as a vertical column, or Above the YouBar, and the setting applies live). Messages rows are laid out from scratch inside Discord's own row: squircle avatar with presence, bold name with time, a one-line preview (last message, attachment, activity or custom status) and an unread or mention pill, on rounded floating cards. Appearance > Hide scroll bars (on by default) removes scroll indicators everywhere. The You page embeds Discord's own profile pieces (trial offer, upsells, Orbs widget, current activity, About Me, connections, friends, note) with Main, Board, Activity and Wishlist tabs, falling back to Reimagined cards if a piece is unavailable. Conversations (DMs and server channels) are redesigned around Discord's native message list: the chat surface takes the Reimagined canvas, the composer is rebuilt from Discord's own pieces as a two-tier card (the message field across the full width, with attach, apps, gift, expressions and send on a tool row beneath it), and the DM and channel header titles sit in a pill. The server screen gets a guild banner with rounded lower corners and text, voice and thread channels as inset rounded pills (the selected one a tinted card) inside Discord's measured row heights; Discord's server sheet gets an inset rounded banner, a centred identity block and inset content. The messages pane rounds only the corners next to the strip (left, right, both under a top strip, none above the YouBar). Side strips stop at the top of the YouBar with a rounded lower corner, and their selection pills sit flush with the outer edge facing inward (mirrored on the right). Above the YouBar the strip floats as a rounded card at the YouBar's own width, clear of the avatar. On the You page, Edit Profile and Avatar & Banner open Discord's own profile editor (Settings > Profiles) for full parity, Nitro opens Discord's Nitro settings, Shop opens Discord's Shop and Quests opens Discord's Quest Home, all through the same native calls Discord's You screen uses, so Back returns to the You page. Previously: DM rows become taller floating cards with larger avatars and an accent edge when unread (the cell height is enlarged through Discord's own getMessagesItemChannelSizes so the list stays measured correctly), notifications become cards with Reimagined section headers, and the server rail becomes a floating panel with pill separators. It also replaces the You tab with a Reimagined You page: banner, presence ring, custom status and account switcher, badges, Edit Profile, Quests/Shop/Nitro/Settings, Orbs, member since, connections, friends, note and current activity, plus a button that shows Discord's own You page in place for activity history and wishlist (the YouBar and native navigation stay). Appearance > Hide Quests dock above the YouBar (on by default) removes the floating Quests dock; it needs an app restart to take effect and falls back to the original screen on any error. Preferences > Scan whole app (tour) visits the sibling screens of the screen you are on (names that look parameter-dependent are skipped, and a route that crashed is remembered and skipped next time), records a component census, then returns; copy the settings blueprint afterwards. Appearance > Restyle Discord settings (beta) restyles Discord's own settings lists in place (a fade-and-rise entrance; Discord's own card styling is left untouched) by patching the design-system TableRowGroup. It is off by default, needs no tweak, and switches itself off if a restyled list fails to render. The settings search bar (the design hub's SearchField) is wrapped in a rounded frame with an accent hairline (unclipped, so the focus ring stays whole). Appearance > Roomier settings rows (beta) restyles each TableRow (taller, translucent icon tiles, accent-tinted selected radio rows); the group skin adds a rounded hairline-bordered card with small-caps section titles. Appearance > Record settings blueprint, then Copy settings blueprint, captures a text-free structural sample (component names, prop keys, numeric styles) of the rows and groups on each screen you visit so the skin can be designed from real data. Check the compatibility report for NativeSkinTableRowGroup and NativeSkinTableRow.
+Appearance > Reimagined inside native screens (beta) redesigns Discord's own Messages, Notifications and server navigation in place. Servers become a horizontally scrolling strip across the top (Home/DMs, guild icons with selected and unread indicators and mention badges, folders that expand inline, Add a Server; tap uses Discord's own guild navigation, long press opens Discord's guild sheet; Appearance > Server strip instead of the rail turns it off and restores the rail; the strip can sit at the Top, down the Left or Right side as a vertical column, or Above the YouBar, and the setting applies live). Messages rows are laid out from scratch inside Discord's own row: squircle avatar with presence, bold name with time, a one-line preview (last message, attachment, activity or custom status) and an unread or mention pill, on rounded floating cards. Appearance > Hide scroll bars (on by default) removes scroll indicators everywhere. The You page embeds Discord's own profile pieces (trial offer, upsells, Orbs widget, current activity, About Me, connections, friends, note) with Main, Board, Activity and Wishlist tabs, falling back to Reimagined cards if a piece is unavailable. Conversations (DMs and server channels) are redesigned around Discord's native message list: the chat surface takes the Reimagined canvas, the composer is rebuilt from Discord's own pieces as a two-tier card (the message field across the full width, with attach, apps, gift, expressions and send on a tool row beneath it), and the DM and channel header titles sit in a pill. On the server screen, text, voice and thread channels keep Discord's own alignment and the selected channel becomes a tinted card with an accent hairline; Discord's server sheet gets an inset rounded banner, a centred identity block and inset content. The messages pane and Discord's pane outline round only the corners next to the strip (left, right, both under a top strip, none above the YouBar). Side strips stop at the top of the YouBar with a rounded lower corner, and their selection pills sit flush with the outer edge facing inward (mirrored on the right). Above the YouBar the strip floats as a rounded card at the YouBar's own width, clear of the avatar. On the You page, Edit Profile and Avatar & Banner open Discord's own profile editor (Settings > Profiles) for full parity, Nitro opens Discord's Nitro settings, Shop opens Discord's Shop and Quests opens Discord's Quest Home, all through the same native calls Discord's You screen uses, so Back returns to the You page. Previously: DM rows become taller floating cards with larger avatars and an accent edge when unread (the cell height is enlarged through Discord's own getMessagesItemChannelSizes so the list stays measured correctly), notifications become cards with Reimagined section headers, and the server rail becomes a floating panel with pill separators. It also replaces the You tab with a Reimagined You page: banner, presence ring, custom status and account switcher, badges, Edit Profile, Quests/Shop/Nitro/Settings, Orbs, member since, connections, friends, note and current activity, plus a button that shows Discord's own You page in place for activity history and wishlist (the YouBar and native navigation stay). Appearance > Hide Quests dock above the YouBar (on by default) removes the floating Quests dock; it needs an app restart to take effect and falls back to the original screen on any error. Preferences > Scan whole app (tour) visits the sibling screens of the screen you are on (names that look parameter-dependent are skipped, and a route that crashed is remembered and skipped next time), records a component census, then returns; copy the settings blueprint afterwards. Appearance > Restyle Discord settings (beta) restyles Discord's own settings lists in place (a fade-and-rise entrance; Discord's own card styling is left untouched) by patching the design-system TableRowGroup. It is off by default, needs no tweak, and switches itself off if a restyled list fails to render. The settings search bar (the design hub's SearchField) is wrapped in a rounded frame with an accent hairline (unclipped, so the focus ring stays whole). Appearance > Roomier settings rows (beta) restyles each TableRow (taller, translucent icon tiles, accent-tinted selected radio rows); the group skin adds a rounded hairline-bordered card with small-caps section titles. Appearance > Record settings blueprint, then Copy settings blueprint, captures a text-free structural sample (component names, prop keys, numeric styles) of the rows and groups on each screen you visit so the skin can be designed from real data. Check the compatibility report for NativeSkinTableRowGroup and NativeSkinTableRow.
 
 ## Validation
 
@@ -1143,4 +1163,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.38', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.39', sourceSHA256: digest(code), output: out }));

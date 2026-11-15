@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.38 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.39 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.38", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.39", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, hideQuestDock: true, hideScrollBars: true, serverStrip: true, stripPosition: "top", blueprint: false, accounts: {} };
@@ -1264,6 +1264,20 @@
   const stripPos = () => { const v = cfg("stripPosition"); return v === "left" || v === "right" || v === "bottom" ? v : "top"; };
   const paneOffsets = pos => pos === "left" ? { left: STRIP_W, right: 0, top: 0 } : pos === "right" ? { left: 0, right: STRIP_W, top: 0 } : pos === "bottom" ? { left: 0, top: 0, bottom: STRIP_H + STRIP_LIFT } : { left: 0, top: STRIP_H };
   // The messages pane next to the strip: re-offset live when the strip position setting changes, without waiting for Discord to re-render the panel.
+  // Discord outlines the pane with a separate non-interactive overlay (framedBorder: a hairline left and top edge with the drawer corner radius).
+  // It follows the strip like the pane: outline and rounded corner on the strip's side, both under a top strip, none above the YouBar.
+  function isFrame(n) {
+    if (n.props?.pointerEvents !== "none" || n.props.children != null) return false;
+    const st = safe(() => RN.StyleSheet.flatten(n.props.style), null) || {};
+    return st.position === "absolute" && (st.borderTopLeftRadius > 0 || st.borderTopRightRadius > 0) && (st.borderTopWidth > 0 || st.borderLeftWidth > 0);
+  }
+  function frameRestyle(n, pos, sibling) {
+    const st = safe(() => RN.StyleSheet.flatten(n.props.style), null) || {}, r = st.borderTopLeftRadius || st.borderTopRightRadius || RAD.sheet, w = st.borderTopWidth || st.borderLeftWidth || hairline();
+    health.hooks.PaneFrame = pos + (sibling ? " sibling" : " inner");
+    if (pos === "bottom") return addStyle(n, { borderWidth: 0, borderTopWidth: 0, borderLeftWidth: 0, borderRightWidth: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0, opacity: 0 });
+    const offs = sibling ? (pos === "left" ? { left: STRIP_W, right: 0 } : pos === "right" ? { left: 0, right: STRIP_W } : { left: 0, right: 0, top: STRIP_H }) : {};
+    return addStyle(n, { ...offs, borderTopWidth: w, borderLeftWidth: pos === "right" ? 0 : w, borderRightWidth: pos === "left" ? 0 : w, borderTopLeftRadius: pos === "right" ? 0 : r, borderTopRightRadius: pos === "left" ? 0 : r });
+  }
   let StripPane = null, StripGuard = null;
   function stripClasses() {
   if (StripPane) return;
@@ -1276,9 +1290,13 @@
       this.sig = cfg("serverStrip") + ":" + stripPos();
       const el = this.props.el;
       if (!cfg("serverStrip")) return el;
-      const pos = stripPos(), flat = safe(() => RN.StyleSheet.flatten(el.props.style), null) || {}, r = flat.borderTopLeftRadius || flat.borderTopRightRadius || flat.borderRadius || RAD.sheet;
+      const pos = stripPos();
+      if (this.props.frame) return frameRestyle(el, pos, true);
+      const flat = safe(() => RN.StyleSheet.flatten(el.props.style), null) || {}, r = flat.borderTopLeftRadius || flat.borderTopRightRadius || flat.borderRadius || RAD.sheet;
       health.hooks.PaneCorners = pos + " r=" + r;
-      return addStyle(el, { ...paneOffsets(pos), borderRadius: 0, borderTopLeftRadius: pos === "left" || pos === "top" ? r : 0, borderTopRightRadius: pos === "right" || pos === "top" ? r : 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, overflow: "hidden" });
+      const inner = mapTree(el.props.children, isFrame, n => frameRestyle(n, pos, false));
+      const body = inner === el.props.children ? el : React.cloneElement(el, null, ...(Array.isArray(inner) ? inner : [inner]));
+      return addStyle(body, { ...paneOffsets(pos), borderRadius: 0, borderTopLeftRadius: pos === "left" || pos === "top" ? r : 0, borderTopRightRadius: pos === "right" || pos === "top" ? r : 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, overflow: "hidden" });
     }
   };
   // A failing strip (missing hook, store or context) takes itself out and hands servers back to Discord's rail on the next render instead of taking the panel down.
@@ -1411,7 +1429,7 @@
     let found = false;
     const next = mapTree(out, n => Array.isArray(n.props?.children) && n.props.children.some(isPane), n => {
       found = true;
-      const kids = n.props.children.filter(k => !(isEl(k) && homePanelType && (k.type === homePanelType || baseType(k.type) === baseType(homePanelType)))).map(k => isPane(k) ? h(StripPane, { key: k.key == null ? "reimagined-pane" : k.key, el: k }) : k);
+      const kids = n.props.children.filter(k => !(isEl(k) && homePanelType && (k.type === homePanelType || baseType(k.type) === baseType(homePanelType)))).map((k, i) => isPane(k) ? h(StripPane, { key: k.key == null ? "reimagined-pane" : k.key, el: k }) : isEl(k) && isFrame(k) ? h(StripPane, { key: k.key == null ? "reimagined-frame" + i : k.key, el: k, frame: true }) : k);
       return React.cloneElement(n, null, ...kids, h(StripGuard, { key: "reimagined-strip" }, h(ServerStrip)));
     });
     if (found) { health.hooks.ServerStrip = homePanelType ? "applied" : "applied (rail kept)"; return next; }
@@ -1467,11 +1485,14 @@
     const composerSplit = row => {
       const kids = React.Children.toArray(row.props.children), rs = flatStyle(row.props.style), lead = [], tail = [], field = [];
       let send = null;
+      // Discord wraps the tools in alignment Views, so each child is classified by what it contains; moved wrappers drop their field-alignment padding.
+      const has = (n, test, d = 0) => d > 6 || n == null || typeof n !== "object" ? false : Array.isArray(n) ? n.some(x => has(x, test, d + 1)) : isEl(n) && (test(n.props || {}) || has(n.props?.children, test, d + 1));
+      const isLead = p => "onPressAction" in p && !("onPressExpression" in p) && ("canUpload" in p || "shouldPhotosButtonBeDisabled" in p || "isAppLauncherEnabled" in p), isTail = p => "onPressExpression" in p, isSend = p => "onSendMessage" in p;
+      const tool = k => isEl(k) && k.props?.style != null ? addStyle(k, { paddingBottom: 0, paddingLeft: 0, marginBottom: 0 }) : k;
       for (const k of kids) {
-        const p = isEl(k) ? k.props || {} : {};
-        if ("onPressAction" in p && ("canUpload" in p || "shouldPhotosButtonBeDisabled" in p || "isAppLauncherEnabled" in p)) lead.push(k);
-        else if ("onPressExpression" in p) tail.push(k);
-        else if ("onSendMessage" in p) send = k;
+        if (has(k, isSend) && !has(k, isTail) && !has(k, isLead)) send = tool(k);
+        else if (has(k, isTail) && !has(k, isLead)) tail.push(tool(k));
+        else if (has(k, isLead) && !has(k, isTail)) lead.push(tool(k));
         else field.push(k);
       }
       health.hooks.NativeComposerLayout = lead.length || tail.length || send ? "two-tier" : "field-only";
@@ -1489,15 +1510,14 @@
     const titlePill = output => { const c = colors(); return styleRoot(output, { backgroundColor: c.surface, borderRadius: RAD.round, paddingHorizontal: SPACE.md, paddingVertical: 4, overflow: "hidden" }); };
     hookExport("NativeDmHeader", CH + "PrivateChannelHeader.tsx", ["default"], titlePill);
     hookExport("NativeChannelHeader", CH + "GuildChannelHeader.tsx", ["default"], titlePill);
-    // The server screen: the guild banner gets rounded lower corners and channels become rounded pills inside Discord's measured row heights.
-    hookExport("NativeGuildHeader", "modules/channel_list_v2/native/RedesignGuildHeader.tsx", ["default"], output => styleRoot(output, { borderBottomLeftRadius: RAD.sheet, borderBottomRightRadius: RAD.sheet, overflow: "hidden" }));
-    // Channel rows are Discord's own memo components (text, voice, thread); each becomes an inset rounded pill and the selected one a tinted
-    // card (Discord's unread and selection indicators are kept). Row heights are untouched, so the list's measured layout stays valid.
+        // Channel rows are Discord's own memo components (text, voice, thread); Discord's own geometry and selection layer are kept
+    // (so rows stay aligned with the header); the selection layer becomes a Reimagined tinted card with an accent hairline.
     const CL = "modules/channel_list_v2/native/items/";
     const channelPill = (output, args) => {
       if (!isEl(output)) return output;
-      const p = args?.[0] || {}, c = colors(), id = p.channel?.id || p.channelId, on = p.selected === true || p.isChannelSelected === true || (!!id && call(stores.SelectedChannelStore, "getChannelId", [], null) === id);
-      return styleRoot(output, { marginHorizontal: SPACE.sm, borderRadius: RAD.medium, overflow: "hidden", backgroundColor: on ? c.accentSoft : "transparent" });
+      const c = colors();
+      const lit = mapTree(output, n => n.props?.children == null && typeof n.type !== "function" && (st => st.position === "absolute" && st.top === 0 && st.bottom === 0 && st.left === 0 && st.right === 0)(flatStyle(n.props?.style)), n => addStyle(n, { backgroundColor: c.accentSoft, borderRadius: RAD.medium, borderWidth: hairline(), borderColor: c.accent + "66" }));
+      return styleRoot(lit, { borderRadius: RAD.medium });
     };
     hookExport("NativeChannelRows", CL + "TextChannel.tsx", ["default"], channelPill);
     hookExport("NativeVoiceRows", CL + "VoiceChannel.tsx", ["default"], channelPill);
