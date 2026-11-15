@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.37 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.38 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.37", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.38", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, hideQuestDock: true, hideScrollBars: true, serverStrip: true, stripPosition: "top", blueprint: false, accounts: {} };
@@ -818,6 +818,7 @@
     const createGuild = () => { const m = safe(() => api.metro.findByFilePath("modules/create_guild/native/CreateGuildModalActionCreators.tsx"), null), a = m?.default || m; if (typeof a?.openCreateGuildModal === "function") safe(() => a.openCreateGuildModal()); };
     const stripStore = name => { stripStore.cache = stripStore.cache || {}; return name in stripStore.cache ? stripStore.cache[name] : (stripStore.cache[name] = safe(() => api.metro.findByStoreName(name), null)); };
     const insetsHook = () => { if (insetsHook.v === undefined) insetsHook.v = safe(() => api.metro.findByProps("useSafeAreaInsets")?.useSafeAreaInsets, null) || null; return insetsHook.v; };
+    const youBarMarginHook = () => { if (youBarMarginHook.v === undefined) youBarMarginHook.v = safe(() => api.metro.findByFilePath("modules/main_tabs_v2/native/you_bar/hooks/useYouBarMargins.tsx")?.useYouBarHorizontalMargin, null) || null; return youBarMarginHook.v; };
     const youBarHeightHook = () => { if (youBarHeightHook.v === undefined) youBarHeightHook.v = safe(() => api.metro.findByFilePath("modules/main_tabs_v2/native/you_bar/hooks/useYouBarTotalHeight.tsx")?.useYouBarTotalHeight, null) || null; return youBarHeightHook.v; };
     // One strip, four placements: along the top, down either side (a vertical column) or above the YouBar.
     class ServerStripBody extends React.Component {
@@ -827,7 +828,8 @@
       // Selection marker: a short bar under the icon in a row, a vertical pill on the outer edge in a column.
       marker(on, hot, tint) {
         const c = colors(), pos = this.props.pos, size = on ? 18 : hot ? 6 : 0;
-        if (pos === "left" || pos === "right") return h(RN.View, { pointerEvents: "none", style: { position: "absolute", [pos === "left" ? "left" : "right"]: -11, top: 22 - (on ? 12 : hot ? 4 : 0), width: 3, height: on ? 24 : hot ? 8 : 0, borderRadius: 2, backgroundColor: tint || (on ? c.accent : c.ink) } });
+        // Columns use a half pill flush with the outer screen edge, its round side facing the icon: mirrored for a right-hand strip.
+        if (pos === "left" || pos === "right") return h(RN.View, { pointerEvents: "none", style: { position: "absolute", [pos]: -12, top: 22 - (on ? 12 : hot ? 4 : 0), width: 4, height: on ? 24 : hot ? 8 : 0, [pos === "left" ? "borderTopRightRadius" : "borderTopLeftRadius"]: 4, [pos === "left" ? "borderBottomRightRadius" : "borderBottomLeftRadius"]: 4, backgroundColor: tint || (on ? c.accent : c.ink) } });
         return h(RN.View, { style: { marginTop: 4, height: 3, width: size, borderRadius: 2, backgroundColor: tint || (on ? c.accent : c.ink) } });
       }
       gap() { return this.props.pos === "left" || this.props.pos === "right" ? { marginVertical: 5 } : { marginHorizontal: 5 }; }
@@ -862,16 +864,17 @@
         }
         kids.push(h(RN.Pressable, { key: "add", accessibilityRole: "button", accessibilityLabel: "Add a Server", onPress: () => { recordTap("strip-add"); createGuild(); }, style: ({ pressed }) => [{ width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, borderStyle: "dashed", borderColor: c.line, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 }, column ? { marginVertical: 5 } : { marginHorizontal: 5, marginBottom: 7 }] }, h(Icon, { name: "PlusIcon", size: 20, color: c.muted })));
         const frame = column
-          ? { position: "absolute", top: 0, bottom: 0, [pos]: 0, width: STRIP_W, paddingTop: this.props.top, paddingBottom: this.props.bottom, backgroundColor: c.bg, [pos === "left" ? "borderRightWidth" : "borderLeftWidth"]: hairline(), borderColor: c.line, zIndex: 5 }
-          : pos === "bottom" ? { position: "absolute", left: 0, right: 0, bottom: this.props.bottom, height: STRIP_H, backgroundColor: c.bg, borderTopWidth: hairline(), borderColor: c.line, zIndex: 5 }
+          ? { position: "absolute", top: 0, bottom: this.props.bottom, [pos]: 0, width: STRIP_W, paddingTop: this.props.top, backgroundColor: c.bg, [pos === "left" ? "borderRightWidth" : "borderLeftWidth"]: hairline(), borderBottomWidth: hairline(), [pos === "left" ? "borderBottomRightRadius" : "borderBottomLeftRadius"]: RAD.sheet, borderColor: c.line, overflow: "hidden", zIndex: 5 }
+          : pos === "bottom" ? { position: "absolute", left: this.props.inset, right: this.props.inset, bottom: this.props.bottom + STRIP_LIFT, height: STRIP_H, backgroundColor: c.surface, borderRadius: RAD.sheet, borderWidth: hairline(), borderColor: c.line, overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, zIndex: 5 }
           : { position: "absolute", top: 0, left: 0, right: 0, height: this.props.top + STRIP_H, paddingTop: this.props.top, backgroundColor: c.bg, borderBottomWidth: hairline(), borderColor: c.line, zIndex: 5 };
         return h(RN.View, { testID: "reimagined-server-strip", style: frame },
-          h(RN.ScrollView, { horizontal: !column, showsHorizontalScrollIndicator: false, showsVerticalScrollIndicator: false, style: { flex: 1 }, contentContainerStyle: column ? { alignItems: "center", paddingVertical: SPACE.md } : { alignItems: "center", paddingHorizontal: SPACE.md, paddingTop: 6 } }, ...kids));
+          h(RN.ScrollView, { horizontal: !column, showsHorizontalScrollIndicator: false, showsVerticalScrollIndicator: false, style: { flex: 1 }, contentContainerStyle: column ? { alignItems: "center", paddingTop: SPACE.md, paddingBottom: SPACE.xl } : { alignItems: "center", paddingHorizontal: SPACE.md, paddingTop: 6 } }, ...kids));
       }
     }
     // Each placement is its own keyed component, so hook order never changes when the setting does; only side and bottom placements read the YouBar height.
     function StripTop(p) { const use = insetsHook(), insets = use ? use() : null; return h(ServerStripBody, { pos: p.pos, top: insets?.top || 0, bottom: 0 }); }
-    function StripAboveBar(p) { const use = insetsHook(), insets = use ? use() : null, yb = youBarHeightHook(), barH = yb ? yb() : null; return h(ServerStripBody, { pos: p.pos, top: insets?.top || 0, bottom: typeof barH === "number" && barH > 0 ? barH : (insets?.bottom || 0) + 64 }); }
+    // Side strips end at the top of the YouBar; above it the strip floats at the YouBar's own width, clear of the avatar that rises over the bar.
+    function StripAboveBar(p) { const use = insetsHook(), insets = use ? use() : null, yb = youBarHeightHook(), barH = yb ? yb() : null, ym = youBarMarginHook(), margin = ym ? ym() : null; return h(ServerStripBody, { pos: p.pos, top: insets?.top || 0, inset: typeof margin === "number" && margin >= 0 ? margin : SPACE.md, bottom: typeof barH === "number" && barH > 0 ? barH : (insets?.bottom || 0) + 64 }); }
     ServerStrip = class extends React.Component {
       constructor(p) { super(p); this.refresh = () => { if (this.sig !== cfg("serverStrip") + ":" + stripPos() && typeof this.forceUpdate === "function") this.forceUpdate(); }; }
       componentDidMount() { listeners.add(this.refresh); }
@@ -1257,9 +1260,9 @@
     if (c?.setString) { c.setString(JSON.stringify(data)); toast("Settings blueprint copied"); }
   }
   let scrollTypes = new Set(), ServerStrip = null, dmRowContent = null;
-  const STRIP_H = 64, STRIP_W = 68;
+  const STRIP_H = 64, STRIP_W = 68, STRIP_LIFT = 14;
   const stripPos = () => { const v = cfg("stripPosition"); return v === "left" || v === "right" || v === "bottom" ? v : "top"; };
-  const paneOffsets = pos => pos === "left" ? { left: STRIP_W, right: 0, top: 0 } : pos === "right" ? { left: 0, right: STRIP_W, top: 0 } : pos === "bottom" ? { left: 0, top: 0, bottom: STRIP_H } : { left: 0, top: STRIP_H };
+  const paneOffsets = pos => pos === "left" ? { left: STRIP_W, right: 0, top: 0 } : pos === "right" ? { left: 0, right: STRIP_W, top: 0 } : pos === "bottom" ? { left: 0, top: 0, bottom: STRIP_H + STRIP_LIFT } : { left: 0, top: STRIP_H };
   // The messages pane next to the strip: re-offset live when the strip position setting changes, without waiting for Discord to re-render the panel.
   let StripPane = null, StripGuard = null;
   function stripClasses() {
@@ -1268,7 +1271,15 @@
     constructor(p) { super(p); this.refresh = () => { if (this.sig !== cfg("serverStrip") + ":" + stripPos() && typeof this.forceUpdate === "function") this.forceUpdate(); }; }
     componentDidMount() { listeners.add(this.refresh); }
     componentWillUnmount() { listeners.delete(this.refresh); }
-    render() { this.sig = cfg("serverStrip") + ":" + stripPos(); return cfg("serverStrip") ? addStyle(this.props.el, paneOffsets(stripPos())) : this.props.el; }
+    // Discord rounds the pane's top-left corner (it sits beside its rail); the rounded corners follow the strip instead: the side it is on, both under a top strip, none above the YouBar.
+    render() {
+      this.sig = cfg("serverStrip") + ":" + stripPos();
+      const el = this.props.el;
+      if (!cfg("serverStrip")) return el;
+      const pos = stripPos(), flat = safe(() => RN.StyleSheet.flatten(el.props.style), null) || {}, r = flat.borderTopLeftRadius || flat.borderTopRightRadius || flat.borderRadius || RAD.sheet;
+      health.hooks.PaneCorners = pos + " r=" + r;
+      return addStyle(el, { ...paneOffsets(pos), borderRadius: 0, borderTopLeftRadius: pos === "left" || pos === "top" ? r : 0, borderTopRightRadius: pos === "right" || pos === "top" ? r : 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, overflow: "hidden" });
+    }
   };
   // A failing strip (missing hook, store or context) takes itself out and hands servers back to Discord's rail on the next render instead of taking the panel down.
   StripGuard = class extends React.Component {
@@ -1449,19 +1460,57 @@
       return done ? React.cloneElement(out, null, ...kids) : out;
     };
     hookExport("NativeChatSurface", "modules/chat/native/ChatView.tsx", ["default"], output => styleRoot(output, { backgroundColor: colors().bg }));
-    hookExport("NativeComposer", CI + "FloatingChatInputContainer.tsx", ["default"], output => { const c = colors(); return styleRoot(output, { marginHorizontal: SPACE.sm, marginBottom: SPACE.xs, borderRadius: 26, backgroundColor: c.elevated, borderWidth: hairline(), borderColor: c.line, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 14, shadowOffset: { width: 0, height: 6 } }); });
-    hookExport("NativeComposerField", CI + "ChatInputNativeComponent.tsx", ["default"], output => styleRoot(output, { backgroundColor: colors().surface, borderRadius: 20 }));
+    // The composer is rebuilt from Discord's own pieces into a two-tier card: the message field gets the full width on top and the tools
+    // (attach, apps, gift, expressions, send / voice) sit on a row beneath it. The split is structural and stable across renders, so the native
+    // text field is never remounted while typing; anything unrecognised stays in the field row.
+    const flatStyle = st => safe(() => RN.StyleSheet.flatten(st), null) || {};
+    const composerSplit = row => {
+      const kids = React.Children.toArray(row.props.children), rs = flatStyle(row.props.style), lead = [], tail = [], field = [];
+      let send = null;
+      for (const k of kids) {
+        const p = isEl(k) ? k.props || {} : {};
+        if ("onPressAction" in p && ("canUpload" in p || "shouldPhotosButtonBeDisabled" in p || "isAppLauncherEnabled" in p)) lead.push(k);
+        else if ("onPressExpression" in p) tail.push(k);
+        else if ("onSendMessage" in p) send = k;
+        else field.push(k);
+      }
+      health.hooks.NativeComposerLayout = lead.length || tail.length || send ? "two-tier" : "field-only";
+      return h(RN.View, { key: row.key == null ? "reimagined-composer" : row.key, style: { flexDirection: "column", paddingHorizontal: rs.paddingHorizontal == null ? SPACE.sm : rs.paddingHorizontal, paddingTop: SPACE.sm, paddingBottom: 6 } },
+        h(RN.View, { style: { flexDirection: "row", alignItems: "flex-end", minHeight: 36, paddingHorizontal: 4 } }, ...field),
+        h(RN.View, { style: { flexDirection: "row", alignItems: "center", marginTop: 6, paddingTop: 6, borderTopWidth: hairline(), borderColor: colors().line, gap: 6 } }, ...lead, h(RN.View, { style: { flex: 1 } }), ...tail, send));
+    };
+    hookExport("NativeComposer", CI + "ChatInput.tsx", ["default"], output => {
+      const c = colors();
+      return mapTree(output, n => typeof n.props?.onStartShouldSetResponder === "function" && typeof n.props?.onResponderRelease === "function" && n.props.collapsable === false, box => {
+        const kids = React.Children.toArray(box.props.children).map(k => isEl(k) && flatStyle(k.props?.style).flexDirection === "row" && React.Children.toArray(k.props.children).length > 1 ? composerSplit(k) : k);
+        return React.cloneElement(box, { style: [box.props.style, { backgroundColor: c.surface, borderRadius: 22, borderWidth: hairline(), borderColor: c.line, flexDirection: "column", shadowColor: "#000", shadowOpacity: 0.16, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } }] }, ...kids);
+      });
+    });
     const titlePill = output => { const c = colors(); return styleRoot(output, { backgroundColor: c.surface, borderRadius: RAD.round, paddingHorizontal: SPACE.md, paddingVertical: 4, overflow: "hidden" }); };
     hookExport("NativeDmHeader", CH + "PrivateChannelHeader.tsx", ["default"], titlePill);
     hookExport("NativeChannelHeader", CH + "GuildChannelHeader.tsx", ["default"], titlePill);
     // The server screen: the guild banner gets rounded lower corners and channels become rounded pills inside Discord's measured row heights.
     hookExport("NativeGuildHeader", "modules/channel_list_v2/native/RedesignGuildHeader.tsx", ["default"], output => styleRoot(output, { borderBottomLeftRadius: RAD.sheet, borderBottomRightRadius: RAD.sheet, overflow: "hidden" }));
-    patchFn("NativeChannelRows", "modules/channel_list_v2/native/renderRedesignChannelListItem.tsx", "renderChannelListItem", (_args, out) => {
-      if (!cfg("nativeScreens") || !isEl(out) || !out.props?.channel || typeof out.props.selected !== "boolean") return out;
-      const c = colors(), on = out.props.selected;
-      health.hooks.NativeChannelRows = "applied";
-      return h(RN.View, { key: out.key, style: { marginHorizontal: SPACE.sm, borderRadius: RAD.medium, overflow: "hidden", backgroundColor: on ? c.accentSoft : "transparent", borderWidth: on ? hairline() : 0, borderColor: c.line } }, out);
+    // Channel rows are Discord's own memo components (text, voice, thread); each becomes an inset rounded pill and the selected one a tinted
+    // card (Discord's unread and selection indicators are kept). Row heights are untouched, so the list's measured layout stays valid.
+    const CL = "modules/channel_list_v2/native/items/";
+    const channelPill = (output, args) => {
+      if (!isEl(output)) return output;
+      const p = args?.[0] || {}, c = colors(), id = p.channel?.id || p.channelId, on = p.selected === true || p.isChannelSelected === true || (!!id && call(stores.SelectedChannelStore, "getChannelId", [], null) === id);
+      return styleRoot(output, { marginHorizontal: SPACE.sm, borderRadius: RAD.medium, overflow: "hidden", backgroundColor: on ? c.accentSoft : "transparent" });
+    };
+    hookExport("NativeChannelRows", CL + "TextChannel.tsx", ["default"], channelPill);
+    hookExport("NativeVoiceRows", CL + "VoiceChannel.tsx", ["default"], channelPill);
+    hookExport("NativeThreadRows", CL + "ThreadChannel.tsx", ["default"], channelPill);
+    hookExport("NativeCategoryRows", CL + "RedesignCategory.tsx", ["CategoryChannel"], output => styleRoot(output, { marginHorizontal: SPACE.sm, paddingHorizontal: SPACE.xs }));
+    // The server sheet: an inset rounded banner, a centred identity block (icon, name, description, counts) and inset content.
+    const GAS = "modules/guild_action_sheet/native/components/";
+    hookExport("NativeGuildSheetHeader", GAS + "GuildActionSheetHeader.tsx", ["default"], output => {
+      let banner = false;
+      const framed = mapTree(output, n => !banner && n.props?.source != null && n.props?.style != null && typeof n.type !== "function", n => (banner = true, addStyle(n, { marginHorizontal: SPACE.md, marginTop: SPACE.sm, borderRadius: RAD.sheet, overflow: "hidden" })));
+      return mapTree(framed, n => React.Children.toArray(n.props?.children).some(k => isEl(k) && k.props?.accessibilityRole === "header"), n => addStyle(React.cloneElement(n, null, ...React.Children.toArray(n.props.children).map(k => isEl(k) && (k.props?.accessibilityRole === "header" || typeof k.props?.variant === "string") ? addStyle(k, { textAlign: "center" }) : k)), { alignItems: "center" }));
     });
+    hookExport("NativeGuildSheet", GAS + "GuildActionSheet.tsx", ["default"], output => mapTree(output, n => n.props?.contentContainerStyle !== undefined && n.props?.scrollsToTop === false, n => React.cloneElement(n, { contentContainerStyle: [n.props.contentContainerStyle, { paddingHorizontal: SPACE.xs, gap: SPACE.sm }] })));
     // The server rail becomes a floating panel: its own surface, rounded trailing edge and pill separators. Width and item geometry stay Discord's.
     hookExport("NativeGuildRail", "modules/guilds_bar/native/GuildsBar.tsx", ["default"], output => { const c = colors(); return mapTree(output, n => n.props?.nativeID === "guilds-bar-view", n => addStyle(n, { backgroundColor: c.surface, borderTopRightRadius: RAD.sheet, borderBottomRightRadius: RAD.sheet, borderRightWidth: hairline(), borderColor: c.line, marginVertical: SPACE.sm, paddingTop: SPACE.xs })); });
     hookExport("NativeGuildSeparator", "modules/guilds_bar/native/GuildsBarSeparator.tsx", ["default"], output => isEl(output) && output.props?.style != null && output.props.children == null ? addStyle(output, { backgroundColor: colors().accentSoft, borderRadius: 2, width: 20, alignSelf: "center" }) : output);
