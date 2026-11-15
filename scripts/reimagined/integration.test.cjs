@@ -86,7 +86,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.40');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.41');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -294,6 +294,7 @@ test('alpha.40: strip positions, native You actions, chat and server screens red
   const files = {
     'components_native/MainChannels.tsx': { default: () => ({ type: 'View', props: { children: { type: panelFn, props: {} } } }) },
     'modules/main_tabs_v2/native/tabs/guilds/HomePanelContent.tsx': { HomePanelContent },
+    'modules/channel_list_v2/native/useChannelListWidth.tsx': { default: () => 321 },
     'modules/main_tabs_v2/native/you_bar/hooks/useYouBarTotalHeight.tsx': { useYouBarTotalHeight: () => 90 },
     'modules/main_tabs_v2/native/tabs/you/YouScreen.tsx': { default: () => ({ type: 'native-out', props: {} }) },
     'modules/user_settings/core/native/openUserSettings.tsx': { openUserSettings: o => calls.push(['settings', o.screen]), UserSettingsSections: { PROFILE_CUSTOMIZATION: 'PROFILE_CUSTOMIZATION', PREMIUM: 'PREMIUM' } },
@@ -321,6 +322,8 @@ test('alpha.40: strip positions, native You actions, chat and server screens red
   assert.match(f.plugin.diagnostics().hooks.PaneCorners, /frames=1 rounded=1/); assert.equal(l.strip.props.children.props.horizontal, true);
   assert.equal(f.plugin.diagnostics().hooks.ServerStripPosition, 'bottom');
   f.api.storage.stripPosition = 'top'; l = layout(); assert.ok(JSON.stringify(l.pane).includes('"borderTopLeftRadius":24,"borderTopRightRadius":24'));
+  const listWidth = () => files['modules/channel_list_v2/native/useChannelListWidth.tsx'].default();
+  assert.equal(listWidth(), 393); f.api.storage.stripPosition = 'right'; assert.equal(listWidth(), 325); f.api.storage.stripPosition = 'top';
   f.focused({ name: 'you' }); const you = files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default(), host = new you.type(you.props);
   const find = (n, pred) => !n || typeof n !== 'object' ? null : pred(n) ? n : [].concat(n.props?.children ?? []).concat(Array.isArray(n) ? n : []).reduce((a, k) => a || find(k, pred), null);
   const page = find(host.render(), n => n.type?.name === 'YouPage'), tree = new page.type(page.props).render();
