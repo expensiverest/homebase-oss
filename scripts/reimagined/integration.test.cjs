@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.35');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.36');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -241,6 +241,45 @@ test('native screens redesign DM rows, notifications and the server rail in meas
   assert.equal(files['modules/quests/native/QuestDock/QuestDock.tsx'].default(), null);
   f.api.storage.hideQuestDock = false; assert.equal(files[QH].useIsMobileQuestDockRenderedBase(), true);
   f.api.storage.nativeScreens = false; assert.equal(files[MI + 'MessagesItemChannel.tsx'].getMessagesItemChannelSizes().height, 56); await f.stop();
+});
+test('alpha.36: servers move to a top strip, scroll bars are hidden, DM rows get new content and You embeds native profile pieces', async () => {
+  const pane = { type: 'View', props: { nativeID: 'messages-parent-view', style: { position: 'absolute', left: 72 } } };
+  const HomePanelContent = () => ({ type: 'Rail', props: {} });
+  const LeftPanelContent = () => ({ type: 'View', props: { style: { flex: 1 }, children: [{ type: HomePanelContent, props: {} }, pane] } });
+  const LeftMenuTabsInner = () => ({ type: 'View', props: { children: { type: LeftPanelContent, props: {} } } });
+  const MI = 'modules/main_tabs_v2/native/tabs/messages/items/', UPN = 'modules/user_profile/native/';
+  const NativeNote = () => null, NativeBoard = () => null;
+  const files = {
+    'components_native/MainChannels.tsx': { default: () => ({ type: 'Profiler', props: { children: { type: LeftMenuTabsInner, props: {} } } }) },
+    'modules/main_tabs_v2/native/tabs/guilds/HomePanelContent.tsx': { HomePanelContent },
+    [MI + 'MessagesItemChannel.tsx']: { getMessagesItemChannelSizes: () => ({ avatar: 32, height: 56, padding: 16 }) },
+    [MI + 'channel/MessagesItemChannelBase.tsx']: { default: () => ({ type: 'View', props: { children: { type: 'Pressable', props: { onPress() {}, onLongPress() {}, children: 'native content' } } } }) },
+    'modules/main_tabs_v2/native/tabs/you/YouScreen.tsx': { default: () => ({ type: 'native-out', props: {} }) },
+    [UPN + 'UserProfileNote.tsx']: { default: NativeNote }, [UPN + 'UserProfileWidgetsBoardTab.tsx']: { default: NativeBoard }
+  };
+  const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} }, screens: true, files });
+  const create = f.api.common.React.createElement;
+  const sv = create('ScrollView', { showsVerticalScrollIndicator: true });
+  assert.equal(sv.props.showsVerticalScrollIndicator, false); assert.equal(sv.props.showsHorizontalScrollIndicator, false);
+  f.api.storage.hideScrollBars = false; assert.equal(create('ScrollView', { showsVerticalScrollIndicator: true }).props.showsVerticalScrollIndicator, true); f.api.storage.hideScrollBars = true;
+  const top = files['components_native/MainChannels.tsx'].default(), inner = top.props.children;
+  assert.notEqual(inner.type, LeftMenuTabsInner);
+  const mid = inner.type(inner.props), left = mid.props.children; assert.notEqual(left.type, LeftPanelContent);
+  const panel = left.type(left.props), kids = [].concat(panel.props.children);
+  assert.ok(!kids.some(k => k?.type === HomePanelContent), 'rail removed');
+  const movedPane = kids.find(k => k?.props?.nativeID === 'messages-parent-view'); assert.ok(JSON.stringify(movedPane.props.style).includes('"left":0'));
+  const strip = kids[kids.length - 1], body = strip.type(strip.props), stripTree = new body.type(body.props).render();
+  assert.equal(stripTree.props.testID, 'reimagined-server-strip'); assert.equal(stripTree.props.children.props.horizontal, true);
+  assert.equal(f.plugin.diagnostics().hooks.ServerStrip, 'applied');
+  const sizes = files[MI + 'MessagesItemChannel.tsx'].getMessagesItemChannelSizes();
+  const row = files[MI + 'channel/MessagesItemChannelBase.tsx'].default({ height: sizes.height, channel: { id: '1', type: 3, name: 'Crew', recipients: [] } });
+  const rowText = JSON.stringify(row); assert.ok(rowText.includes('Crew') && !rowText.includes('native content'));
+  f.focused({ name: 'you' }); const you = files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default(), host = new you.type(you.props);
+  const find = (n, pred) => !n || typeof n !== 'object' ? null : pred(n) ? n : [].concat(n.props?.children ?? []).concat(Array.isArray(n) ? n : []).reduce((a, k) => a || find(k, pred), null);
+  const page = find(host.render(), n => n.type?.name === 'YouPage'), instance = new page.type(page.props);
+  assert.ok(find(instance.render(), n => n.type === NativeNote), 'native note embedded');
+  instance.state.tab = 'board'; assert.ok(find(instance.render(), n => n.type === NativeBoard), 'native board tab');
+  await f.stop();
 });
 test('app tour visits declared routes, skips risky ones and returns', async () => {
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} } });
