@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.34');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.35');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -201,7 +201,7 @@ test('native screens re-lay out pieces in place and only replace You on its rout
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} }, screens: true, files });
   await f.advance(2000);
   const hooks = f.plugin.diagnostics().hooks;
-  assert.equal(hooks.NativeForYouEmpty, undefined); assert.equal(hooks.NativeDmRow, undefined); assert.equal(hooks.NativeYou, 'patched');
+  assert.equal(hooks.NativeForYouEmpty, undefined); assert.equal(hooks.NativeDmRow, 'not found'); assert.equal(hooks.NativeYou, 'patched');
   assert.equal(files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default(), out);
   const header = files[NC + 'ForYouRecentActivitySectionHeader.tsx'].ForYouRecentActivitySectionHeader();
   assert.notEqual(header, out); assert.equal(header.props.fallback, out); assert.ok(JSON.stringify(header).includes('RECENT ACTIVITY'));
@@ -215,6 +215,32 @@ test('native screens re-lay out pieces in place and only replace You on its rout
   host.state.classic = true; assert.ok(JSON.stringify(host.render()).includes('native-out'));
   assert.equal(f.plugin.diagnostics().hooks.NativeForYouRecentHeader, 'applied');
   f.api.storage.nativeScreens = false; assert.equal(files[NC + 'ForYouRecentActivitySectionHeader.tsx'].ForYouRecentActivitySectionHeader(), out); await f.stop();
+});
+test('native screens redesign DM rows, notifications and the server rail in measured cells and hide the quest dock', async () => {
+  const MI = 'modules/main_tabs_v2/native/tabs/messages/items/', NC = 'modules/notification_center/native/', QH = 'modules/quests/native/QuestHooks.native.tsx';
+  const pressable = { type: 'PressableHighlight', props: { onPress() {}, onLongPress() {}, style: { flex: 1 } } };
+  const item = info => info.kind === 'divider' ? { type: 'View', props: { style: { height: 1 } } } : { type: 'ErrorBoundary', props: { children: { type: 'Row', props: { item: info } } } };
+  const files = {
+    [MI + 'MessagesItemChannel.tsx']: { getMessagesItemChannelSizes: () => ({ avatar: 32, height: 56, label: 20, labelSecondary: 16, padding: 16 }) },
+    [MI + 'channel/MessagesItemChannelBase.tsx']: { default: () => ({ type: 'View', props: { style: { height: 0 }, children: pressable } }) },
+    [NC + 'ForYouItems.tsx']: { ForYouItems: () => ({ type: 'View', props: { children: { type: 'FlashList', props: { data: [], renderItem: item } } } }) },
+    'modules/guilds_bar/native/GuildsBar.tsx': { default: () => ({ type: 'Profiler', props: { children: { type: 'View', props: { nativeID: 'guilds-bar-view', style: { flex: 1 } } } } }) },
+    [QH]: { useIsMobileQuestDockRenderedBase: () => true, useMobileQuestDockHeight: () => 120 },
+    'modules/quests/native/QuestDock/QuestDock.tsx': { default: () => ({ type: 'Dock', props: {} }) }
+  };
+  const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} }, screens: true, files });
+  const sizes = files[MI + 'MessagesItemChannel.tsx'].getMessagesItemChannelSizes(); assert.ok(sizes.height > 56); assert.equal(sizes.avatar, 40);
+  const row = files[MI + 'channel/MessagesItemChannelBase.tsx'].default({ height: sizes.height, channel: { id: '1' } });
+  const card = JSON.stringify(row.props.children.props.style); assert.ok(card.includes('borderRadius') && card.includes('"flex":1'));
+  assert.deepEqual(files[MI + 'channel/MessagesItemChannelBase.tsx'].default({ height: 56, channel: { id: '1' } }).props.children.props.style, { flex: 1 });
+  const list = files[NC + 'ForYouItems.tsx'].ForYouItems().props.children, rendered = list.props.renderItem({ kind: 'row' });
+  assert.equal(rendered.props.children.type, 'ErrorBoundary'); assert.ok(JSON.stringify(rendered.props.style).includes('borderRadius'));
+  assert.equal(list.props.renderItem({ kind: 'divider' }).props.style.height > 1, true);
+  assert.ok(JSON.stringify(files['modules/guilds_bar/native/GuildsBar.tsx'].default()).includes('borderTopRightRadius'));
+  assert.equal(files[QH].useIsMobileQuestDockRenderedBase(), false); assert.equal(files[QH].useMobileQuestDockHeight(), 0);
+  assert.equal(files['modules/quests/native/QuestDock/QuestDock.tsx'].default(), null);
+  f.api.storage.hideQuestDock = false; assert.equal(files[QH].useIsMobileQuestDockRenderedBase(), true);
+  f.api.storage.nativeScreens = false; assert.equal(files[MI + 'MessagesItemChannel.tsx'].getMessagesItemChannelSizes().height, 56); await f.stop();
 });
 test('app tour visits declared routes, skips risky ones and returns', async () => {
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} } });
