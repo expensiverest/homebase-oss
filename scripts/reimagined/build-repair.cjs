@@ -18,7 +18,7 @@ function region(first, last, replacement) {
   if (a < 0 || b < 0) throw new Error('Missing region: ' + first);
   code = code.slice(0, a) + replacement + code.slice(b);
 }
-code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.35');
+code = code.replaceAll('0.2.0-alpha.1', '0.2.0-alpha.36');
 swap('  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;', `  let api, React, RN, h, Control, Scene, DockHost, Boundary, Page;
   let presenter = null, modalOwner = null, activeSceneNavigation = null, presentationInstance = "";
   const presentationHosts = new Set();
@@ -259,6 +259,8 @@ swap('    Boundary = class extends React.Component {', `    SkinFrame = class ex
     };
     Boundary = class extends React.Component {`);
 swap('  function scan() {', `  let SkinFrame;
+  let scrollTypes = new Set(), ServerStrip = null, dmRowContent = null;
+  const STRIP_H = 64;
   // Re-lays out Discord's own screens in place. Whole screens are only replaced where they are self-contained pushed routes (You);
   // elsewhere the native screen, its scroll plumbing and the YouBar stay intact while its building blocks (rows, section headers, items, empty states) take the Reimagined layout.
   const LAYOUT_TARGETS = [["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true]];
@@ -360,11 +362,43 @@ swap('  function scan() {', `  let SkinFrame;
     };
     cardItems.set(orig, next); return next;
   }
+  // The server rail moves to a top strip: Discord's MainChannels -> LeftMenuTabsInner -> LeftPanelContent chain is followed (unexported inner components are
+  // wrapped by type, cached so they never remount) until the panel holding "messages-parent-view" is found; the rail column is dropped and the pane spans the width.
+  const wrappedTypes = new WeakMap(), RN_HOSTS = () => new Set(["View", "Text", "Image", "ScrollView", "Pressable", "TouchableOpacity", "FlatList", "SectionList"].map(k => safe(() => RN[k], null)).filter(Boolean));
+  function wrapType(type, after) {
+    if (!type || (typeof type !== "function" && typeof type !== "object")) return type;
+    const hit = wrappedTypes.get(type); if (hit) return hit;
+    let next = null;
+    if (typeof type === "function" && !type.prototype?.render) { next = function (props, ref) { return after(type(props, ref), props); }; next.displayName = type.displayName || type.name; if (type.defaultProps) next.defaultProps = type.defaultProps; }
+    else if (typeof type === "object" && typeof type.render === "function") { const inner = type.render; next = React.forwardRef((props, ref) => after(inner(props, ref), props)); }
+    else if (typeof type === "object" && type.type) { const inner = wrapType(type.type, after); if (inner !== type.type) next = React.memo(inner, type.compare || undefined); }
+    if (!next) return type;
+    wrappedTypes.set(type, next); return next;
+  }
+  let homePanelType;
+  function stripLayout(out, level) {
+    if (!cfg("serverStrip") || !ServerStrip || out == null) return out;
+    if (homePanelType === undefined) homePanelType = safe(() => api.metro.findByFilePath("modules/main_tabs_v2/native/tabs/guilds/HomePanelContent.tsx")?.HomePanelContent, null);
+    const isPane = k => isEl(k) && k.props?.nativeID === "messages-parent-view", baseType = ty => ty && typeof ty === "object" && ty.type ? ty.type : ty;
+    let found = false;
+    const next = mapTree(out, n => Array.isArray(n.props?.children) && n.props.children.some(isPane), n => {
+      found = true;
+      const kids = n.props.children.filter(k => !(isEl(k) && homePanelType && (k.type === homePanelType || baseType(k.type) === baseType(homePanelType)))).map(k => isPane(k) ? addStyle(k, { left: 0, top: STRIP_H }) : k);
+      return React.cloneElement(n, null, ...kids, h(ServerStrip, { key: "reimagined-strip" }));
+    });
+    if (found) { health.hooks.ServerStrip = homePanelType ? "applied" : "applied (rail kept)"; return next; }
+    if (level >= 3) return out;
+    const hosts = RN_HOSTS();
+    return mapTree(out, n => !hosts.has(n.type) && (typeof n.type === "function" || typeof n.type?.render === "function" || (n.type?.type && typeof n.type.$$typeof === "symbol")), n => {
+      const w = wrapType(n.type, o => safe(() => stripLayout(o, level + 1), o));
+      return w === n.type ? n : h(w, { ...n.props, key: n.key, ref: n.ref });
+    });
+  }
   function patchRedesign() {
     const MI = MT + "items/", QH = "modules/quests/native/QuestHooks.native.tsx";
     patchFn("NativeDmSizes", MI + "MessagesItemChannel.tsx", "getMessagesItemChannelSizes", (_args, out) => {
       if (!cfg("nativeScreens") || !out || typeof out.height !== "number") return out;
-      const height = Math.round(Math.max(out.height, 40 + (out.padding || 16)) + ROW_GAP);
+      const height = Math.round(Math.max(out.height, 52 + 2 * SPACE.md) + ROW_GAP);
       rowHeights.add(height); health.hooks.NativeDmSizes = "applied";
       return { ...out, avatar: 40, height };
     });
@@ -372,10 +406,11 @@ swap('  function scan() {', `  let SkinFrame;
       const p = args?.[0];
       if (!cfg("nativeScreens") || !isEl(out) || !p || !rowHeights.has(p.height)) return out;
       const c = colors(), id = p.channel?.id, hot = !!id && unread(id);
-      const card = { flex: 1, marginHorizontal: SPACE.md, marginVertical: ROW_GAP / 2, marginBottom: ROW_GAP / 2, paddingHorizontal: SPACE.md, borderRadius: RAD.large, backgroundColor: hot ? c.elevated : c.surface, borderWidth: hairline(), borderColor: hot ? c.accent : c.line, overflow: "hidden" };
+      const card = { flex: 1, flexDirection: "row", alignItems: "center", marginHorizontal: SPACE.md, marginVertical: ROW_GAP / 2, paddingHorizontal: SPACE.md, paddingVertical: 0, borderRadius: 22, backgroundColor: hot ? c.elevated : c.surface, borderWidth: 0, overflow: "hidden" };
+      const content = dmRowContent && p.channel ? safe(() => dmRowContent(p.channel), null) : null;
       let done = false;
       const pressable = n => !done && typeof n.props?.onPress === "function" && typeof n.props?.onLongPress === "function";
-      const next = mapTree(out, pressable, n => { done = true; return addStyle(n, card); });
+      const next = mapTree(out, pressable, n => { done = true; const styled = addStyle(n, card); return content ? React.cloneElement(styled, null, ...content) : styled; });
       if (done) health.hooks.NativeDmRow = "applied";
       return next;
     });
@@ -385,6 +420,7 @@ swap('  function scan() {', `  let SkinFrame;
       return S && S.LARGE_40 != null && out.props.size === S.REFRESH_MEDIUM_32 ? React.cloneElement(out, { size: S.LARGE_40 }) : out;
     });
     hookExport("NativeForYouList", NC + "ForYouItems.tsx", ["ForYouItems"], output => mapTree(output, n => typeof n.props?.renderItem === "function" && "data" in n.props, n => React.cloneElement(n, { renderItem: cardRenderItem(n.props.renderItem) })));
+    hookExport("ServerStripHost", "components_native/MainChannels.tsx", ["default"], output => stripLayout(output, 0));
     // The server rail becomes a floating panel: its own surface, rounded trailing edge and pill separators. Width and item geometry stay Discord's.
     hookExport("NativeGuildRail", "modules/guilds_bar/native/GuildsBar.tsx", ["default"], output => { const c = colors(); return mapTree(output, n => n.props?.nativeID === "guilds-bar-view", n => addStyle(n, { backgroundColor: c.surface, borderTopRightRadius: RAD.sheet, borderBottomRightRadius: RAD.sheet, borderRightWidth: hairline(), borderColor: c.line, marginVertical: SPACE.sm, paddingTop: SPACE.xs })); });
     hookExport("NativeGuildSeparator", "modules/guilds_bar/native/GuildsBarSeparator.tsx", ["default"], output => isEl(output) && output.props?.style != null && output.props.children == null ? addStyle(output, { backgroundColor: colors().accentSoft, borderRadius: 2, width: 20, alignSelf: "center" }) : output);
@@ -613,8 +649,8 @@ swap('  let SkinFrame;', `  let SkinFrame;
   }`);
 
 // Native screens: when enabled, the screen components Discord's navigator renders for the guilds, notifications and you routes are replaced in place by Reimagined content (YouBar and native navigation stay), failing open to the original screen.
-swap('nativeSkinRows: false, blueprint: false', 'nativeSkinRows: false, nativeScreens: false, hideQuestDock: true, blueprint: false');
-swap('h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }),', 'h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }), h(Toggle, { name: "nativeScreens", label: "Restyle native screens (beta)" }), h(Toggle, { name: "hideQuestDock", label: "Hide Quests dock above the YouBar" }),');
+swap('nativeSkinRows: false, blueprint: false', 'nativeSkinRows: false, nativeScreens: false, hideQuestDock: true, hideScrollBars: true, serverStrip: true, blueprint: false');
+swap('h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }),', 'h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }), h(Toggle, { name: "nativeScreens", label: "Restyle native screens (beta)" }), h(Toggle, { name: "hideQuestDock", label: "Hide Quests dock above the YouBar" }), h(Toggle, { name: "serverStrip", label: "Servers as a top strip" }), h(Toggle, { name: "hideScrollBars", label: "Hide scroll bars" }),');
 swap('if (value.key === "nativeSkin" || value.key === "nativeSkinRows" || value.key === "blueprint") patchNativeSkin();', 'if (value.key === "nativeSkin" || value.key === "nativeSkinRows" || value.key === "blueprint" || value.key === "nativeScreens") patchNativeSkin();');
 swap('cfg("layout") && cfg("startHome") && !autoPresented', 'cfg("layout") && !cfg("nativeScreens") && cfg("startHome") && !autoPresented');
 swap('const launch = this.props.mode === "settings" || !me() ? null', 'const launch = this.props.mode === "settings" || !me() || cfg("nativeScreens") ? null');
@@ -641,6 +677,11 @@ swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, RowCard, N
   function swapScreen(args) {
     const type = args?.[0], props = args?.[1];
     if (props && props.__reimaginedRaw) { const { __reimaginedRaw, ...rest } = props; return [type, rest, ...args.slice(2)]; }
+    // Every scroll surface (ScrollView, and the FlatList/SectionList/FlashList that render one) is created without scroll indicators.
+    if (live && type && scrollTypes.has(type) && cfg("hideScrollBars") && (props?.showsVerticalScrollIndicator !== false || props?.showsHorizontalScrollIndicator !== false)) {
+      health.hooks.ScrollBars = "hidden";
+      return [type, { ...(props || {}), showsVerticalScrollIndicator: false, showsHorizontalScrollIndicator: false }, ...args.slice(2)];
+    }
     if (live && cfg("nativeScreens") && props && typeof type !== "string") safe(() => navProbe(type, props));
     // Layout: conversation rows (recognised by their props, since Discord's component names are minified) become spaced cards in place.
     if (live && cfg("nativeScreens") && cfg("nativeRowsBeta") && RowCard && props && typeof type !== "string" && type !== RowCard && props.channelId != null && Object.keys(props).every(k => k === "key" || k === "channelId")) {
@@ -660,12 +701,16 @@ swap('  let SkinFrame;', `  let SkinFrame, NativeHost, NativeOverlay, RowCard, N
     return [NativeHost, { ...props, __reimaginedOrig: type }, ...args.slice(2)];
   }
   function patchScreens() {
-    if (!live || !cfg("nativeScreens")) return;
+    if (!live || !(cfg("nativeScreens") || cfg("hideScrollBars"))) return;
+    scrollTypes = new Set(["ScrollView", "FlatList", "SectionList", "VirtualizedList", "VirtualizedSectionList"].map(k => safe(() => RN[k], null)).filter(Boolean));
+    for (const m of safe(() => api.metro.findByPropsAll("FlashList"), []) || []) { const f = safe(() => unwrap(m).FlashList, null); if (f) scrollTypes.add(f); }
+    for (const m of safe(() => api.metro.findByPropsAll("ScrollView", "FlatList", "Swipeable"), []) || []) ["ScrollView", "FlatList"].forEach(k => { const f = safe(() => unwrap(m)[k], null); if (f) scrollTypes.add(f); });
+    if (!health.hooks.ScrollBars) health.hooks.ScrollBars = cfg("hideScrollBars") ? "armed x" + scrollTypes.size : "off";
     const seen = targets.get(swapScreen) || new Set(); targets.set(swapScreen, seen);
     const attach = (object, method, key) => { if (!object || typeof object[method] !== "function" || seen.has(key)) return; try { api.patcher.before(method, object, args => swapScreen(args)); seen.add(key); } catch (_) { issue("hook-failed:NativeScreens"); } };
     attach(React, "createElement", "createElement");
     let n = 0; for (const rt of safe(() => api.metro.findByPropsAll("jsx", "jsxs"), []) || []) { const o = unwrap(rt); n++; ["jsx", "jsxs", "jsxDEV"].forEach(m => attach(o, m, "rt" + n + ":" + m)); }
-    health.hooks.NativeScreens = health.hooks.NativeScreens || (seen.size ? "armed" : "no hook");
+    if (cfg("nativeScreens")) health.hooks.NativeScreens = health.hooks.NativeScreens || (seen.size ? "armed" : "no hook");
   }`);
 swap('    pass("SearchField", "nativeSkin",', '    patchScreens();\n    pass("SearchField", "nativeSkin",');
 swap('    Boundary = class extends React.Component {', `    RowCard = class extends React.Component {
@@ -749,6 +794,71 @@ swap('    Boundary = class extends React.Component {', `    RowCard = class exte
 swap('      if (blueprint.search.length >= 8) return;', '      if (props.route && typeof props.route.name === "string" && props.navigation && typeof type !== "string") { const list = blueprint.screenRoots[props.route.name] || (blueprint.screenRoots[props.route.name] = []), sig = name + "|" + Object.keys(props).sort().join(","); if (list.length < 4 && !list.some(x => x.sig === sig)) list.push({ sig, type: name, keys: Object.keys(props).slice(0, 14) }); }\n      if (blueprint.search.length >= 8) return;');
 swap('screens: {}, tabBars: {} };', 'screens: {}, screenRoots: {}, tabBars: {} };');
 swap('screens: blueprint.screens, tabBars: blueprint.tabBars,', 'screens: blueprint.screens, screenRoots: blueprint.screenRoots, tabBars: blueprint.tabBars,');
+swap('    RowCard = class extends React.Component {', `    // Servers as a horizontally scrolling strip above the Messages / channel pane (replaces the vertical rail). Discord's own navigation runs on tap, its guild sheet on long press.
+    const transitionGuild = id => { const m = safe(() => api.metro.findByFilePath("modules/guilds_bar/native/utils/transitionGuildsBarToGuildOrOpenSelectedChannel.tsx"), null), f = typeof m?.default === "function" ? m.default : typeof m === "function" ? m : null; if (f && safe(() => (f(id), true), false)) return; call(mod("transitionToGuild"), "transitionToGuild", [id], null); };
+    const guildSheet = g => { const m = safe(() => api.metro.findByFilePath("modules/guild_action_sheet/native/openGuildActionSheet.tsx"), null), f = typeof m?.default === "function" ? m.default : null; if (f) safe(() => f(g)); };
+    const createGuild = () => { const m = safe(() => api.metro.findByFilePath("modules/create_guild/native/CreateGuildModalActionCreators.tsx"), null), a = m?.default || m; if (typeof a?.openCreateGuildModal === "function") safe(() => a.openCreateGuildModal()); };
+    const stripStore = name => { stripStore.cache = stripStore.cache || {}; return name in stripStore.cache ? stripStore.cache[name] : (stripStore.cache[name] = safe(() => api.metro.findByStoreName(name), null)); };
+    const insetsHook = () => { if (insetsHook.v === undefined) insetsHook.v = safe(() => api.metro.findByProps("useSafeAreaInsets")?.useSafeAreaInsets, null) || null; return insetsHook.v; };
+    class ServerStripBody extends React.Component {
+      constructor(p) { super(p); this.state = { open: {} }; this.tick = () => { if (this.timer || !live) return; this.timer = setTimeout(() => { this.timer = null; if (this.alive) this.forceUpdate(); }, 80); }; }
+      componentDidMount() { this.alive = true; this.subs = ["SelectedGuildStore", "GuildReadStateStore", "SortedGuildStore", "GuildStore"].map(stripStore).filter(s => s?.addChangeListener); this.subs.forEach(s => s.addChangeListener(this.tick)); }
+      componentWillUnmount() { this.alive = false; clearTimeout(this.timer); (this.subs || []).forEach(s => safe(() => s.removeChangeListener(this.tick))); }
+      item(g, selected, extra) {
+        const c = colors(), on = selected === g.id, rs = stripStore("GuildReadStateStore"), mentions = call(rs, "getMentionCount", [g.id], 0) || 0, hot = !!call(rs, "hasUnread", [g.id], false), uri = imageUrl(g, "guild");
+        return h(RN.Pressable, { key: g.id, accessibilityRole: "button", accessibilityLabel: g.name + (mentions ? ", " + mentions + " mentions" : hot ? ", unread" : ""), delayLongPress: 320,
+          onPress: () => { recordTap("strip-guild"); transitionGuild(g.id); }, onLongPress: () => { recordTap("strip-guild-menu"); guildSheet(g); },
+          style: ({ pressed }) => [{ alignItems: "center", marginHorizontal: 5, transform: [{ scale: pressed ? 0.9 : 1 }] }, extra] },
+          h(RN.View, { style: { width: 44, height: 44, borderRadius: on ? 14 : 22, overflow: "hidden", backgroundColor: on ? c.accent : c.surface, alignItems: "center", justifyContent: "center", borderWidth: on ? 2 : 0, borderColor: c.accent } },
+            uri ? h(RN.Image, { source: { uri }, style: { width: 44, height: 44 } }) : t(String(g.name || "?").split(/\\s+/).map(w => w.charAt(0)).join("").slice(0, 3), { fontSize: 14, fontWeight: "700", color: on ? c.accentInk || "#fff" : c.ink })),
+          h(RN.View, { style: { marginTop: 4, height: 3, width: on ? 18 : hot ? 6 : 0, borderRadius: 2, backgroundColor: on ? c.accent : c.ink } }),
+          mentions ? h(RN.View, { style: { position: "absolute", top: -3, right: -4, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, backgroundColor: c.danger || "#ED4245", borderWidth: 2, borderColor: c.bg, alignItems: "center", justifyContent: "center" } }, t(mentions > 99 ? "99+" : String(mentions), { fontSize: 10, lineHeight: 12, fontWeight: "800", color: "#fff" })) : null);
+      }
+      render() {
+        const c = colors(), gs = stripStore("GuildStore") || stores.GuildStore, selected = call(stripStore("SelectedGuildStore"), "getGuildId", [], null), tree = call(stores.SortedGuildStore, "getGuildsTree", [], null)?.root?.children || [];
+        const guild = id => call(gs, "getGuild", [id], null), kids = [];
+        const home = h(RN.Pressable, { key: "home", accessibilityRole: "button", accessibilityLabel: "Direct Messages", onPress: () => { recordTap("strip-home"); transitionGuild("@me"); }, style: ({ pressed }) => ({ alignItems: "center", marginRight: 5, transform: [{ scale: pressed ? 0.9 : 1 }] }) },
+          h(RN.View, { style: { width: 44, height: 44, borderRadius: selected ? 22 : 14, backgroundColor: selected ? c.surface : c.accent, alignItems: "center", justifyContent: "center" } }, h(Icon, { name: "ChatIcon", size: 22, color: selected ? c.ink : c.accentInk || "#fff" })),
+          h(RN.View, { style: { marginTop: 4, height: 3, width: selected ? 0 : 18, borderRadius: 2, backgroundColor: c.accent } }));
+        kids.push(home, h(RN.View, { key: "sep", style: { width: hairline() * 2, height: 28, marginHorizontal: SPACE.sm, marginBottom: 7, backgroundColor: c.line } }));
+        for (const n of tree) {
+          if (Array.isArray(n?.children) && n.children.length && n.type !== "guild") {
+            const fid = String(n.id ?? n.folderId ?? "f"), open = !!this.state.open[fid], tint = typeof n.color === "number" ? "#" + n.color.toString(16).padStart(6, "0") : c.accent, members = n.children.map(x => guild(x.id)).filter(Boolean);
+            const anyOn = members.some(g => g.id === selected), anyHot = members.some(g => call(stripStore("GuildReadStateStore"), "hasUnread", [g.id], false));
+            const chip = h(RN.Pressable, { key: "f" + fid, accessibilityRole: "button", accessibilityLabel: (n.name || "Folder") + (open ? ", expanded" : ", collapsed"), onPress: () => { recordTap("strip-folder"); if (animated()) safe(() => RN.LayoutAnimation.configureNext(RN.LayoutAnimation.Presets.easeInEaseOut)); this.setState({ open: { ...this.state.open, [fid]: !open } }); }, style: ({ pressed }) => ({ alignItems: "center", marginHorizontal: 5, transform: [{ scale: pressed ? 0.9 : 1 }] }) },
+              h(RN.View, { style: { width: 44, height: 44, borderRadius: 14, backgroundColor: tint + "33", flexDirection: "row", flexWrap: "wrap", padding: 5, alignContent: "space-between", justifyContent: "space-between" } },
+                open ? h(RN.View, { style: { flex: 1, alignItems: "center", justifyContent: "center" } }, h(Icon, { name: "FolderIcon", size: 20, color: tint })) : members.slice(0, 4).map(g => imageUrl(g, "guild") ? h(RN.Image, { key: g.id, source: { uri: imageUrl(g, "guild") }, style: { width: 15, height: 15, borderRadius: 5 } }) : h(RN.View, { key: g.id, style: { width: 15, height: 15, borderRadius: 5, backgroundColor: c.elevated } }))),
+              h(RN.View, { style: { marginTop: 4, height: 3, width: anyOn && !open ? 18 : anyHot && !open ? 6 : 0, borderRadius: 2, backgroundColor: anyOn ? c.accent : c.ink } }));
+            kids.push(open ? h(RN.View, { key: "fo" + fid, style: { flexDirection: "row", alignItems: "flex-start", paddingTop: 5, paddingHorizontal: 2, marginHorizontal: 3, borderRadius: 18, backgroundColor: tint + "1F" } }, chip, ...members.map(g => this.item(g, selected))) : chip);
+          } else { const g = guild(n?.id); if (g) kids.push(this.item(g, selected)); }
+        }
+        kids.push(h(RN.Pressable, { key: "add", accessibilityRole: "button", accessibilityLabel: "Add a Server", onPress: () => { recordTap("strip-add"); createGuild(); }, style: ({ pressed }) => ({ marginHorizontal: 5, marginBottom: 7, width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, borderStyle: "dashed", borderColor: c.line, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 }) }, h(Icon, { name: "PlusIcon", size: 20, color: c.muted })));
+        return h(RN.View, { testID: "reimagined-server-strip", style: { position: "absolute", top: 0, left: 0, right: 0, height: this.props.top + STRIP_H, paddingTop: this.props.top, backgroundColor: c.bg, borderBottomWidth: hairline(), borderColor: c.line, zIndex: 5 } },
+          h(RN.ScrollView, { horizontal: true, showsHorizontalScrollIndicator: false, style: { flex: 1 }, contentContainerStyle: { alignItems: "center", paddingHorizontal: SPACE.md, paddingTop: 6 } }, ...kids));
+      }
+    }
+    ServerStrip = function ServerStrip() { const use = insetsHook(), insets = use ? use() : null; return h(ServerStripBody, { top: insets?.top || 0 }); };
+    // A Messages row laid out from scratch inside Discord's own pressable: squircle avatar with presence, name and time, a two-line preview and an unread pill.
+    const ago = ms => { const d = (Date.now() - ms) / 1000; if (!(d >= 0)) return ""; if (d < 60) return "now"; if (d < 3600) return Math.floor(d / 60) + "m"; if (d < 86400) return Math.floor(d / 3600) + "h"; if (d < 604800) return Math.floor(d / 86400) + "d"; return safe(() => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" }), ""); };
+    const snowTime = id => safe(() => Number((BigInt(id) >> BigInt(22)) + BigInt(1420070400000)), 0);
+    dmRowContent = ch => {
+      const c = colors(), group = ch.type === 3, uid = group ? null : call(ch, "getRecipientId", [], ch.recipients?.[0]), u = uid ? user(uid) : null;
+      const name = ch.name || (group ? (ch.recipients || []).map(id => userName(user(id))).slice(0, 3).join(", ") || "Group DM" : userName(u));
+      const hot = unread(ch.id), mentions = mentionCount(ch.id), status = uid ? call(stores.PresenceStore, "getStatus", [uid], "offline") : null, dot = { online: "#3BA55D", idle: "#FAA81A", dnd: "#ED4245", streaming: "#593695" }[status];
+      const last = call(call(stores.MessageStore, "getMessages", [ch.id], null), "last", [], null), mine = last?.author?.id && last.author.id === accountId;
+      const acts = uid ? call(stores.PresenceStore, "getActivities", [uid], []) || [] : [], custom = acts.find(a => a?.type === 4)?.state, playing = acts.find(a => a && a.type !== 4);
+      const preview = typeof last?.content === "string" && last.content ? (mine ? "You: " : "") + last.content.split(String.fromCharCode(10)).join(" ") : last?.attachments?.length ? (mine ? "You sent " : "Sent ") + "an attachment" : playing ? ({ 0: "Playing ", 1: "Streaming ", 2: "Listening to ", 3: "Watching " }[playing.type] || "") + (playing.name || "") : custom || (group ? (ch.recipients || []).length + 1 + " members" : "");
+      const when = ago(last?.timestamp ? new Date(last.timestamp).getTime() : ch.lastMessageId ? snowTime(ch.lastMessageId) : 0), icon = group && ch.icon ? "https://cdn.discordapp.com/channel-icons/" + ch.id + "/" + ch.icon + ".png?size=128" : null;
+      return [
+        h(RN.View, { key: "a", style: { width: 52, height: 52 } }, h(RN.View, { style: { width: 52, height: 52, borderRadius: 18, overflow: "hidden" } }, h(Avatar, { name, uri: icon || (u ? imageUrl(u, "user") : null), size: 52 })),
+          dot ? h(RN.View, { style: { position: "absolute", right: -3, bottom: -3, width: 16, height: 16, borderRadius: 8, backgroundColor: dot, borderWidth: 3, borderColor: hot ? c.elevated : c.surface } }) : null),
+        h(RN.View, { key: "b", style: { flex: 1, minWidth: 0, marginLeft: SPACE.md } },
+          h(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, t(name, { flex: 1, fontSize: 16, lineHeight: 20, fontWeight: hot ? "800" : "600", color: c.ink, letterSpacing: -0.2 }, { numberOfLines: 1 }), when ? t(when, { fontSize: 12, lineHeight: 16, marginLeft: SPACE.sm, color: hot ? c.accent : c.faint || c.muted, fontWeight: hot ? "700" : "500" }) : null),
+          h(RN.View, { style: { flexDirection: "row", alignItems: "center", marginTop: 3 } }, t(preview || " ", { flex: 1, fontSize: 14, lineHeight: 18, color: hot ? c.ink : c.muted, fontWeight: hot ? "500" : "400" }, { numberOfLines: 1 }),
+            mentions || hot ? h(RN.View, { style: { marginLeft: SPACE.sm, minWidth: mentions ? 20 : 10, height: mentions ? 20 : 10, paddingHorizontal: mentions ? 6 : 0, borderRadius: 10, backgroundColor: mentions ? c.danger || "#ED4245" : c.accent, alignItems: "center", justifyContent: "center" } }, mentions ? t(mentions > 99 ? "99+" : String(mentions), { fontSize: 11, lineHeight: 14, fontWeight: "800", color: "#fff" }) : null) : null))
+      ];
+    };
+    RowCard = class extends React.Component {`);
 // You page rebuilt from Discord's own stores and profile so it carries everything the native You screen shows.
 swap('    class EditProfile extends React.Component {', `    // The You page: everything the native You screen exposes (banner, status, badges, Orbs, member since, connections, friends, note, activity,
     // Quests/Shop/Nitro/Settings, account switcher), laid out in the Reimagined language. Anything only Discord can render (activity history, wishlist) opens the native page in place.
@@ -758,6 +868,31 @@ swap('    class EditProfile extends React.Component {', `    // The You page: ev
     const since = id => safe(() => new Date(Number((BigInt(id) >> BigInt(22)) + BigInt(1420070400000))).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }), null);
     const activityArt = a => { const img = a?.assets?.large_image; if (!img) return null; if (img.startsWith("spotify:")) return "https://i.scdn.co/image/" + img.slice(8); if (img.startsWith("mp:")) return "https://media.discordapp.net/" + img.slice(3); return a.application_id ? "https://cdn.discordapp.com/app-assets/" + a.application_id + "/" + img + ".png" : null; };
     const youExtra = {};
+    // Parity with the native You screen: Discord's own profile pieces (the same ones YouScreenUserProfileContent renders) are embedded in the Reimagined layout.
+    // Each sits behind its own boundary and falls back to the Reimagined card, so a missing or failing piece never takes the page down.
+    const UPN = "modules/user_profile/native/", youMissing = new Set();
+    const natMod = (file, name) => { const m = safe(() => api.metro.findByFilePath(file), null); if (!m) return null; const C = name ? m[name] : m.default !== undefined ? m.default : m; return C && (typeof C === "function" || typeof C === "object") ? C : null; };
+    const natHook = (file, name) => { const m = safe(() => api.metro.findByFilePath(file), null), f = m && (m[name] || m.default); return typeof f === "function" ? f : null; };
+    class NativeSlot extends React.Component {
+      constructor(p) { super(p); this.state = { failed: false }; }
+      componentDidCatch() { issue("you-native:" + this.props.label); youMissing.add(this.props.label); health.hooks.YouNative = "fallback: " + Array.from(youMissing).join(","); this.setState({ failed: true }); }
+      render() { return this.state.failed ? (this.props.fallback === undefined ? null : this.props.fallback) : this.props.children; }
+    }
+    const slot = (label, C, props, fallback) => { if (!C) { youMissing.add(label); health.hooks.YouNative = "fallback: " + Array.from(youMissing).join(","); return fallback === undefined ? null : fallback; } if (!health.hooks.YouNative) health.hooks.YouNative = "native"; return h(NativeSlot, { key: label, label, fallback }, h(C, props)); };
+    const hooks = {};
+    const hookOf = (key, file, name) => key in hooks ? hooks[key] : (hooks[key] = natHook(file, name));
+    function NativeAbout(p) { const dp = hookOf("profile", "modules/user_profile/hooks/useDisplayProfile.tsx", "useDisplayProfile")(p.userId); return h(p.C, { userId: p.userId, displayProfile: dp }); }
+    function NativeTrial(p) { const show = hookOf("trial", "modules/main_tabs_v2/native/tabs/you/hooks/useShouldShowExpiringTrialOfferCard.tsx", "useShouldShowExpiringTrialOfferCard")(); return show ? h(p.C, { navigateToPremium: p.navigateToPremium, style: p.style }) : null; }
+    function NativeWishlist(p) {
+      const fetch = hookOf("wishlist", "modules/wishlists/hooks/useWishlistHooks.tsx", "useFetchWishlist") || (hooks.wishlistProps = hooks.wishlistProps || mod("useFetchWishlist"))?.useFetchWishlist;
+      const store = safe(() => api.metro.findByStoreName("WishlistStore"), null) || mod("getFirstWishlistId"), wishlistId = call(store, "getFirstWishlistId", [p.userId], null);
+      if (typeof fetch === "function") fetch({ wishlistId, userId: p.userId });
+      const m = safe(() => api.metro.findByFilePath(UPN + "UserProfileWishlistGrid.tsx"), null), width = safe(() => RN.Dimensions.get("window").width, 390) - 2 * SPACE.lg;
+      if (wishlistId && m?.default) return h(m.default, { wishlistId, containerWidth: width, isVisible: true });
+      return m?.WishlistEmptyState ? h(m.WishlistEmptyState, { userId: p.userId, isCurrentUser: true }) : p.fallback;
+    }
+    const openStatus = () => { const m = mod("openEditCustomStatusModal"); if (typeof m?.openEditCustomStatusModal === "function" && safe(() => (m.openEditCustomStatusModal({ analyticsLocations: ["you screen"] }), true), false)) return; accountSheet(); };
+    const openFriends = () => { const nav = safe(() => mod("getRootNavigationRef")?.getRootNavigationRef?.(), null); if (nav && safe(() => nav.isReady?.() !== false && (nav.navigate("friends"), true), false)) return; deepLink("/friends"); };
     class YouPage extends React.Component {
       constructor(p) { super(p); this.state = { tab: "main" }; }
       componentDidMount() {
@@ -768,34 +903,44 @@ swap('    class EditProfile extends React.Component {', `    // The You page: ev
         const c = colors(), id = accountId, u = me(), data = { ...profileFor(id), ...(youExtra[id] || {}) }, name = data._displayName || userName(u);
         const status = call(stores.PresenceStore, "getStatus", [id], "online"), ring = { online: "#3BA55D", idle: "#FAA81A", dnd: "#ED4245" }[status] || c.line;
         const acts = call(stores.PresenceStore, "getActivities", [id], []) || [], custom = acts.find(a => a?.type === 4), others = acts.filter(a => a && a.type !== 4);
-        const accentNum = data.accentColor ?? data.accent_color ?? u?.accentColor, banner = imageUrl({ id, banner: data.banner || u?.banner }, "banner"), accent = typeof accentNum === "number" ? "#" + accentNum.toString(16).padStart(6, "0") : c.accentSoft;
+        const accentNum = data.accentColor ?? data.accent_color ?? u?.accentColor, banner = imageUrl({ id, banner: data.banner || u?.banner }, "banner"), theme = (data.themeColors || data.theme_colors || []).map(n => typeof n === "number" ? "#" + n.toString(16).padStart(6, "0") : null), accent = theme[0] || (typeof accentNum === "number" ? "#" + accentNum.toString(16).padStart(6, "0") : c.accentSoft);
         const badges = Array.isArray(data.badges) ? data.badges : [], links = (data.connectedAccounts || data.connected_accounts || []).filter(x => x && x.name);
         const rel = call(stores.RelationshipStore, "getFriendIDs", [], null) || Object.entries(call(stores.RelationshipStore, "getRelationships", [], {}) || {}).filter(([, v]) => v === 1 || v?.type === 1).map(([k]) => k);
         const vc = youStore("VirtualCurrencyStore"), orbs = call(vc, "getCurrentBalance", [], null) ?? vc?.balance, note = call(youStore("NoteStore"), "getNote", [id], null)?.note;
         const card = (children, extra) => h(RN.View, { style: [{ backgroundColor: c.surface, borderRadius: RAD.large, padding: SPACE.lg, marginBottom: SPACE.md }, extra] }, children);
         const label = s => t(s, { fontSize: TYPE.small, fontWeight: "700", letterSpacing: 0.8, color: c.muted, marginBottom: SPACE.sm });
         const tile = (icon, text, run, key) => h(Control, { key, id: "you-" + key, label: text, run, style: { flex: 1, paddingVertical: SPACE.md, borderRadius: RAD.medium, backgroundColor: c.surface, marginHorizontal: 3 } }, h(Icon, { name: icon, size: 22, color: c.ink }), t(text, { fontSize: TYPE.small, fontWeight: "600", marginTop: SPACE.xs }));
-        const seg = ["main", "activity"].map(k => h(Control, { key: k, id: "you-tab-" + k, label: k, selected: this.state.tab === k, run: () => { if (animated()) safe(() => RN.LayoutAnimation.configureNext(RN.LayoutAnimation.Presets.easeInEaseOut)); this.setState({ tab: k }); }, style: { flex: 1, borderRadius: RAD.round, backgroundColor: this.state.tab === k ? c.elevated : "transparent" } }, t(k === "main" ? "Main" : "Activity", { fontSize: TYPE.caption, fontWeight: "700", color: this.state.tab === k ? c.ink : c.muted })));
+        const seg = ["main", "board", "activity", "wishlist"].map(k => h(Control, { key: k, id: "you-tab-" + k, label: k, selected: this.state.tab === k, run: () => { if (animated()) safe(() => RN.LayoutAnimation.configureNext(RN.LayoutAnimation.Presets.easeInEaseOut)); this.setState({ tab: k }); }, style: { flex: 1, borderRadius: RAD.round, backgroundColor: this.state.tab === k ? c.elevated : "transparent" } }, t({ main: "Main", board: "Board", activity: "Activity", wishlist: "Wishlist" }[k], { fontSize: TYPE.caption, fontWeight: "700", color: this.state.tab === k ? c.ink : c.muted })));
+        const cardStyle = { backgroundColor: c.surface, borderColor: c.line, borderWidth: 0, borderRadius: RAD.large, marginBottom: SPACE.md }, toPremium = () => deepLink("/store"), toShop = () => deepLink("/shop");
+        const aboutC = natMod(UPN + "UserProfileAboutMeCard.tsx"), conn = safe(() => api.metro.findByFilePath(UPN + "UserProfileConnections.tsx"), null);
+        const fbAbout = [data.bio ? card([label("ABOUT ME"), h(MessageText, { key: "bio", content: data.bio })]) : null, card([label("MEMBER SINCE"), t(since(id) || "Unknown", { key: "d", fontSize: TYPE.body })])].filter(Boolean);
         const main = [
-          orbs != null ? card(h(RN.View, { style: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" } }, t("Orbs Balance", { fontWeight: "600" }), h(RN.View, { style: { paddingHorizontal: SPACE.md, paddingVertical: 6, borderRadius: RAD.round, backgroundColor: c.elevated } }, t(String(orbs), { fontWeight: "700" }))), null) : null,
-          data.bio ? card([label("ABOUT ME"), h(MessageText, { key: "bio", content: data.bio })]) : null,
-          card([label("MEMBER SINCE"), t(since(id) || "Unknown", { key: "d", fontSize: TYPE.body })]),
-          links.length ? card([label("CONNECTIONS"), ...links.map((l, i) => h(RN.View, { key: "l" + i, style: { flexDirection: "row", alignItems: "center", paddingVertical: 6 } }, h(RN.View, { style: { paddingHorizontal: SPACE.sm, paddingVertical: 2, borderRadius: RAD.small - 4, backgroundColor: c.elevated, marginRight: SPACE.md } }, t(String(l.type || "").toUpperCase(), { fontSize: 10, fontWeight: "700", color: c.muted })), t(l.name + (l.verified ? "  \\u2713" : ""), { flex: 1, fontWeight: "600" }, { numberOfLines: 1 })))]) : null,
-          card(h(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, h(RN.View, { style: { flex: 1 } }, t("Friends", { fontWeight: "600" }), t(rel.length + " friends", { fontSize: TYPE.caption, color: c.muted, marginTop: 2 })), h(RN.View, { style: { flexDirection: "row" } }, ...rel.slice(0, 5).map((fid, i) => h(RN.View, { key: fid, style: { marginLeft: i ? -10 : 0, borderRadius: 16, borderWidth: 2, borderColor: c.surface } }, h(Avatar, { name: userName(user(fid)), uri: imageUrl(user(fid), "user"), size: 28 })))))),
-          card([label("NOTE (ONLY VISIBLE TO YOU)"), t(note || "No note yet.", { key: "n", color: note ? c.ink : c.muted })])
+          slot("trial", natMod("modules/main_tabs_v2/native/tabs/you/YouExpiringTrialOfferCard.tsx") && NativeTrial, { C: natMod("modules/main_tabs_v2/native/tabs/you/YouExpiringTrialOfferCard.tsx"), navigateToPremium: toPremium, style: cardStyle }, null),
+          slot("upsells", natMod(UPN + "UserProfileDismissibleUpsells.tsx"), { navigateToPremium: toPremium, navigateToShop: toShop, hasCustomProfileTheme: Array.isArray(data.themeColors || data.theme_colors) }, null),
+          slot("checkpoint", natMod("modules/checkpoint/native/components/CheckpointProfileEntrypoint.tsx"), {}, null),
+          orbs == null ? null : slot("orbs", natMod("modules/virtual_currency/native/BalanceWidgetMenu.tsx"), { orbWalletEntryRowRef: this.orbRef || (this.orbRef = React.createRef()) }, orbs != null ? card(h(RN.View, { style: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" } }, t("Orbs Balance", { fontWeight: "600" }), h(RN.View, { style: { paddingHorizontal: SPACE.md, paddingVertical: 6, borderRadius: RAD.round, backgroundColor: c.elevated } }, t(String(orbs), { fontWeight: "700" }))), null) : null),
+          slot("activity", natMod(UPN + "UserProfileActivity.tsx"), { user: u, currentUser: u, style: cardStyle }, null),
+          aboutC ? slot("about", NativeAbout, { C: aboutC, userId: id }, h(RN.View, { key: "fa" }, ...fbAbout)) : h(RN.View, { key: "fa" }, ...fbAbout),
+          conn?.UserProfileAccountConnectionsCard ? slot("connections", conn.UserProfileAccountConnectionsCard, { userId: id }, links.length ? card([label("CONNECTIONS"), ...links.map((l, i) => h(RN.View, { key: "l" + i, style: { flexDirection: "row", alignItems: "center", paddingVertical: 6 } }, h(RN.View, { style: { paddingHorizontal: SPACE.sm, paddingVertical: 2, borderRadius: RAD.small - 4, backgroundColor: c.elevated, marginRight: SPACE.md } }, t(String(l.type || "").toUpperCase(), { fontSize: 10, fontWeight: "700", color: c.muted })), t(l.name + (l.verified ? "  \\u2713" : ""), { flex: 1, fontWeight: "600" }, { numberOfLines: 1 })))]) : null) : links.length ? card([label("CONNECTIONS"), ...links.map((l, i) => h(RN.View, { key: "l" + i, style: { flexDirection: "row", alignItems: "center", paddingVertical: 6 } }, h(RN.View, { style: { paddingHorizontal: SPACE.sm, paddingVertical: 2, borderRadius: RAD.small - 4, backgroundColor: c.elevated, marginRight: SPACE.md } }, t(String(l.type || "").toUpperCase(), { fontSize: 10, fontWeight: "700", color: c.muted })), t(l.name + (l.verified ? "  \\u2713" : ""), { flex: 1, fontWeight: "600" }, { numberOfLines: 1 })))]) : null,
+          slot("appConnections", conn?.UserProfileApplicationRoleConnectionsCard, { userId: id }, null),
+          slot("friends", natMod(UPN + "UserProfileYourFriendsCard.tsx"), { userId: id, navigateToFriends: openFriends }, card(h(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, h(RN.View, { style: { flex: 1 } }, t("Friends", { fontWeight: "600" }), t(rel.length + " friends", { fontSize: TYPE.caption, color: c.muted, marginTop: 2 })), h(RN.View, { style: { flexDirection: "row" } }, ...rel.slice(0, 5).map((fid, i) => h(RN.View, { key: fid, style: { marginLeft: i ? -10 : 0, borderRadius: 16, borderWidth: 2, borderColor: c.surface } }, h(Avatar, { name: userName(user(fid)), uri: imageUrl(user(fid), "user"), size: 28 }))))))),
+          slot("note", natMod(UPN + "UserProfileNote.tsx"), { userId: id }, card([label("NOTE (ONLY VISIBLE TO YOU)"), t(note || "No note yet.", { key: "n", color: note ? c.ink : c.muted })]))
         ];
-        const activity = [
+        const board = [slot("board", natMod(UPN + "UserProfileWidgetsBoardTab.tsx"), { userId: id, isVisible: true, cardStyle, isCurrentUser: true }, card(t("Your board is empty.", { color: c.muted }), { key: "nb" }))];
+        const wishlist = [slot("wishlist", NativeWishlist, { userId: id, fallback: card(t("Your wishlist is empty.", { color: c.muted }), { key: "nw" }) }, card(t("Your wishlist is empty.", { color: c.muted }), { key: "nw" }))];
+        const ownActivity = [
           others.length ? others.map((a, i) => card(h(RN.View, { style: { flexDirection: "row", alignItems: "center" } }, activityArt(a) ? h(RN.Image, { source: { uri: activityArt(a) }, style: { width: 56, height: 56, borderRadius: RAD.small, marginRight: SPACE.md } }) : null,
             h(RN.View, { style: { flex: 1, minWidth: 0 } }, t(({ 0: "Playing", 1: "Streaming", 2: "Listening to", 3: "Watching", 5: "Competing in" }[a.type] || "") + " " + (a.name || ""), { fontSize: TYPE.small, fontWeight: "700", color: c.muted }, { numberOfLines: 1 }), a.details ? t(a.details, { fontWeight: "600", marginTop: 2 }, { numberOfLines: 1 }) : null, a.state ? t(a.state, { fontSize: TYPE.caption, color: c.muted }, { numberOfLines: 1 }) : null)), { key: "a" + i })) : card(t("Nothing happening right now.", { color: c.muted })),
           this.props.onClassic ? h(Control, { key: "classic", id: "you-history", label: "Recent activity and wishlist", run: this.props.onClassic, style: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: SPACE.lg, paddingVertical: SPACE.lg, borderRadius: RAD.large, backgroundColor: c.surface } }, t("Recent activity and wishlist", { fontWeight: "600" }), h(Icon, { name: "ArrowSmallRightIcon", size: 18 })) : null
         ];
+        const activity = [slot("activityTab", natMod(UPN + "UserProfileActivityTab.tsx"), { user: u, currentUser: u, cardStyle }, h(RN.View, { key: "oa" }, ...ownActivity.filter(Boolean)))];
         return h(Page, { title: "You", right: ib("SettingsIcon", "Settings", "settings", null, "profile-settings") },
-          h(RN.View, { style: { borderRadius: RAD.sheet, overflow: "hidden", backgroundColor: c.surface, marginBottom: SPACE.lg } },
+          h(RN.View, { style: { borderRadius: RAD.sheet, overflow: "hidden", backgroundColor: c.surface, marginBottom: SPACE.lg, borderWidth: theme[1] ? 2 : 0, borderColor: theme[1] || c.line } },
             banner ? h(RN.Image, { source: { uri: banner }, resizeMode: "cover", style: { height: 120, width: "100%" } }) : h(RN.View, { style: { height: 120, backgroundColor: accent } }),
             h(RN.View, { style: { paddingHorizontal: SPACE.lg, paddingBottom: SPACE.lg } },
               h(RN.View, { style: { flexDirection: "row", alignItems: "flex-end", marginTop: -44 } },
                 h(RN.View, { style: { borderRadius: 50, borderWidth: 4, borderColor: c.surface } }, h(RN.View, { style: { borderRadius: 46, borderWidth: 3, borderColor: ring } }, h(Avatar, { name, uri: imageUrl(u, "user"), size: 80 }))),
-                h(Control, { id: "you-status", label: "Set status", run: accountSheet, style: { flex: 1, marginLeft: SPACE.md, marginBottom: SPACE.sm, alignItems: "flex-start", paddingHorizontal: SPACE.md, borderRadius: RAD.medium, backgroundColor: c.elevated } }, t(custom ? ((custom.emoji?.name && !custom.emoji.id ? custom.emoji.name + " " : "") + (custom.state || "")) : "Set a status", { fontSize: TYPE.caption, fontStyle: custom ? "normal" : "italic", color: custom ? c.ink : c.muted }, { numberOfLines: 2 }))),
+                h(Control, { id: "you-status", label: "Set status", run: openStatus, style: { flex: 1, marginLeft: SPACE.md, marginBottom: SPACE.sm, alignItems: "flex-start", paddingHorizontal: SPACE.md, borderRadius: RAD.medium, backgroundColor: c.elevated } }, t(custom ? ((custom.emoji?.name && !custom.emoji.id ? custom.emoji.name + " " : "") + (custom.state || "")) : "Set a status", { fontSize: TYPE.caption, fontStyle: custom ? "normal" : "italic", color: custom ? c.ink : c.muted }, { numberOfLines: 2 }))),
               h(Control, { id: "you-account", label: "Switch account or status", run: accountSheet, style: { flexDirection: "row", justifyContent: "flex-start", marginTop: SPACE.md, minHeight: 36 } }, t(name, { fontSize: TYPE.section, fontWeight: "800", letterSpacing: -0.4 }, { numberOfLines: 1 }), t("  \\u25BE", { color: c.muted, fontSize: TYPE.body })),
               h(RN.View, { style: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" } }, t(u?.username || "", { color: c.muted }), data.pronouns ? t("  \\u00B7  " + data.pronouns, { color: c.muted }) : null,
                 badges.length ? h(RN.View, { style: { flexDirection: "row", marginLeft: SPACE.sm, paddingHorizontal: 6, paddingVertical: 3, borderRadius: RAD.small - 4, backgroundColor: c.elevated } }, ...badges.slice(0, 10).map(b => h(RN.Image, { key: b.id, accessibilityLabel: b.description, source: { uri: "https://cdn.discordapp.com/badge-icons/" + b.icon + ".png" }, style: { width: 18, height: 18, marginHorizontal: 2 } }))) : null),
@@ -804,7 +949,7 @@ swap('    class EditProfile extends React.Component {', `    // The You page: ev
                 button("Avatar & Banner", "settings", "profile", { flex: 1 }, "avatar-settings")))),
           h(RN.View, { style: { flexDirection: "row", marginHorizontal: -3, marginBottom: SPACE.lg } }, tile("QuestsIcon", "Quests", () => deepLink("/quest-home"), "quests"), tile("ShopIcon", "Shop", () => deepLink("/shop"), "shop"), tile("NitroWheelIcon", "Nitro", () => deepLink("/store"), "nitro"), tile("SettingsIcon", "Settings", () => send("settings"), "settings")),
           h(RN.View, { style: { flexDirection: "row", padding: 4, borderRadius: RAD.round, backgroundColor: c.surface, marginBottom: SPACE.lg } }, ...seg),
-          ...(this.state.tab === "main" ? main : activity));
+          ...({ main, board, activity, wishlist }[this.state.tab] || main));
       }
     }
     class EditProfile extends React.Component {`);
@@ -812,11 +957,11 @@ fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'index.js'), code);
 fs.copyFileSync(path.join(base, 'LICENSE'), path.join(out, 'LICENSE'));
 fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({
-  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.35',
+  name: 'Discord: Reimagined (0.2 Preview)', version: '0.2.0-alpha.36',
   description: '0.2 features with acknowledged route presentation, modal fallback and preserved original navigation. Device verification pending.',
   authors: [{ name: 'expensiverest' }], main: 'index.js', hash: digest(code), distra: { spec: 1 }
 }, null, 2) + '\n');
-fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.35
+fs.writeFileSync(path.join(out, 'README.md'), `# Discord: Reimagined 0.2.0-alpha.36
 
 Opt-in repair of the withdrawn 0.2.0-alpha.1. Disable the stable Reimagined plugin and all other navigation plugins before enabling this one.
 
@@ -854,7 +999,7 @@ When Reimagined hands off to a Discord screen (a forum, Settings under the fallb
 
 ## Native skin (beta)
 
-Appearance > Reimagined inside native screens (beta) redesigns Discord's own Messages, Notifications and server rail in place: DM rows become taller floating cards with larger avatars and an accent edge when unread (the cell height is enlarged through Discord's own getMessagesItemChannelSizes so the list stays measured correctly), notifications become cards with Reimagined section headers, and the server rail becomes a floating panel with pill separators. It also replaces the You tab with a Reimagined You page: banner, presence ring, custom status and account switcher, badges, Edit Profile, Quests/Shop/Nitro/Settings, Orbs, member since, connections, friends, note and current activity, plus a button that shows Discord's own You page in place for activity history and wishlist (the YouBar and native navigation stay). Appearance > Hide Quests dock above the YouBar (on by default) removes the floating Quests dock; it needs an app restart to take effect and falls back to the original screen on any error. Preferences > Scan whole app (tour) visits the sibling screens of the screen you are on (names that look parameter-dependent are skipped, and a route that crashed is remembered and skipped next time), records a component census, then returns; copy the settings blueprint afterwards. Appearance > Restyle Discord settings (beta) restyles Discord's own settings lists in place (a fade-and-rise entrance; Discord's own card styling is left untouched) by patching the design-system TableRowGroup. It is off by default, needs no tweak, and switches itself off if a restyled list fails to render. The settings search bar (the design hub's SearchField) is wrapped in a rounded frame with an accent hairline (unclipped, so the focus ring stays whole). Appearance > Roomier settings rows (beta) restyles each TableRow (taller, translucent icon tiles, accent-tinted selected radio rows); the group skin adds a rounded hairline-bordered card with small-caps section titles. Appearance > Record settings blueprint, then Copy settings blueprint, captures a text-free structural sample (component names, prop keys, numeric styles) of the rows and groups on each screen you visit so the skin can be designed from real data. Check the compatibility report for NativeSkinTableRowGroup and NativeSkinTableRow.
+Appearance > Reimagined inside native screens (beta) redesigns Discord's own Messages, Notifications and server navigation in place. Servers become a horizontally scrolling strip across the top (Home/DMs, guild icons with selected and unread indicators and mention badges, folders that expand inline, Add a Server; tap uses Discord's own guild navigation, long press opens Discord's guild sheet; Appearance > Servers as a top strip turns it off and restores the rail). Messages rows are laid out from scratch inside Discord's own row: squircle avatar with presence, bold name with time, a one-line preview (last message, attachment, activity or custom status) and an unread or mention pill, on rounded floating cards. Appearance > Hide scroll bars (on by default) removes scroll indicators everywhere. The You page embeds Discord's own profile pieces (trial offer, upsells, Orbs widget, current activity, About Me, connections, friends, note) with Main, Board, Activity and Wishlist tabs, falling back to Reimagined cards if a piece is unavailable. Previously: DM rows become taller floating cards with larger avatars and an accent edge when unread (the cell height is enlarged through Discord's own getMessagesItemChannelSizes so the list stays measured correctly), notifications become cards with Reimagined section headers, and the server rail becomes a floating panel with pill separators. It also replaces the You tab with a Reimagined You page: banner, presence ring, custom status and account switcher, badges, Edit Profile, Quests/Shop/Nitro/Settings, Orbs, member since, connections, friends, note and current activity, plus a button that shows Discord's own You page in place for activity history and wishlist (the YouBar and native navigation stay). Appearance > Hide Quests dock above the YouBar (on by default) removes the floating Quests dock; it needs an app restart to take effect and falls back to the original screen on any error. Preferences > Scan whole app (tour) visits the sibling screens of the screen you are on (names that look parameter-dependent are skipped, and a route that crashed is remembered and skipped next time), records a component census, then returns; copy the settings blueprint afterwards. Appearance > Restyle Discord settings (beta) restyles Discord's own settings lists in place (a fade-and-rise entrance; Discord's own card styling is left untouched) by patching the design-system TableRowGroup. It is off by default, needs no tweak, and switches itself off if a restyled list fails to render. The settings search bar (the design hub's SearchField) is wrapped in a rounded frame with an accent hairline (unclipped, so the focus ring stays whole). Appearance > Roomier settings rows (beta) restyles each TableRow (taller, translucent icon tiles, accent-tinted selected radio rows); the group skin adds a rounded hairline-bordered card with small-caps section titles. Appearance > Record settings blueprint, then Copy settings blueprint, captures a text-free structural sample (component names, prop keys, numeric styles) of the rows and groups on each screen you visit so the skin can be designed from real data. Check the compatibility report for NativeSkinTableRowGroup and NativeSkinTableRow.
 
 ## Validation
 
@@ -862,4 +1007,4 @@ Presenter tests and synthetic plugin lifecycle integration checks run in the Rei
 
 The installer SHA-256 covers the exact source bytes. Runtime has no remote code loader. GPL-3.0-only.
 `);
-console.log(JSON.stringify({ version: '0.2.0-alpha.35', sourceSHA256: digest(code), output: out }));
+console.log(JSON.stringify({ version: '0.2.0-alpha.36', sourceSHA256: digest(code), output: out }));
