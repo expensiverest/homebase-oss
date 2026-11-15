@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.40 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.41 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.40", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.41", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, hideQuestDock: true, hideScrollBars: true, serverStrip: true, stripPosition: "top", blueprint: false, accounts: {} };
@@ -1479,6 +1479,16 @@
     });
     hookExport("NativeForYouList", NC + "ForYouItems.tsx", ["ForYouItems"], output => mapTree(output, n => typeof n.props?.renderItem === "function" && "data" in n.props, n => React.cloneElement(n, { renderItem: cardRenderItem(n.props.renderItem) })));
     hookExport("ServerStripHost", "components_native/MainChannels.tsx", ["default"], output => stripLayout(output, 0));
+    // Discord sizes the channel list (banner width and height, the collapsing sticky header, unread bars) as drawer width minus its own guild rail.
+    // The rail is gone, so the list reports the width the pane really has: the full drawer under a top strip or above the YouBar, minus the strip beside it.
+    let railWidth = null;
+    patchFn("ChannelListWidth", "modules/channel_list_v2/native/useChannelListWidth.tsx", "default", (_args, out) => {
+      if (!cfg("nativeScreens") || !cfg("serverStrip") || typeof out !== "number") return out;
+      if (railWidth == null) railWidth = (r => typeof r === "number" ? r : 72)(safe(() => api.metro.findByProps("DM_WIDTH")?.DM_WIDTH, null));
+      const pos = stripPos(), next = out + railWidth - (pos === "left" || pos === "right" ? STRIP_W : 0);
+      health.hooks.ChannelListWidth = pos + " " + Math.round(out) + "->" + Math.round(next);
+      return next;
+    });
     // Channel screens draw their own rounded, bordered frame (StandaloneChannelScreen, ChannelScreenAnimatedFrame, the empty panel); it follows the strip position too.
     const screenCorners = label => output => { if (!cfg("serverStrip")) return output; const stat = { frames: 0, rounded: 0 }, out = cornerWalk(output, stripPos(), stat); health.hooks.ScreenCorners = label + " " + stripPos() + " frames=" + stat.frames + " rounded=" + stat.rounded; return out; };
     for (const [label, file] of [["standalone", "modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx"], ["animated", "modules/main_tabs_v2/native/panels/ChannelScreenAnimatedFrame.tsx"], ["empty", "modules/main_tabs_v2/native/panels/MainTabsEmptyChatPanel.tsx"]]) hookExport("ScreenCorners:" + label, file, ["default"], screenCorners(label));
