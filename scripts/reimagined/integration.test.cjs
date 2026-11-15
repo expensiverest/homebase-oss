@@ -21,6 +21,7 @@ function fixture(options = {}) {
   const RN = Object.fromEntries(['View','Text','Pressable','TouchableOpacity','ScrollView','SafeAreaView','TextInput','Switch','Image','Modal','KeyboardAvoidingView','FlatList'].map(n => [n,n]));
   RN.Dimensions = { get: () => ({ width: 390, height: 844 }), addEventListener: () => ({ remove() {} }) };
   RN.Platform = { OS: 'ios' };
+  RN.StyleSheet = { flatten: st => Array.isArray(st) ? Object.assign({}, ...st.map(RN.StyleSheet.flatten)) : st || {} };
   if (options.noModal) delete RN.Modal;
   const original = element('OriginalYouBar', { settingsAccess: true });
   const target = { default: { type: () => original } };
@@ -85,7 +86,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.37');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.38');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -281,8 +282,9 @@ test('alpha.36: servers move to a top strip, scroll bars are hidden, DM rows get
   instance.state.tab = 'board'; assert.ok(find(instance.render(), n => n.type === NativeBoard), 'native board tab');
   await f.stop();
 });
-test('alpha.37: strip positions, native You actions, chat and server screens redesigned in place', async () => {
-  const pane = { type: 'View', props: { nativeID: 'messages-parent-view', style: { position: 'absolute', left: 72 } } };
+const RN_bg = el => [].concat(el.props.style).reduce((a, st) => st && st.backgroundColor !== undefined ? st.backgroundColor : a, undefined);
+test('alpha.38: strip positions, native You actions, chat and server screens redesigned in place', async () => {
+  const pane = { type: 'View', props: { nativeID: 'messages-parent-view', style: { position: 'absolute', left: 72, borderTopLeftRadius: 24 } } };
   const HomePanelContent = () => ({ type: 'Rail', props: {} });
   const panelFn = () => ({ type: 'View', props: { children: [{ type: HomePanelContent, props: {} }, pane] } });
   const calls = [];
@@ -295,28 +297,34 @@ test('alpha.37: strip positions, native You actions, chat and server screens red
     'modules/collectibles/CollectiblesActionCreators.tsx': { openCollectiblesShopMobile: () => calls.push(['shop']) },
     'modules/quests/native/QuestUtils.native.tsx': { openQuestHome: o => calls.push(['quests', typeof o]) },
     'modules/chat/native/ChatView.tsx': { default: () => ({ type: 'NativeChat', props: { style: { flex: 1 } } }) },
-    'modules/chat_input/native/FloatingChatInputContainer.tsx': { default: () => ({ type: 'View', props: { style: { position: 'absolute' } } }) },
-    'modules/channel_list_v2/native/renderRedesignChannelListItem.tsx': { renderChannelListItem: x => x }
+    'modules/chat_input/native/ChatInput.tsx': { default: () => ({ type: 'View', props: { children: { type: 'View', props: { collapsable: false, onStartShouldSetResponder: () => true, onResponderRelease: () => {}, style: { borderRadius: 24 }, children: { type: 'View', props: { style: { flexDirection: 'row', paddingHorizontal: 8 }, children: [
+      { type: 'Actions', props: { onPressAction: 1, canUpload: true } }, { type: 'View', props: { style: { flex: 1 }, children: 'field' } }, { type: 'Right', props: { onPressExpression: 1 } }, { type: 'Send', props: { onSendMessage: 1 } }] } } } } } }) },
+    'modules/channel_list_v2/native/items/TextChannel.tsx': { default: p => ({ type: 'Pressable', props: { style: { height: 40 }, children: [p.selected ? { type: 'View', props: { style: { position: 'absolute', width: 4 } } } : null, { type: 'View', props: { style: { flexDirection: 'row' }, children: 'general' } }] } }) }
   };
   const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} }, screens: true, files });
   const layout = () => { const panel = files['components_native/MainChannels.tsx'].default().props.children, kids = [].concat(panel.type(panel.props).props.children);
     const paneEl = kids.find(k => k?.props?.el), strip = kids[kids.length - 1].props.children, outer = new strip.type(strip.props).render(), body = outer.type(outer.props);
     return { pane: new paneEl.type(paneEl.props).render().props.style, strip: new body.type(body.props).render() }; };
+  const seek = (n, pred) => !n || typeof n !== 'object' ? null : pred(n) ? n : [].concat(n.props?.children ?? []).concat(Array.isArray(n) ? n : []).reduce((a, k) => a || seek(k, pred), null);
   f.api.storage.stripPosition = 'left'; let l = layout();
-  assert.ok(JSON.stringify(l.pane).includes('"left":68')); assert.equal(l.strip.props.style.left, 0); assert.equal(l.strip.props.style.width, 68); assert.equal(l.strip.props.children.props.horizontal, false);
-  f.api.storage.stripPosition = 'right'; l = layout(); assert.ok(JSON.stringify(l.pane).includes('"right":68')); assert.equal(l.strip.props.style.right, 0);
-  f.api.storage.stripPosition = 'bottom'; l = layout(); assert.ok(JSON.stringify(l.pane).includes('"bottom":64')); assert.equal(l.strip.props.style.bottom, 90); assert.equal(l.strip.props.children.props.horizontal, true);
+  assert.ok(JSON.stringify(l.pane).includes('"left":68')); assert.ok(JSON.stringify(l.pane).includes('"borderTopLeftRadius":24,"borderTopRightRadius":0')); assert.equal(l.strip.props.style.left, 0); assert.equal(l.strip.props.style.bottom, 90); assert.ok(l.strip.props.style.borderBottomRightRadius > 0); assert.equal(l.strip.props.style.width, 68); assert.equal(l.strip.props.children.props.horizontal, false);
+  f.api.storage.stripPosition = 'right'; l = layout(); assert.ok(JSON.stringify(l.pane).includes('"right":68')); assert.ok(JSON.stringify(l.pane).includes('"borderTopLeftRadius":0,"borderTopRightRadius":24')); assert.equal(l.strip.props.style.right, 0); assert.equal(l.strip.props.style.bottom, 90);
+  const marker = seek(l.strip, n => n.props?.pointerEvents === 'none' && n.props.style?.height === 24); assert.equal(marker.props.style.right, -12); assert.equal(marker.props.style.borderTopLeftRadius, 4); assert.equal(marker.props.style.borderTopRightRadius, undefined);
+  f.api.storage.stripPosition = 'bottom'; l = layout(); assert.ok(JSON.stringify(l.pane).includes('"bottom":78')); assert.ok(JSON.stringify(l.pane).includes('"borderTopLeftRadius":0,"borderTopRightRadius":0')); assert.equal(l.strip.props.style.bottom, 104); assert.ok(l.strip.props.style.left > 0); assert.equal(l.strip.props.style.left, l.strip.props.style.right); assert.ok(l.strip.props.style.borderRadius > 0); assert.equal(l.strip.props.children.props.horizontal, true);
   assert.equal(f.plugin.diagnostics().hooks.ServerStripPosition, 'bottom');
+  f.api.storage.stripPosition = 'top'; l = layout(); assert.ok(JSON.stringify(l.pane).includes('"borderTopLeftRadius":24,"borderTopRightRadius":24'));
   f.focused({ name: 'you' }); const you = files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default(), host = new you.type(you.props);
   const find = (n, pred) => !n || typeof n !== 'object' ? null : pred(n) ? n : [].concat(n.props?.children ?? []).concat(Array.isArray(n) ? n : []).reduce((a, k) => a || find(k, pred), null);
   const page = find(host.render(), n => n.type?.name === 'YouPage'), tree = new page.type(page.props).render();
   for (const id of ['edit-profile', 'avatar-settings', 'you-nitro', 'you-shop', 'you-quests']) find(tree, n => n.props?.id === id).props.run();
   assert.deepEqual(calls, [['settings', 'PROFILE_CUSTOMIZATION'], ['settings', 'PROFILE_CUSTOMIZATION'], ['settings', 'PREMIUM'], ['shop'], ['quests', 'object']]);
   assert.ok(JSON.stringify(files['modules/chat/native/ChatView.tsx'].default().props.style).includes('backgroundColor'));
-  assert.ok(JSON.stringify(files['modules/chat_input/native/FloatingChatInputContainer.tsx'].default().props.style).includes('"borderRadius":26'));
-  const row = files['modules/channel_list_v2/native/renderRedesignChannelListItem.tsx'].renderChannelListItem({ type: 'ChannelRow', props: { channel: { id: '5' }, selected: true } });
-  assert.equal(row.type, 'View'); assert.equal(row.props.children.type, 'ChannelRow');
-  const category = { type: 'Category', props: { channel: { id: '6' } } }; assert.equal(files['modules/channel_list_v2/native/renderRedesignChannelListItem.tsx'].renderChannelListItem(category), category);
+  const box = files['modules/chat_input/native/ChatInput.tsx'].default().props.children, tiers = box.props.children.props.children;
+  assert.ok(JSON.stringify(box.props.style).includes('"borderRadius":22')); assert.equal(tiers[0].props.children.props.children, 'field');
+  assert.deepEqual(tiers[1].props.children.map(k => k?.type), ['Actions', 'View', 'Right', 'Send']); assert.equal(f.plugin.diagnostics().hooks.NativeComposerLayout, 'two-tier');
+  const row = files['modules/channel_list_v2/native/items/TextChannel.tsx'].default({ channel: { id: '5' }, selected: true }), plain = files['modules/channel_list_v2/native/items/TextChannel.tsx'].default({ channel: { id: '6' }, selected: false });
+  assert.equal(row.type, 'Pressable'); assert.ok(JSON.stringify(row.props.style).includes('"borderRadius":18'));
+  assert.notEqual(RN_bg(row), RN_bg(plain));
   await f.stop();
 });
 test('app tour visits declared routes, skips risky ones and returns', async () => {
