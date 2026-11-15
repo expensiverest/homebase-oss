@@ -1,11 +1,11 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.39 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.40 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.39", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.40", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
     showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, hideQuestDock: true, hideScrollBars: true, serverStrip: true, stripPosition: "top", blueprint: false, accounts: {} };
@@ -828,8 +828,8 @@
       // Selection marker: a short bar under the icon in a row, a vertical pill on the outer edge in a column.
       marker(on, hot, tint) {
         const c = colors(), pos = this.props.pos, size = on ? 18 : hot ? 6 : 0;
-        // Columns use a half pill flush with the outer screen edge, its round side facing the icon: mirrored for a right-hand strip.
-        if (pos === "left" || pos === "right") return h(RN.View, { pointerEvents: "none", style: { position: "absolute", [pos]: -12, top: 22 - (on ? 12 : hot ? 4 : 0), width: 4, height: on ? 24 : hot ? 8 : 0, [pos === "left" ? "borderTopRightRadius" : "borderTopLeftRadius"]: 4, [pos === "left" ? "borderBottomRightRadius" : "borderBottomLeftRadius"]: 4, backgroundColor: tint || (on ? c.accent : c.ink) } });
+        // Columns use a half pill on the left of the icon with its round side facing it: the screen edge for a left strip, the pane edge for a right strip.
+        if (pos === "left" || pos === "right") return h(RN.View, { pointerEvents: "none", style: { position: "absolute", left: -12, top: 22 - (on ? 12 : hot ? 4 : 0), width: 4, height: on ? 24 : hot ? 8 : 0, [pos === "left" ? "borderTopRightRadius" : "borderTopLeftRadius"]: 4, [pos === "left" ? "borderBottomRightRadius" : "borderBottomLeftRadius"]: 4, ...(pos === "right" ? { borderTopRightRadius: 4, borderBottomRightRadius: 4 } : null), backgroundColor: tint || (on ? c.accent : c.ink) } });
         return h(RN.View, { style: { marginTop: 4, height: 3, width: size, borderRadius: 2, backgroundColor: tint || (on ? c.accent : c.ink) } });
       }
       gap() { return this.props.pos === "left" || this.props.pos === "right" ? { marginVertical: 5 } : { marginHorizontal: 5 }; }
@@ -1269,14 +1269,26 @@
   function isFrame(n) {
     if (n.props?.pointerEvents !== "none" || n.props.children != null) return false;
     const st = safe(() => RN.StyleSheet.flatten(n.props.style), null) || {};
-    return st.position === "absolute" && (st.borderTopLeftRadius > 0 || st.borderTopRightRadius > 0) && (st.borderTopWidth > 0 || st.borderLeftWidth > 0);
+    return st.position === "absolute" && (st.borderTopLeftRadius > 0 || st.borderTopRightRadius > 0 || st.borderRadius > 0) && (st.borderTopWidth > 0 || st.borderLeftWidth > 0 || st.borderWidth > 0);
+  }
+  const topRadius = st => st.borderTopLeftRadius || st.borderTopRightRadius || st.borderRadius || 0;
+  // Discord also rounds wrappers inside the pane (its side style clips the screens); every rounded wrapper and outline Discord renders there is restyled, not just the first.
+  function cornerWalk(node, pos, stat, d = 0) {
+    if (d > 6 || node == null || typeof node !== "object") return node;
+    if (Array.isArray(node)) { let changed = false; const next = node.map(k => { const m = cornerWalk(k, pos, stat, d + 1); if (m !== k) changed = true; return m; }); return changed ? next : node; }
+    if (!isEl(node)) return node;
+    let n = node;
+    if (isFrame(n)) { stat.frames++; n = frameRestyle(n, pos, false); }
+    else if (n.props?.style != null) { const st = safe(() => RN.StyleSheet.flatten(n.props.style), null) || {}, r = st.borderTopLeftRadius || st.borderTopRightRadius || 0; if (r > 0) { stat.rounded++; n = addStyle(n, { borderTopLeftRadius: pos === "left" || pos === "top" ? r : 0, borderTopRightRadius: pos === "right" || pos === "top" ? r : 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }); } }
+    const kids = n.props?.children, next = kids == null ? kids : cornerWalk(kids, pos, stat, d + 1);
+    return next === kids ? n : React.cloneElement(n, null, ...(Array.isArray(next) ? next : [next]));
   }
   function frameRestyle(n, pos, sibling) {
-    const st = safe(() => RN.StyleSheet.flatten(n.props.style), null) || {}, r = st.borderTopLeftRadius || st.borderTopRightRadius || RAD.sheet, w = st.borderTopWidth || st.borderLeftWidth || hairline();
+    const st = safe(() => RN.StyleSheet.flatten(n.props.style), null) || {}, r = topRadius(st) || RAD.sheet, w = st.borderTopWidth || st.borderLeftWidth || st.borderWidth || hairline();
     health.hooks.PaneFrame = pos + (sibling ? " sibling" : " inner");
     if (pos === "bottom") return addStyle(n, { borderWidth: 0, borderTopWidth: 0, borderLeftWidth: 0, borderRightWidth: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0, opacity: 0 });
     const offs = sibling ? (pos === "left" ? { left: STRIP_W, right: 0 } : pos === "right" ? { left: 0, right: STRIP_W } : { left: 0, right: 0, top: STRIP_H }) : {};
-    return addStyle(n, { ...offs, borderTopWidth: w, borderLeftWidth: pos === "right" ? 0 : w, borderRightWidth: pos === "left" ? 0 : w, borderTopLeftRadius: pos === "right" ? 0 : r, borderTopRightRadius: pos === "left" ? 0 : r });
+    return addStyle(n, { ...offs, borderWidth: 0, borderBottomWidth: 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderTopWidth: w, borderLeftWidth: pos === "right" ? 0 : w, borderRightWidth: pos === "left" ? 0 : w, borderTopLeftRadius: pos === "right" ? 0 : r, borderTopRightRadius: pos === "left" ? 0 : r });
   }
   let StripPane = null, StripGuard = null;
   function stripClasses() {
@@ -1293,8 +1305,8 @@
       const pos = stripPos();
       if (this.props.frame) return frameRestyle(el, pos, true);
       const flat = safe(() => RN.StyleSheet.flatten(el.props.style), null) || {}, r = flat.borderTopLeftRadius || flat.borderTopRightRadius || flat.borderRadius || RAD.sheet;
-      health.hooks.PaneCorners = pos + " r=" + r;
-      const inner = mapTree(el.props.children, isFrame, n => frameRestyle(n, pos, false));
+      const stat = { frames: 0, rounded: 0 }, inner = cornerWalk(el.props.children, pos, stat);
+      health.hooks.PaneCorners = pos + " r=" + r + " frames=" + stat.frames + " rounded=" + stat.rounded;
       const body = inner === el.props.children ? el : React.cloneElement(el, null, ...(Array.isArray(inner) ? inner : [inner]));
       return addStyle(body, { ...paneOffsets(pos), borderRadius: 0, borderTopLeftRadius: pos === "left" || pos === "top" ? r : 0, borderTopRightRadius: pos === "right" || pos === "top" ? r : 0, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, overflow: "hidden" });
     }
@@ -1467,6 +1479,9 @@
     });
     hookExport("NativeForYouList", NC + "ForYouItems.tsx", ["ForYouItems"], output => mapTree(output, n => typeof n.props?.renderItem === "function" && "data" in n.props, n => React.cloneElement(n, { renderItem: cardRenderItem(n.props.renderItem) })));
     hookExport("ServerStripHost", "components_native/MainChannels.tsx", ["default"], output => stripLayout(output, 0));
+    // Channel screens draw their own rounded, bordered frame (StandaloneChannelScreen, ChannelScreenAnimatedFrame, the empty panel); it follows the strip position too.
+    const screenCorners = label => output => { if (!cfg("serverStrip")) return output; const stat = { frames: 0, rounded: 0 }, out = cornerWalk(output, stripPos(), stat); health.hooks.ScreenCorners = label + " " + stripPos() + " frames=" + stat.frames + " rounded=" + stat.rounded; return out; };
+    for (const [label, file] of [["standalone", "modules/main_tabs_v2/native/channel/StandaloneChannelScreen.tsx"], ["animated", "modules/main_tabs_v2/native/panels/ChannelScreenAnimatedFrame.tsx"], ["empty", "modules/main_tabs_v2/native/panels/MainTabsEmptyChatPanel.tsx"]]) hookExport("ScreenCorners:" + label, file, ["default"], screenCorners(label));
     // Conversations (DMs and server channels): Discord's message list is a native view, so it is redesigned around its edges in place:
     // the chat surface takes the Reimagined canvas, the composer becomes a floating rounded field and the header title sits in a soft pill.
     const CH = "modules/main_tabs_v2/native/channel/header/", CI = "modules/chat_input/native/";
