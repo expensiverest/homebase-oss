@@ -86,7 +86,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.39');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.40');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -283,8 +283,10 @@ test('alpha.36: servers move to a top strip, scroll bars are hidden, DM rows get
   await f.stop();
 });
 const RN_bg = el => [].concat(el.props.style).reduce((a, st) => st && st.backgroundColor !== undefined ? st.backgroundColor : a, undefined);
-test('alpha.39: strip positions, native You actions, chat and server screens redesigned in place', async () => {
-  const pane = { type: 'View', props: { nativeID: 'messages-parent-view', style: { position: 'absolute', left: 72, borderTopLeftRadius: 24 } } };
+test('alpha.40: strip positions, native You actions, chat and server screens redesigned in place', async () => {
+  const pane = { type: 'View', props: { nativeID: 'messages-parent-view', style: { position: 'absolute', left: 72, borderTopLeftRadius: 24 }, children: { type: 'Fragment', props: { children: [
+    { type: 'View', props: { style: [{ flex: 1 }, { borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' }], children: { type: 'Screens', props: {} } } },
+    { type: 'View', props: { pointerEvents: 'none', style: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderWidth: 1, borderRadius: 24 } } }] } } } };
   const frame = { type: 'View', props: { pointerEvents: 'none', style: { position: 'absolute', top: 0, bottom: 0, left: 72, right: 0, borderLeftWidth: 1, borderTopWidth: 1, borderTopLeftRadius: 24 } } };
   const HomePanelContent = () => ({ type: 'Rail', props: {} });
   const panelFn = () => ({ type: 'View', props: { children: [{ type: HomePanelContent, props: {} }, pane, frame] } });
@@ -306,14 +308,17 @@ test('alpha.39: strip positions, native You actions, chat and server screens red
   const layout = () => { const panel = files['components_native/MainChannels.tsx'].default().props.children, kids = [].concat(panel.type(panel.props).props.children);
     const paneEl = kids.find(k => k?.props?.el), strip = kids[kids.length - 1].props.children, outer = new strip.type(strip.props).render(), body = outer.type(outer.props);
     const frameEl = kids.find(k => k?.props?.frame);
-    return { pane: new paneEl.type(paneEl.props).render().props.style, frame: Object.assign({}, ...[].concat(new frameEl.type(frameEl.props).render().props.style)), strip: new body.type(body.props).render() }; };
+    const paneOut = new paneEl.type(paneEl.props).render(), flat = st => Object.assign({}, ...[].concat(st).flat(3).filter(Boolean)), inner = paneOut.props.children.props.children;
+    return { inner: flat(inner[0].props.style), innerFrame: flat(inner[1].props.style), pane: paneOut.props.style, frame: Object.assign({}, ...[].concat(new frameEl.type(frameEl.props).render().props.style)), strip: new body.type(body.props).render() }; };
   const seek = (n, pred) => !n || typeof n !== 'object' ? null : pred(n) ? n : [].concat(n.props?.children ?? []).concat(Array.isArray(n) ? n : []).reduce((a, k) => a || seek(k, pred), null);
   f.api.storage.stripPosition = 'left'; let l = layout();
   assert.ok(JSON.stringify(l.pane).includes('"left":68')); assert.ok(JSON.stringify(l.pane).includes('"borderTopLeftRadius":24,"borderTopRightRadius":0')); assert.equal(l.strip.props.style.left, 0); assert.equal(l.strip.props.style.bottom, 90); assert.ok(l.strip.props.style.borderBottomRightRadius > 0); assert.equal(l.strip.props.style.width, 68); assert.equal(l.strip.props.children.props.horizontal, false);
   f.api.storage.stripPosition = 'right'; l = layout(); assert.ok(JSON.stringify(l.pane).includes('"right":68')); assert.ok(JSON.stringify(l.pane).includes('"borderTopLeftRadius":0,"borderTopRightRadius":24')); assert.equal(l.strip.props.style.right, 0); assert.equal(l.strip.props.style.bottom, 90);
   assert.deepEqual([l.frame.left, l.frame.right, l.frame.borderTopLeftRadius, l.frame.borderTopRightRadius, l.frame.borderLeftWidth, l.frame.borderRightWidth], [0, 68, 0, 24, 0, 1]);
-  const marker = seek(l.strip, n => n.props?.pointerEvents === 'none' && n.props.style?.height === 24); assert.equal(marker.props.style.right, -12); assert.equal(marker.props.style.borderTopLeftRadius, 4); assert.equal(marker.props.style.borderTopRightRadius, undefined);
-  f.api.storage.stripPosition = 'bottom'; l = layout(); assert.ok(JSON.stringify(l.pane).includes('"bottom":78')); assert.ok(JSON.stringify(l.pane).includes('"borderTopLeftRadius":0,"borderTopRightRadius":0')); assert.equal(l.strip.props.style.bottom, 104); assert.ok(l.strip.props.style.left > 0); assert.equal(l.strip.props.style.left, l.strip.props.style.right); assert.ok(l.strip.props.style.borderRadius > 0); assert.equal(l.frame.borderTopLeftRadius, 0); assert.equal(l.frame.opacity, 0); assert.equal(l.strip.props.children.props.horizontal, true);
+  const marker = seek(l.strip, n => n.props?.pointerEvents === 'none' && n.props.style?.height === 24); assert.equal(marker.props.style.left, -12); assert.equal(marker.props.style.right, undefined);
+  assert.deepEqual([l.inner.borderTopLeftRadius, l.inner.borderTopRightRadius], [0, 24]); assert.deepEqual([l.innerFrame.borderTopLeftRadius, l.innerFrame.borderTopRightRadius, l.innerFrame.borderLeftWidth, l.innerFrame.borderRightWidth, l.innerFrame.borderTopWidth], [0, 24, 0, 1, 1]);
+  f.api.storage.stripPosition = 'bottom'; l = layout(); assert.ok(JSON.stringify(l.pane).includes('"bottom":78')); assert.ok(JSON.stringify(l.pane).includes('"borderTopLeftRadius":0,"borderTopRightRadius":0')); assert.equal(l.strip.props.style.bottom, 104); assert.ok(l.strip.props.style.left > 0); assert.equal(l.strip.props.style.left, l.strip.props.style.right); assert.ok(l.strip.props.style.borderRadius > 0); assert.equal(l.frame.borderTopLeftRadius, 0); assert.equal(l.frame.opacity, 0); assert.deepEqual([l.inner.borderTopLeftRadius, l.inner.borderTopRightRadius, l.innerFrame.opacity], [0, 0, 0]);
+  assert.match(f.plugin.diagnostics().hooks.PaneCorners, /frames=1 rounded=1/); assert.equal(l.strip.props.children.props.horizontal, true);
   assert.equal(f.plugin.diagnostics().hooks.ServerStripPosition, 'bottom');
   f.api.storage.stripPosition = 'top'; l = layout(); assert.ok(JSON.stringify(l.pane).includes('"borderTopLeftRadius":24,"borderTopRightRadius":24'));
   f.focused({ name: 'you' }); const you = files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default(), host = new you.type(you.props);
