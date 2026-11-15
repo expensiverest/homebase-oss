@@ -1,14 +1,14 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.34 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.35 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.34", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.35", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
-    showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, blueprint: false, accounts: {} };
+    showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, hideQuestDock: true, blueprint: false, accounts: {} };
   const PALETTES = {
     blurple: { name: "Blurple", bg: "#17181f", surface: "#20222b", elevated: "#2b2d38", line: "#3a3d4b", ink: "#f2f3f8", muted: "#b0b4c4", faint: "#9296a9", accent: "#b4bcff", accentInk: "#1d2160", accentSoft: "#30346a", danger: "#f5a9b3", clear: "transparent", shade: "rgba(8,9,14,0.62)" },
     midnight: { name: "Midnight", bg: "#141918", surface: "#1c2320", elevated: "#27302b", line: "#39443d", ink: "#f0f2e9", muted: "#a8b5aa", faint: "#8a9b8e", accent: "#bdd7b7", accentInk: "#203323", accentSoft: "#2d3b2e", danger: "#f3b9ad", clear: "transparent", shade: "rgba(10,15,12,0.6)" },
@@ -538,7 +538,7 @@
     function Toggle(p) { return h(RN.View, { style: { flexDirection: "row", alignItems: "center", paddingVertical: SPACE.md, borderBottomWidth: 1, borderBottomColor: colors().line } }, t(p.label, { flex: 1, minWidth: 0, paddingRight: SPACE.lg, fontWeight: "500" }), h(RN.Switch, { testID: "setting-" + p.name, accessibilityLabel: p.label, value: !!cfg(p.name), trackColor: { false: colors().line, true: colors().accent }, thumbColor: colors().surface, onValueChange: value => send("setting", { key: p.name, value: !!value }) })); }
     function Preferences() { const c = colors(); return h(Page, { title: "Appearance", back: true },
       h(RN.View, { style: { flexDirection: "row", justifyContent: "space-between" } }, ...Object.entries(PALETTES).map(([id, p]) => h(Control, { key: id, id: "palette-" + id, label: p.name, action: "setting", value: { key: "palette", value: id }, selected: cfg("palette") === id, style: { flex: 1, marginRight: id === "slate" ? 0 : SPACE.sm, padding: SPACE.md, borderRadius: RAD.medium, borderWidth: cfg("palette") === id ? 2 : 1, borderColor: cfg("palette") === id ? c.accent : c.line, backgroundColor: p.bg } }, h(RN.View, { style: { flexDirection: "row", marginBottom: SPACE.sm } }, ...[p.surface, p.accent, p.ink].map((color, i) => h(RN.View, { key: i, style: { width: 16, height: 16, borderRadius: 8, marginRight: 3, backgroundColor: color } }))), t(p.name, { color: p.ink, fontSize: TYPE.small, fontWeight: "600" }, { numberOfLines: 1 })))),
-      h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }), h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }), h(Toggle, { name: "nativeScreens", label: "Restyle native screens (beta)" }),
+      h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }), h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }), h(Toggle, { name: "nativeScreens", label: "Restyle native screens (beta)" }), h(Toggle, { name: "hideQuestDock", label: "Hide Quests dock above the YouBar" }),
       button(cfg("density") === "compact" ? "Comfortable" : "Compact", "setting", { key: "density", value: cfg("density") === "compact" ? "comfortable" : "compact" }, { marginTop: SPACE.lg }, "density"),
       h(Section, { title: "Diagnostics" }), h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"), h(Toggle, { name: "blueprint", label: "Record settings blueprint" }), button("Copy settings blueprint", "blueprint", null, { marginTop: SPACE.sm }, "copy-blueprint"), button("Scan whole app (tour)", "tour", null, { marginTop: SPACE.sm }, "scan-app"), button("Copy screen tree", "tree", null, { marginTop: SPACE.sm }, "copy-tree"),
       t(VERSION, { fontSize: TYPE.small, color: c.muted, marginTop: SPACE.xl }), health.issues.length ? t(health.issues.join("\n"), { color: c.danger, marginTop: SPACE.md, fontSize: TYPE.small }) : null); }
@@ -1168,6 +1168,79 @@
       return h(NativeHost, { route: { name: route }, forceTab: SCREEN_TAB[route] || route, navigation: safe(() => root(), null), overlay: pushed, __out: output, __reimaginedOrig: passthrough });
     });
     for (const [label, file, names, kind] of PIECE_TARGETS) hookExport(label, file, names, (output, args) => pieceWrap(kind, output, args));
+    patchRedesign();
+  }
+  // In-place redesign of Discord's own lists. Fixed-size lists (DMs, the server rail) are only restyled inside the geometry Discord measures:
+  // the DM cell height comes from getMessagesItemChannelSizes, so it is enlarged there and the native row is restyled to exactly fill it.
+  const rowHeights = new Set(), cardItems = new WeakMap();
+  function patchFn(label, file, name, after) {
+    const raw = safe(() => api.metro.findByFilePath(file), null);
+    if (!raw || typeof raw[name] !== "function") { health.hooks[label] = raw ? "no export" : "not found"; return; }
+    const seen = targets.get(raw) || new Set();
+    if (seen.has("fn:" + name)) return;
+    try { api.patcher.after(name, raw, (args, output) => { if (!live) return output; try { return after(args, output); } catch (_) { return output; } }); seen.add("fn:" + name); targets.set(raw, seen); if (health.hooks[label] !== "applied") health.hooks[label] = "patched"; }
+    catch (_) { issue("hook-failed:" + label); }
+  }
+  function mapTree(node, pred, fn, depth = 0) {
+    if (depth > 12 || node == null || typeof node !== "object") return node;
+    if (Array.isArray(node)) { let changed = false; const next = node.map(n => { const m = mapTree(n, pred, fn, depth + 1); if (m !== n) changed = true; return m; }); return changed ? next : node; }
+    if (!isEl(node)) return node;
+    if (pred(node)) return fn(node);
+    const kids = node.props?.children, next = kids == null ? kids : mapTree(kids, pred, fn, depth + 1);
+    return next === kids ? node : React.cloneElement(node, null, ...(Array.isArray(next) ? next : [next]));
+  }
+  const addStyle = (el, extra) => React.cloneElement(el, { style: typeof el.props.style === "function" ? state => [el.props.style(state), extra] : [el.props.style, extra] });
+  const hairline = () => RN.StyleSheet?.hairlineWidth || 1;
+  const ROW_GAP = 12;
+  function cardRenderItem(orig) {
+    if (typeof orig !== "function") return orig;
+    if (cardItems.has(orig)) return cardItems.get(orig);
+    const next = function (info) {
+      const out = orig.apply(this, arguments);
+      if (!live || !cfg("nativeScreens") || !isEl(out)) return out;
+      const c = colors(), p = out.props || {}, inner = isEl(p.children) ? p.children.props || {} : {};
+      if (p.children == null && p.style != null && Object.keys(p).length === 1) return h(RN.View, { style: { height: SPACE.xs } });
+      if (!(inner.item || p.item || p.suggestedFriend)) return out;
+      health.hooks.NativeForYouCards = "applied";
+      return h(RN.View, { style: { marginHorizontal: SPACE.md, marginVertical: 4, borderRadius: RAD.large, backgroundColor: c.surface, borderWidth: hairline(), borderColor: c.line, overflow: "hidden" } }, out);
+    };
+    cardItems.set(orig, next); return next;
+  }
+  function patchRedesign() {
+    const MI = MT + "items/", QH = "modules/quests/native/QuestHooks.native.tsx";
+    patchFn("NativeDmSizes", MI + "MessagesItemChannel.tsx", "getMessagesItemChannelSizes", (_args, out) => {
+      if (!cfg("nativeScreens") || !out || typeof out.height !== "number") return out;
+      const height = Math.round(Math.max(out.height, 40 + (out.padding || 16)) + ROW_GAP);
+      rowHeights.add(height); health.hooks.NativeDmSizes = "applied";
+      return { ...out, avatar: 40, height };
+    });
+    patchFn("NativeDmRow", MI + "channel/MessagesItemChannelBase.tsx", "default", (args, out) => {
+      const p = args?.[0];
+      if (!cfg("nativeScreens") || !isEl(out) || !p || !rowHeights.has(p.height)) return out;
+      const c = colors(), id = p.channel?.id, hot = !!id && unread(id);
+      const card = { flex: 1, marginHorizontal: SPACE.md, marginVertical: ROW_GAP / 2, marginBottom: ROW_GAP / 2, paddingHorizontal: SPACE.md, borderRadius: RAD.large, backgroundColor: hot ? c.elevated : c.surface, borderWidth: hairline(), borderColor: hot ? c.accent : c.line, overflow: "hidden" };
+      let done = false;
+      const pressable = n => !done && typeof n.props?.onPress === "function" && typeof n.props?.onLongPress === "function";
+      const next = mapTree(out, pressable, n => { done = true; return addStyle(n, card); });
+      if (done) health.hooks.NativeDmRow = "applied";
+      return next;
+    });
+    patchFn("NativeDmAvatar", MI + "channel/MessagesItemChannelAvatar.tsx", "default", (_args, out) => {
+      if (!cfg("nativeScreens") || !rowHeights.size || !isEl(out) || !out.props?.user) return out;
+      const S = safe(() => api.metro.findByProps("AvatarSizes")?.AvatarSizes, null);
+      return S && S.LARGE_40 != null && out.props.size === S.REFRESH_MEDIUM_32 ? React.cloneElement(out, { size: S.LARGE_40 }) : out;
+    });
+    hookExport("NativeForYouList", NC + "ForYouItems.tsx", ["ForYouItems"], output => mapTree(output, n => typeof n.props?.renderItem === "function" && "data" in n.props, n => React.cloneElement(n, { renderItem: cardRenderItem(n.props.renderItem) })));
+    // The server rail becomes a floating panel: its own surface, rounded trailing edge and pill separators. Width and item geometry stay Discord's.
+    hookExport("NativeGuildRail", "modules/guilds_bar/native/GuildsBar.tsx", ["default"], output => { const c = colors(); return mapTree(output, n => n.props?.nativeID === "guilds-bar-view", n => addStyle(n, { backgroundColor: c.surface, borderTopRightRadius: RAD.sheet, borderBottomRightRadius: RAD.sheet, borderRightWidth: hairline(), borderColor: c.line, marginVertical: SPACE.sm, paddingTop: SPACE.xs })); });
+    hookExport("NativeGuildSeparator", "modules/guilds_bar/native/GuildsBarSeparator.tsx", ["default"], output => isEl(output) && output.props?.style != null && output.props.children == null ? addStyle(output, { backgroundColor: colors().accentSoft, borderRadius: 2, width: 20, alignSelf: "center" }) : output);
+    // The Quests dock floating above the YouBar: the original hooks still run (hook order is preserved) but report it as not rendered with no height.
+    const noDock = (value) => (_args, out) => cfg("hideQuestDock") ? (health.hooks.QuestDock = "hidden", value) : out;
+    patchFn("QuestDock", QH, "useIsMobileQuestDockRenderedBase", noDock(false));
+    patchFn("QuestDockRendered", QH, "useIsMobileQuestDockRendered", noDock(false));
+    patchFn("QuestDockVisible", QH, "useIsMobileQuestDockVisibleToUser", noDock(false));
+    patchFn("QuestDockHeight", QH, "useMobileQuestDockHeight", noDock(0));
+    for (const [label, file] of [["QuestDockView", "modules/quests/native/QuestDock/QuestDock.tsx"], ["QuestDockNoFill", "modules/quests/native/QuestDock/NoFillQuestDock.tsx"]]) patchFn(label, file, "default", (_args, out) => cfg("hideQuestDock") ? null : out);
   }
   function patchNativeSkin() {
     if (!live) return;
