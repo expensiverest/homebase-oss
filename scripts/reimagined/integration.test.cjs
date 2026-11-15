@@ -85,7 +85,7 @@ function controlInScene(scene, id) {
   visit(scene.render()); return result;
 }
 test('package entry point and exact source SHA-256 match', () => {
-  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.36');
+  assert.equal(manifest.main, 'index.js'); assert.equal(manifest.version, '0.2.0-alpha.37');
   assert.equal(manifest.hash, crypto.createHash('sha256').update(code).digest('hex'));
 });
 test('0.2 message, profile and voice service implementation is preserved', () => {
@@ -267,8 +267,8 @@ test('alpha.36: servers move to a top strip, scroll bars are hidden, DM rows get
   const mid = inner.type(inner.props), left = mid.props.children; assert.notEqual(left.type, LeftPanelContent);
   const panel = left.type(left.props), kids = [].concat(panel.props.children);
   assert.ok(!kids.some(k => k?.type === HomePanelContent), 'rail removed');
-  const movedPane = kids.find(k => k?.props?.nativeID === 'messages-parent-view'); assert.ok(JSON.stringify(movedPane.props.style).includes('"left":0'));
-  const strip = kids[kids.length - 1], body = strip.type(strip.props), stripTree = new body.type(body.props).render();
+  const paneEl = kids.find(k => k?.props?.el?.props?.nativeID === 'messages-parent-view'), movedPane = new paneEl.type(paneEl.props).render(); assert.ok(JSON.stringify(movedPane.props.style).includes('"left":0'));
+  const strip = kids[kids.length - 1].props.children, outer = new strip.type(strip.props).render(), body = outer.type(outer.props), stripTree = new body.type(body.props).render();
   assert.equal(stripTree.props.testID, 'reimagined-server-strip'); assert.equal(stripTree.props.children.props.horizontal, true);
   assert.equal(f.plugin.diagnostics().hooks.ServerStrip, 'applied');
   const sizes = files[MI + 'MessagesItemChannel.tsx'].getMessagesItemChannelSizes();
@@ -279,6 +279,44 @@ test('alpha.36: servers move to a top strip, scroll bars are hidden, DM rows get
   const page = find(host.render(), n => n.type?.name === 'YouPage'), instance = new page.type(page.props);
   assert.ok(find(instance.render(), n => n.type === NativeNote), 'native note embedded');
   instance.state.tab = 'board'; assert.ok(find(instance.render(), n => n.type === NativeBoard), 'native board tab');
+  await f.stop();
+});
+test('alpha.37: strip positions, native You actions, chat and server screens redesigned in place', async () => {
+  const pane = { type: 'View', props: { nativeID: 'messages-parent-view', style: { position: 'absolute', left: 72 } } };
+  const HomePanelContent = () => ({ type: 'Rail', props: {} });
+  const panelFn = () => ({ type: 'View', props: { children: [{ type: HomePanelContent, props: {} }, pane] } });
+  const calls = [];
+  const files = {
+    'components_native/MainChannels.tsx': { default: () => ({ type: 'View', props: { children: { type: panelFn, props: {} } } }) },
+    'modules/main_tabs_v2/native/tabs/guilds/HomePanelContent.tsx': { HomePanelContent },
+    'modules/main_tabs_v2/native/you_bar/hooks/useYouBarTotalHeight.tsx': { useYouBarTotalHeight: () => 90 },
+    'modules/main_tabs_v2/native/tabs/you/YouScreen.tsx': { default: () => ({ type: 'native-out', props: {} }) },
+    'modules/user_settings/core/native/openUserSettings.tsx': { openUserSettings: o => calls.push(['settings', o.screen]), UserSettingsSections: { PROFILE_CUSTOMIZATION: 'PROFILE_CUSTOMIZATION', PREMIUM: 'PREMIUM' } },
+    'modules/collectibles/CollectiblesActionCreators.tsx': { openCollectiblesShopMobile: () => calls.push(['shop']) },
+    'modules/quests/native/QuestUtils.native.tsx': { openQuestHome: o => calls.push(['quests', typeof o]) },
+    'modules/chat/native/ChatView.tsx': { default: () => ({ type: 'NativeChat', props: { style: { flex: 1 } } }) },
+    'modules/chat_input/native/FloatingChatInputContainer.tsx': { default: () => ({ type: 'View', props: { style: { position: 'absolute' } } }) },
+    'modules/channel_list_v2/native/renderRedesignChannelListItem.tsx': { renderChannelListItem: x => x }
+  };
+  const f = fixture({ hub: { TableRowGroup: { type: () => null }, TableRow: {} }, screens: true, files });
+  const layout = () => { const panel = files['components_native/MainChannels.tsx'].default().props.children, kids = [].concat(panel.type(panel.props).props.children);
+    const paneEl = kids.find(k => k?.props?.el), strip = kids[kids.length - 1].props.children, outer = new strip.type(strip.props).render(), body = outer.type(outer.props);
+    return { pane: new paneEl.type(paneEl.props).render().props.style, strip: new body.type(body.props).render() }; };
+  f.api.storage.stripPosition = 'left'; let l = layout();
+  assert.ok(JSON.stringify(l.pane).includes('"left":68')); assert.equal(l.strip.props.style.left, 0); assert.equal(l.strip.props.style.width, 68); assert.equal(l.strip.props.children.props.horizontal, false);
+  f.api.storage.stripPosition = 'right'; l = layout(); assert.ok(JSON.stringify(l.pane).includes('"right":68')); assert.equal(l.strip.props.style.right, 0);
+  f.api.storage.stripPosition = 'bottom'; l = layout(); assert.ok(JSON.stringify(l.pane).includes('"bottom":64')); assert.equal(l.strip.props.style.bottom, 90); assert.equal(l.strip.props.children.props.horizontal, true);
+  assert.equal(f.plugin.diagnostics().hooks.ServerStripPosition, 'bottom');
+  f.focused({ name: 'you' }); const you = files['modules/main_tabs_v2/native/tabs/you/YouScreen.tsx'].default(), host = new you.type(you.props);
+  const find = (n, pred) => !n || typeof n !== 'object' ? null : pred(n) ? n : [].concat(n.props?.children ?? []).concat(Array.isArray(n) ? n : []).reduce((a, k) => a || find(k, pred), null);
+  const page = find(host.render(), n => n.type?.name === 'YouPage'), tree = new page.type(page.props).render();
+  for (const id of ['edit-profile', 'avatar-settings', 'you-nitro', 'you-shop', 'you-quests']) find(tree, n => n.props?.id === id).props.run();
+  assert.deepEqual(calls, [['settings', 'PROFILE_CUSTOMIZATION'], ['settings', 'PROFILE_CUSTOMIZATION'], ['settings', 'PREMIUM'], ['shop'], ['quests', 'object']]);
+  assert.ok(JSON.stringify(files['modules/chat/native/ChatView.tsx'].default().props.style).includes('backgroundColor'));
+  assert.ok(JSON.stringify(files['modules/chat_input/native/FloatingChatInputContainer.tsx'].default().props.style).includes('"borderRadius":26'));
+  const row = files['modules/channel_list_v2/native/renderRedesignChannelListItem.tsx'].renderChannelListItem({ type: 'ChannelRow', props: { channel: { id: '5' }, selected: true } });
+  assert.equal(row.type, 'View'); assert.equal(row.props.children.type, 'ChannelRow');
+  const category = { type: 'Category', props: { channel: { id: '6' } } }; assert.equal(files['modules/channel_list_v2/native/renderRedesignChannelListItem.tsx'].renderChannelListItem(category), category);
   await f.stop();
 });
 test('app tour visits declared routes, skips risky ones and returns', async () => {

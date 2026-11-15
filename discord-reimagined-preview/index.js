@@ -1,14 +1,14 @@
 (() => {
   "use strict";
-  /* Discord: Reimagined - 0.2.0-alpha.36 - GPL-3.0-only
+  /* Discord: Reimagined - 0.2.0-alpha.37 - GPL-3.0-only
    * Additive successor to index.js (0.1.0-alpha.1, retained for rollback).
    * Native operations stay inside Discord's authenticated modules. No token access.
    * Hallmark: existing graphite/sage system preserved; no new display chrome.
    */
-  const VERSION = "0.2.0-alpha.36", THEME_ID = "discord-reimagined";
+  const VERSION = "0.2.0-alpha.37", THEME_ID = "discord-reimagined";
   const DEFAULTS = { palette: "blurple", density: "comfortable", nativePalette: true,
     startHome: true, diagnostics: false, reduceMotion: false, layout: true,
-    showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, hideQuestDock: true, hideScrollBars: true, serverStrip: true, blueprint: false, accounts: {} };
+    showPreviews: true, grid: true, nativeSkin: false, nativeSkinRows: false, nativeScreens: false, hideQuestDock: true, hideScrollBars: true, serverStrip: true, stripPosition: "top", blueprint: false, accounts: {} };
   const PALETTES = {
     blurple: { name: "Blurple", bg: "#17181f", surface: "#20222b", elevated: "#2b2d38", line: "#3a3d4b", ink: "#f2f3f8", muted: "#b0b4c4", faint: "#9296a9", accent: "#b4bcff", accentInk: "#1d2160", accentSoft: "#30346a", danger: "#f5a9b3", clear: "transparent", shade: "rgba(8,9,14,0.62)" },
     midnight: { name: "Midnight", bg: "#141918", surface: "#1c2320", elevated: "#27302b", line: "#39443d", ink: "#f0f2e9", muted: "#a8b5aa", faint: "#8a9b8e", accent: "#bdd7b7", accentInk: "#203323", accentSoft: "#2d3b2e", danger: "#f3b9ad", clear: "transparent", shade: "rgba(10,15,12,0.6)" },
@@ -538,7 +538,7 @@
     function Toggle(p) { return h(RN.View, { style: { flexDirection: "row", alignItems: "center", paddingVertical: SPACE.md, borderBottomWidth: 1, borderBottomColor: colors().line } }, t(p.label, { flex: 1, minWidth: 0, paddingRight: SPACE.lg, fontWeight: "500" }), h(RN.Switch, { testID: "setting-" + p.name, accessibilityLabel: p.label, value: !!cfg(p.name), trackColor: { false: colors().line, true: colors().accent }, thumbColor: colors().surface, onValueChange: value => send("setting", { key: p.name, value: !!value }) })); }
     function Preferences() { const c = colors(); return h(Page, { title: "Appearance", back: true },
       h(RN.View, { style: { flexDirection: "row", justifyContent: "space-between" } }, ...Object.entries(PALETTES).map(([id, p]) => h(Control, { key: id, id: "palette-" + id, label: p.name, action: "setting", value: { key: "palette", value: id }, selected: cfg("palette") === id, style: { flex: 1, marginRight: id === "slate" ? 0 : SPACE.sm, padding: SPACE.md, borderRadius: RAD.medium, borderWidth: cfg("palette") === id ? 2 : 1, borderColor: cfg("palette") === id ? c.accent : c.line, backgroundColor: p.bg } }, h(RN.View, { style: { flexDirection: "row", marginBottom: SPACE.sm } }, ...[p.surface, p.accent, p.ink].map((color, i) => h(RN.View, { key: i, style: { width: 16, height: 16, borderRadius: 8, marginRight: 3, backgroundColor: color } }))), t(p.name, { color: p.ink, fontSize: TYPE.small, fontWeight: "600" }, { numberOfLines: 1 })))),
-      h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }), h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }), h(Toggle, { name: "nativeScreens", label: "Restyle native screens (beta)" }), h(Toggle, { name: "hideQuestDock", label: "Hide Quests dock above the YouBar" }), h(Toggle, { name: "serverStrip", label: "Servers as a top strip" }), h(Toggle, { name: "hideScrollBars", label: "Hide scroll bars" }),
+      h(Section, { title: "Display" }), h(Toggle, { name: "nativePalette", label: "Sync Discord theme" }), h(Toggle, { name: "showPreviews", label: "Message previews" }), h(Toggle, { name: "reduceMotion", label: "Reduce motion" }), h(Toggle, { name: "startHome", label: "Open Home on launch" }), h(Toggle, { name: "layout", label: "Navigation dock" }), h(Toggle, { name: "nativeSkin", label: "Restyle Discord settings (beta)" }), h(Toggle, { name: "nativeSkinRows", label: "Roomier settings rows (beta)" }), h(Toggle, { name: "nativeScreens", label: "Restyle native screens (beta)" }), h(Toggle, { name: "hideQuestDock", label: "Hide Quests dock above the YouBar" }), h(Toggle, { name: "serverStrip", label: "Server strip instead of the rail" }), h(RN.View, { testID: "strip-position", style: { flexDirection: "row", paddingVertical: SPACE.md, borderBottomWidth: 1, borderBottomColor: colors().line, opacity: cfg("serverStrip") ? 1 : 0.45 } }, ...[["top", "Top"], ["left", "Left"], ["right", "Right"], ["bottom", "Above YouBar"]].map(([id, name], i) => h(Control, { key: id, id: "strip-" + id, label: "Server strip: " + name, action: "setting", value: { key: "stripPosition", value: id }, selected: (cfg("stripPosition") || "top") === id, style: { flex: id === "bottom" ? 1.6 : 1, marginLeft: i ? SPACE.xs : 0, paddingVertical: SPACE.sm, borderRadius: RAD.round, backgroundColor: (cfg("stripPosition") || "top") === id ? colors().accentSoft : colors().surface } }, t(name, { fontSize: TYPE.caption, fontWeight: "700", color: (cfg("stripPosition") || "top") === id ? colors().accent : colors().ink })))), h(Toggle, { name: "hideScrollBars", label: "Hide scroll bars" }),
       button(cfg("density") === "compact" ? "Comfortable" : "Compact", "setting", { key: "density", value: cfg("density") === "compact" ? "comfortable" : "compact" }, { marginTop: SPACE.lg }, "density"),
       h(Section, { title: "Diagnostics" }), h(Toggle, { name: "diagnostics", label: "Tap diagnostics" }), button("Copy compatibility report", "report", null, { marginTop: SPACE.lg }, "copy-report"), h(Toggle, { name: "blueprint", label: "Record settings blueprint" }), button("Copy settings blueprint", "blueprint", null, { marginTop: SPACE.sm }, "copy-blueprint"), button("Scan whole app (tour)", "tour", null, { marginTop: SPACE.sm }, "scan-app"), button("Copy screen tree", "tree", null, { marginTop: SPACE.sm }, "copy-tree"),
       t(VERSION, { fontSize: TYPE.small, color: c.muted, marginTop: SPACE.xl }), health.issues.length ? t(health.issues.join("\n"), { color: c.danger, marginTop: SPACE.md, fontSize: TYPE.small }) : null); }
@@ -588,6 +588,22 @@
       return m?.WishlistEmptyState ? h(m.WishlistEmptyState, { userId: p.userId, isCurrentUser: true }) : p.fallback;
     }
     const openStatus = () => { const m = mod("openEditCustomStatusModal"); if (typeof m?.openEditCustomStatusModal === "function" && safe(() => (m.openEditCustomStatusModal({ analyticsLocations: ["you screen"] }), true), false)) return; accountSheet(); };
+    // The same native entry points Discord's own You screen uses (Settings -> Profiles, Nitro, the Shop, Quest Home), so each opens as a native screen above the
+    // You page and Back returns to it. A deep link is only the last resort.
+    const nativeFn = (file, name) => { const m = safe(() => api.metro.findByFilePath(file), null) || mod(name), f = m?.[name]; return typeof f === "function" ? f : null; };
+    const userSettings = (section, params) => {
+      recordTap("you-settings:" + section);
+      const m = safe(() => api.metro.findByFilePath("modules/user_settings/core/native/openUserSettings.tsx"), null) || mod("openUserSettings"), S = m?.UserSettingsSections || safe(() => api.metro.findByProps("UserSettingsSections")?.UserSettingsSections, null), screen = S?.[section] || section;
+      if (typeof m?.openUserSettings === "function" && safe(() => (m.openUserSettings(params ? { screen, params } : { screen }), true), false)) { health.capabilities.settingsSheet = "requested; not device-verified"; return; }
+      const r = safe(() => root(), null);
+      if (r?.navigate && safe(() => (r.navigate("settings", { screen }), true), false)) return;
+      issue("you-settings-unavailable:" + section); toast("Open this from Discord's Settings.");
+    };
+    const openProfileEditor = () => userSettings("PROFILE_CUSTOMIZATION");
+    const openAvatarBanner = () => { recordTap("you-avatar-banner"); userSettings("PROFILE_CUSTOMIZATION"); };
+    const openNitro = () => userSettings("PREMIUM");
+    const openShop = () => { recordTap("you-shop"); const f = nativeFn("modules/collectibles/CollectiblesActionCreators.tsx", "openCollectiblesShopMobile"); if (f && safe(() => (f({ analyticsLocations: [] }), true), false)) return; deepLink("/shop"); };
+    const openQuests = () => { recordTap("you-quests"); const f = nativeFn("modules/quests/native/QuestUtils.native.tsx", "openQuestHome"); if (f && safe(() => (f({}), true), false)) return; deepLink("/quest-home"); };
     const openFriends = () => { const nav = safe(() => mod("getRootNavigationRef")?.getRootNavigationRef?.(), null); if (nav && safe(() => nav.isReady?.() !== false && (nav.navigate("friends"), true), false)) return; deepLink("/friends"); };
     class YouPage extends React.Component {
       constructor(p) { super(p); this.state = { tab: "main" }; }
@@ -607,7 +623,7 @@
         const label = s => t(s, { fontSize: TYPE.small, fontWeight: "700", letterSpacing: 0.8, color: c.muted, marginBottom: SPACE.sm });
         const tile = (icon, text, run, key) => h(Control, { key, id: "you-" + key, label: text, run, style: { flex: 1, paddingVertical: SPACE.md, borderRadius: RAD.medium, backgroundColor: c.surface, marginHorizontal: 3 } }, h(Icon, { name: icon, size: 22, color: c.ink }), t(text, { fontSize: TYPE.small, fontWeight: "600", marginTop: SPACE.xs }));
         const seg = ["main", "board", "activity", "wishlist"].map(k => h(Control, { key: k, id: "you-tab-" + k, label: k, selected: this.state.tab === k, run: () => { if (animated()) safe(() => RN.LayoutAnimation.configureNext(RN.LayoutAnimation.Presets.easeInEaseOut)); this.setState({ tab: k }); }, style: { flex: 1, borderRadius: RAD.round, backgroundColor: this.state.tab === k ? c.elevated : "transparent" } }, t({ main: "Main", board: "Board", activity: "Activity", wishlist: "Wishlist" }[k], { fontSize: TYPE.caption, fontWeight: "700", color: this.state.tab === k ? c.ink : c.muted })));
-        const cardStyle = { backgroundColor: c.surface, borderColor: c.line, borderWidth: 0, borderRadius: RAD.large, marginBottom: SPACE.md }, toPremium = () => deepLink("/store"), toShop = () => deepLink("/shop");
+        const cardStyle = { backgroundColor: c.surface, borderColor: c.line, borderWidth: 0, borderRadius: RAD.large, marginBottom: SPACE.md }, toPremium = openNitro, toShop = openShop;
         const aboutC = natMod(UPN + "UserProfileAboutMeCard.tsx"), conn = safe(() => api.metro.findByFilePath(UPN + "UserProfileConnections.tsx"), null);
         const fbAbout = [data.bio ? card([label("ABOUT ME"), h(MessageText, { key: "bio", content: data.bio })]) : null, card([label("MEMBER SINCE"), t(since(id) || "Unknown", { key: "d", fontSize: TYPE.body })])].filter(Boolean);
         const main = [
@@ -641,9 +657,9 @@
               h(RN.View, { style: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" } }, t(u?.username || "", { color: c.muted }), data.pronouns ? t("  \u00B7  " + data.pronouns, { color: c.muted }) : null,
                 badges.length ? h(RN.View, { style: { flexDirection: "row", marginLeft: SPACE.sm, paddingHorizontal: 6, paddingVertical: 3, borderRadius: RAD.small - 4, backgroundColor: c.elevated } }, ...badges.slice(0, 10).map(b => h(RN.Image, { key: b.id, accessibilityLabel: b.description, source: { uri: "https://cdn.discordapp.com/badge-icons/" + b.icon + ".png" }, style: { width: 18, height: 18, marginHorizontal: 2 } }))) : null),
               h(RN.View, { style: { flexDirection: "row", marginTop: SPACE.lg } },
-                button("Edit Profile", "edit-profile", null, { flex: 1, backgroundColor: c.accent, marginRight: SPACE.sm }, "edit-profile"),
-                button("Avatar & Banner", "settings", "profile", { flex: 1 }, "avatar-settings")))),
-          h(RN.View, { style: { flexDirection: "row", marginHorizontal: -3, marginBottom: SPACE.lg } }, tile("QuestsIcon", "Quests", () => deepLink("/quest-home"), "quests"), tile("ShopIcon", "Shop", () => deepLink("/shop"), "shop"), tile("NitroWheelIcon", "Nitro", () => deepLink("/store"), "nitro"), tile("SettingsIcon", "Settings", () => send("settings"), "settings")),
+                button("Edit Profile", null, null, { flex: 1, backgroundColor: c.accent, marginRight: SPACE.sm }, "edit-profile", openProfileEditor),
+                button("Avatar & Banner", null, null, { flex: 1 }, "avatar-settings", openAvatarBanner)))),
+          h(RN.View, { style: { flexDirection: "row", marginHorizontal: -3, marginBottom: SPACE.lg } }, tile("QuestsIcon", "Quests", openQuests, "quests"), tile("ShopIcon", "Shop", openShop, "shop"), tile("NitroWheelIcon", "Nitro", openNitro, "nitro"), tile("SettingsIcon", "Settings", () => send("settings"), "settings")),
           h(RN.View, { style: { flexDirection: "row", padding: 4, borderRadius: RAD.round, backgroundColor: c.surface, marginBottom: SPACE.lg } }, ...seg),
           ...({ main, board, activity, wishlist }[this.state.tab] || main));
       }
@@ -802,44 +818,71 @@
     const createGuild = () => { const m = safe(() => api.metro.findByFilePath("modules/create_guild/native/CreateGuildModalActionCreators.tsx"), null), a = m?.default || m; if (typeof a?.openCreateGuildModal === "function") safe(() => a.openCreateGuildModal()); };
     const stripStore = name => { stripStore.cache = stripStore.cache || {}; return name in stripStore.cache ? stripStore.cache[name] : (stripStore.cache[name] = safe(() => api.metro.findByStoreName(name), null)); };
     const insetsHook = () => { if (insetsHook.v === undefined) insetsHook.v = safe(() => api.metro.findByProps("useSafeAreaInsets")?.useSafeAreaInsets, null) || null; return insetsHook.v; };
+    const youBarHeightHook = () => { if (youBarHeightHook.v === undefined) youBarHeightHook.v = safe(() => api.metro.findByFilePath("modules/main_tabs_v2/native/you_bar/hooks/useYouBarTotalHeight.tsx")?.useYouBarTotalHeight, null) || null; return youBarHeightHook.v; };
+    // One strip, four placements: along the top, down either side (a vertical column) or above the YouBar.
     class ServerStripBody extends React.Component {
-      constructor(p) { super(p); this.state = { open: {} }; this.tick = () => { if (this.timer || !live) return; this.timer = setTimeout(() => { this.timer = null; if (this.alive) this.forceUpdate(); }, 80); }; }
-      componentDidMount() { this.alive = true; this.subs = ["SelectedGuildStore", "GuildReadStateStore", "SortedGuildStore", "GuildStore"].map(stripStore).filter(s => s?.addChangeListener); this.subs.forEach(s => s.addChangeListener(this.tick)); }
-      componentWillUnmount() { this.alive = false; clearTimeout(this.timer); (this.subs || []).forEach(s => safe(() => s.removeChangeListener(this.tick))); }
-      item(g, selected, extra) {
+      constructor(p) { super(p); this.state = { open: {} }; this.tick = () => { if (this.timer || !live) return; this.timer = setTimeout(() => { this.timer = null; if (this.alive && typeof this.forceUpdate === "function") this.forceUpdate(); }, 80); }; }
+      componentDidMount() { this.alive = true; listeners.add(this.tick); this.subs = ["SelectedGuildStore", "GuildReadStateStore", "SortedGuildStore", "GuildStore"].map(stripStore).filter(s => s?.addChangeListener); this.subs.forEach(s => s.addChangeListener(this.tick)); }
+      componentWillUnmount() { this.alive = false; listeners.delete(this.tick); clearTimeout(this.timer); (this.subs || []).forEach(s => safe(() => s.removeChangeListener(this.tick))); }
+      // Selection marker: a short bar under the icon in a row, a vertical pill on the outer edge in a column.
+      marker(on, hot, tint) {
+        const c = colors(), pos = this.props.pos, size = on ? 18 : hot ? 6 : 0;
+        if (pos === "left" || pos === "right") return h(RN.View, { pointerEvents: "none", style: { position: "absolute", [pos === "left" ? "left" : "right"]: -11, top: 22 - (on ? 12 : hot ? 4 : 0), width: 3, height: on ? 24 : hot ? 8 : 0, borderRadius: 2, backgroundColor: tint || (on ? c.accent : c.ink) } });
+        return h(RN.View, { style: { marginTop: 4, height: 3, width: size, borderRadius: 2, backgroundColor: tint || (on ? c.accent : c.ink) } });
+      }
+      gap() { return this.props.pos === "left" || this.props.pos === "right" ? { marginVertical: 5 } : { marginHorizontal: 5 }; }
+      item(g, selected) {
         const c = colors(), on = selected === g.id, rs = stripStore("GuildReadStateStore"), mentions = call(rs, "getMentionCount", [g.id], 0) || 0, hot = !!call(rs, "hasUnread", [g.id], false), uri = imageUrl(g, "guild");
         return h(RN.Pressable, { key: g.id, accessibilityRole: "button", accessibilityLabel: g.name + (mentions ? ", " + mentions + " mentions" : hot ? ", unread" : ""), delayLongPress: 320,
           onPress: () => { recordTap("strip-guild"); transitionGuild(g.id); }, onLongPress: () => { recordTap("strip-guild-menu"); guildSheet(g); },
-          style: ({ pressed }) => [{ alignItems: "center", marginHorizontal: 5, transform: [{ scale: pressed ? 0.9 : 1 }] }, extra] },
+          style: ({ pressed }) => [{ alignItems: "center", transform: [{ scale: pressed ? 0.9 : 1 }] }, this.gap()] },
           h(RN.View, { style: { width: 44, height: 44, borderRadius: on ? 14 : 22, overflow: "hidden", backgroundColor: on ? c.accent : c.surface, alignItems: "center", justifyContent: "center", borderWidth: on ? 2 : 0, borderColor: c.accent } },
-            uri ? h(RN.Image, { source: { uri }, style: { width: 44, height: 44 } }) : t(String(g.name || "?").split(/\s+/).map(w => w.charAt(0)).join("").slice(0, 3), { fontSize: 14, fontWeight: "700", color: on ? c.accentInk || "#fff" : c.ink })),
-          h(RN.View, { style: { marginTop: 4, height: 3, width: on ? 18 : hot ? 6 : 0, borderRadius: 2, backgroundColor: on ? c.accent : c.ink } }),
+            uri ? h(RN.Image, { source: { uri }, style: { width: 44, height: 44 } }) : t(String(g.name || "?").split(" ").filter(Boolean).map(w => w.charAt(0)).join("").slice(0, 3), { fontSize: 14, fontWeight: "700", color: on ? c.accentInk || "#fff" : c.ink })),
+          this.marker(on, hot),
           mentions ? h(RN.View, { style: { position: "absolute", top: -3, right: -4, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, backgroundColor: c.danger || "#ED4245", borderWidth: 2, borderColor: c.bg, alignItems: "center", justifyContent: "center" } }, t(mentions > 99 ? "99+" : String(mentions), { fontSize: 10, lineHeight: 12, fontWeight: "800", color: "#fff" })) : null);
       }
       render() {
-        const c = colors(), gs = stripStore("GuildStore") || stores.GuildStore, selected = call(stripStore("SelectedGuildStore"), "getGuildId", [], null), tree = call(stores.SortedGuildStore, "getGuildsTree", [], null)?.root?.children || [];
+        const c = colors(), pos = this.props.pos, column = pos === "left" || pos === "right";
+        const gs = stripStore("GuildStore") || stores.GuildStore, selected = call(stripStore("SelectedGuildStore"), "getGuildId", [], null), tree = call(stores.SortedGuildStore, "getGuildsTree", [], null)?.root?.children || [];
         const guild = id => call(gs, "getGuild", [id], null), kids = [];
-        const home = h(RN.Pressable, { key: "home", accessibilityRole: "button", accessibilityLabel: "Direct Messages", onPress: () => { recordTap("strip-home"); transitionGuild("@me"); }, style: ({ pressed }) => ({ alignItems: "center", marginRight: 5, transform: [{ scale: pressed ? 0.9 : 1 }] }) },
+        const home = h(RN.Pressable, { key: "home", accessibilityRole: "button", accessibilityLabel: "Direct Messages", onPress: () => { recordTap("strip-home"); transitionGuild("@me"); }, style: ({ pressed }) => ({ alignItems: "center", transform: [{ scale: pressed ? 0.9 : 1 }] }) },
           h(RN.View, { style: { width: 44, height: 44, borderRadius: selected ? 22 : 14, backgroundColor: selected ? c.surface : c.accent, alignItems: "center", justifyContent: "center" } }, h(Icon, { name: "ChatIcon", size: 22, color: selected ? c.ink : c.accentInk || "#fff" })),
-          h(RN.View, { style: { marginTop: 4, height: 3, width: selected ? 0 : 18, borderRadius: 2, backgroundColor: c.accent } }));
-        kids.push(home, h(RN.View, { key: "sep", style: { width: hairline() * 2, height: 28, marginHorizontal: SPACE.sm, marginBottom: 7, backgroundColor: c.line } }));
+          this.marker(!selected, false));
+        kids.push(home, h(RN.View, { key: "sep", style: column ? { height: hairline() * 2, width: 28, marginVertical: SPACE.sm, backgroundColor: c.line } : { width: hairline() * 2, height: 28, marginHorizontal: SPACE.sm, marginBottom: 7, backgroundColor: c.line } }));
         for (const n of tree) {
           if (Array.isArray(n?.children) && n.children.length && n.type !== "guild") {
             const fid = String(n.id ?? n.folderId ?? "f"), open = !!this.state.open[fid], tint = typeof n.color === "number" ? "#" + n.color.toString(16).padStart(6, "0") : c.accent, members = n.children.map(x => guild(x.id)).filter(Boolean);
             const anyOn = members.some(g => g.id === selected), anyHot = members.some(g => call(stripStore("GuildReadStateStore"), "hasUnread", [g.id], false));
-            const chip = h(RN.Pressable, { key: "f" + fid, accessibilityRole: "button", accessibilityLabel: (n.name || "Folder") + (open ? ", expanded" : ", collapsed"), onPress: () => { recordTap("strip-folder"); if (animated()) safe(() => RN.LayoutAnimation.configureNext(RN.LayoutAnimation.Presets.easeInEaseOut)); this.setState({ open: { ...this.state.open, [fid]: !open } }); }, style: ({ pressed }) => ({ alignItems: "center", marginHorizontal: 5, transform: [{ scale: pressed ? 0.9 : 1 }] }) },
+            const chip = h(RN.Pressable, { key: "f" + fid, accessibilityRole: "button", accessibilityLabel: (n.name || "Folder") + (open ? ", expanded" : ", collapsed"), onPress: () => { recordTap("strip-folder"); if (animated()) safe(() => RN.LayoutAnimation.configureNext(RN.LayoutAnimation.Presets.easeInEaseOut)); this.setState({ open: { ...this.state.open, [fid]: !open } }); }, style: ({ pressed }) => [{ alignItems: "center", transform: [{ scale: pressed ? 0.9 : 1 }] }, this.gap()] },
               h(RN.View, { style: { width: 44, height: 44, borderRadius: 14, backgroundColor: tint + "33", flexDirection: "row", flexWrap: "wrap", padding: 5, alignContent: "space-between", justifyContent: "space-between" } },
                 open ? h(RN.View, { style: { flex: 1, alignItems: "center", justifyContent: "center" } }, h(Icon, { name: "FolderIcon", size: 20, color: tint })) : members.slice(0, 4).map(g => imageUrl(g, "guild") ? h(RN.Image, { key: g.id, source: { uri: imageUrl(g, "guild") }, style: { width: 15, height: 15, borderRadius: 5 } }) : h(RN.View, { key: g.id, style: { width: 15, height: 15, borderRadius: 5, backgroundColor: c.elevated } }))),
-              h(RN.View, { style: { marginTop: 4, height: 3, width: anyOn && !open ? 18 : anyHot && !open ? 6 : 0, borderRadius: 2, backgroundColor: anyOn ? c.accent : c.ink } }));
-            kids.push(open ? h(RN.View, { key: "fo" + fid, style: { flexDirection: "row", alignItems: "flex-start", paddingTop: 5, paddingHorizontal: 2, marginHorizontal: 3, borderRadius: 18, backgroundColor: tint + "1F" } }, chip, ...members.map(g => this.item(g, selected))) : chip);
+              this.marker(anyOn && !open, anyHot && !open, anyOn ? c.accent : null));
+            kids.push(open ? h(RN.View, { key: "fo" + fid, style: column ? { alignItems: "center", paddingVertical: 2, marginVertical: 3, borderRadius: 18, backgroundColor: tint + "1F" } : { flexDirection: "row", alignItems: "flex-start", paddingTop: 5, paddingHorizontal: 2, marginHorizontal: 3, borderRadius: 18, backgroundColor: tint + "1F" } }, chip, ...members.map(g => this.item(g, selected))) : chip);
           } else { const g = guild(n?.id); if (g) kids.push(this.item(g, selected)); }
         }
-        kids.push(h(RN.Pressable, { key: "add", accessibilityRole: "button", accessibilityLabel: "Add a Server", onPress: () => { recordTap("strip-add"); createGuild(); }, style: ({ pressed }) => ({ marginHorizontal: 5, marginBottom: 7, width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, borderStyle: "dashed", borderColor: c.line, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 }) }, h(Icon, { name: "PlusIcon", size: 20, color: c.muted })));
-        return h(RN.View, { testID: "reimagined-server-strip", style: { position: "absolute", top: 0, left: 0, right: 0, height: this.props.top + STRIP_H, paddingTop: this.props.top, backgroundColor: c.bg, borderBottomWidth: hairline(), borderColor: c.line, zIndex: 5 } },
-          h(RN.ScrollView, { horizontal: true, showsHorizontalScrollIndicator: false, style: { flex: 1 }, contentContainerStyle: { alignItems: "center", paddingHorizontal: SPACE.md, paddingTop: 6 } }, ...kids));
+        kids.push(h(RN.Pressable, { key: "add", accessibilityRole: "button", accessibilityLabel: "Add a Server", onPress: () => { recordTap("strip-add"); createGuild(); }, style: ({ pressed }) => [{ width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, borderStyle: "dashed", borderColor: c.line, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 }, column ? { marginVertical: 5 } : { marginHorizontal: 5, marginBottom: 7 }] }, h(Icon, { name: "PlusIcon", size: 20, color: c.muted })));
+        const frame = column
+          ? { position: "absolute", top: 0, bottom: 0, [pos]: 0, width: STRIP_W, paddingTop: this.props.top, paddingBottom: this.props.bottom, backgroundColor: c.bg, [pos === "left" ? "borderRightWidth" : "borderLeftWidth"]: hairline(), borderColor: c.line, zIndex: 5 }
+          : pos === "bottom" ? { position: "absolute", left: 0, right: 0, bottom: this.props.bottom, height: STRIP_H, backgroundColor: c.bg, borderTopWidth: hairline(), borderColor: c.line, zIndex: 5 }
+          : { position: "absolute", top: 0, left: 0, right: 0, height: this.props.top + STRIP_H, paddingTop: this.props.top, backgroundColor: c.bg, borderBottomWidth: hairline(), borderColor: c.line, zIndex: 5 };
+        return h(RN.View, { testID: "reimagined-server-strip", style: frame },
+          h(RN.ScrollView, { horizontal: !column, showsHorizontalScrollIndicator: false, showsVerticalScrollIndicator: false, style: { flex: 1 }, contentContainerStyle: column ? { alignItems: "center", paddingVertical: SPACE.md } : { alignItems: "center", paddingHorizontal: SPACE.md, paddingTop: 6 } }, ...kids));
       }
     }
-    ServerStrip = function ServerStrip() { const use = insetsHook(), insets = use ? use() : null; return h(ServerStripBody, { top: insets?.top || 0 }); };
+    // Each placement is its own keyed component, so hook order never changes when the setting does; only side and bottom placements read the YouBar height.
+    function StripTop(p) { const use = insetsHook(), insets = use ? use() : null; return h(ServerStripBody, { pos: p.pos, top: insets?.top || 0, bottom: 0 }); }
+    function StripAboveBar(p) { const use = insetsHook(), insets = use ? use() : null, yb = youBarHeightHook(), barH = yb ? yb() : null; return h(ServerStripBody, { pos: p.pos, top: insets?.top || 0, bottom: typeof barH === "number" && barH > 0 ? barH : (insets?.bottom || 0) + 64 }); }
+    ServerStrip = class extends React.Component {
+      constructor(p) { super(p); this.refresh = () => { if (this.sig !== cfg("serverStrip") + ":" + stripPos() && typeof this.forceUpdate === "function") this.forceUpdate(); }; }
+      componentDidMount() { listeners.add(this.refresh); }
+      componentWillUnmount() { listeners.delete(this.refresh); }
+      render() {
+        const pos = stripPos(); this.sig = cfg("serverStrip") + ":" + pos;
+        if (!cfg("serverStrip")) return null;
+        health.hooks.ServerStripPosition = pos;
+        return h(pos === "top" ? StripTop : StripAboveBar, { key: pos, pos });
+      }
+    };
     // A Messages row laid out from scratch inside Discord's own pressable: squircle avatar with presence, name and time, a two-line preview and an unread pill.
     const ago = ms => { const d = (Date.now() - ms) / 1000; if (!(d >= 0)) return ""; if (d < 60) return "now"; if (d < 3600) return Math.floor(d / 60) + "m"; if (d < 86400) return Math.floor(d / 3600) + "h"; if (d < 604800) return Math.floor(d / 86400) + "d"; return safe(() => new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" }), ""); };
     const snowTime = id => safe(() => Number((BigInt(id) >> BigInt(22)) + BigInt(1420070400000)), 0);
@@ -1214,7 +1257,26 @@
     if (c?.setString) { c.setString(JSON.stringify(data)); toast("Settings blueprint copied"); }
   }
   let scrollTypes = new Set(), ServerStrip = null, dmRowContent = null;
-  const STRIP_H = 64;
+  const STRIP_H = 64, STRIP_W = 68;
+  const stripPos = () => { const v = cfg("stripPosition"); return v === "left" || v === "right" || v === "bottom" ? v : "top"; };
+  const paneOffsets = pos => pos === "left" ? { left: STRIP_W, right: 0, top: 0 } : pos === "right" ? { left: 0, right: STRIP_W, top: 0 } : pos === "bottom" ? { left: 0, top: 0, bottom: STRIP_H } : { left: 0, top: STRIP_H };
+  // The messages pane next to the strip: re-offset live when the strip position setting changes, without waiting for Discord to re-render the panel.
+  let StripPane = null, StripGuard = null;
+  function stripClasses() {
+  if (StripPane) return;
+  StripPane = class extends React.Component {
+    constructor(p) { super(p); this.refresh = () => { if (this.sig !== cfg("serverStrip") + ":" + stripPos() && typeof this.forceUpdate === "function") this.forceUpdate(); }; }
+    componentDidMount() { listeners.add(this.refresh); }
+    componentWillUnmount() { listeners.delete(this.refresh); }
+    render() { this.sig = cfg("serverStrip") + ":" + stripPos(); return cfg("serverStrip") ? addStyle(this.props.el, paneOffsets(stripPos())) : this.props.el; }
+  };
+  // A failing strip (missing hook, store or context) takes itself out and hands servers back to Discord's rail on the next render instead of taking the panel down.
+  StripGuard = class extends React.Component {
+    constructor(p) { super(p); this.state = { failed: false }; }
+    componentDidCatch() { issue("server-strip-failed"); health.hooks.ServerStrip = "failed"; api.storage.serverStrip = false; this.setState({ failed: true }); emit(); }
+    render() { return this.state.failed ? null : this.props.children; }
+  };
+  }
   // Re-lays out Discord's own screens in place. Whole screens are only replaced where they are self-contained pushed routes (You);
   // elsewhere the native screen, its scroll plumbing and the YouBar stay intact while its building blocks (rows, section headers, items, empty states) take the Reimagined layout.
   const LAYOUT_TARGETS = [["NativeYou", "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx", "you", true]];
@@ -1332,13 +1394,14 @@
   let homePanelType;
   function stripLayout(out, level) {
     if (!cfg("serverStrip") || !ServerStrip || out == null) return out;
+    stripClasses();
     if (homePanelType === undefined) homePanelType = safe(() => api.metro.findByFilePath("modules/main_tabs_v2/native/tabs/guilds/HomePanelContent.tsx")?.HomePanelContent, null);
     const isPane = k => isEl(k) && k.props?.nativeID === "messages-parent-view", baseType = ty => ty && typeof ty === "object" && ty.type ? ty.type : ty;
     let found = false;
     const next = mapTree(out, n => Array.isArray(n.props?.children) && n.props.children.some(isPane), n => {
       found = true;
-      const kids = n.props.children.filter(k => !(isEl(k) && homePanelType && (k.type === homePanelType || baseType(k.type) === baseType(homePanelType)))).map(k => isPane(k) ? addStyle(k, { left: 0, top: STRIP_H }) : k);
-      return React.cloneElement(n, null, ...kids, h(ServerStrip, { key: "reimagined-strip" }));
+      const kids = n.props.children.filter(k => !(isEl(k) && homePanelType && (k.type === homePanelType || baseType(k.type) === baseType(homePanelType)))).map(k => isPane(k) ? h(StripPane, { key: k.key == null ? "reimagined-pane" : k.key, el: k }) : k);
+      return React.cloneElement(n, null, ...kids, h(StripGuard, { key: "reimagined-strip" }, h(ServerStrip)));
     });
     if (found) { health.hooks.ServerStrip = homePanelType ? "applied" : "applied (rail kept)"; return next; }
     if (level >= 3) return out;
@@ -1375,6 +1438,30 @@
     });
     hookExport("NativeForYouList", NC + "ForYouItems.tsx", ["ForYouItems"], output => mapTree(output, n => typeof n.props?.renderItem === "function" && "data" in n.props, n => React.cloneElement(n, { renderItem: cardRenderItem(n.props.renderItem) })));
     hookExport("ServerStripHost", "components_native/MainChannels.tsx", ["default"], output => stripLayout(output, 0));
+    // Conversations (DMs and server channels): Discord's message list is a native view, so it is redesigned around its edges in place:
+    // the chat surface takes the Reimagined canvas, the composer becomes a floating rounded field and the header title sits in a soft pill.
+    const CH = "modules/main_tabs_v2/native/channel/header/", CI = "modules/chat_input/native/";
+    const styleRoot = (out, extra) => {
+      if (!isEl(out)) return out;
+      if (out.type !== React.Fragment) return addStyle(out, extra);
+      let done = false;
+      const kids = React.Children.toArray(out.props.children).map(k => !done && isEl(k) && k.type !== React.Fragment && k.props?.style != null ? (done = true, addStyle(k, extra)) : k);
+      return done ? React.cloneElement(out, null, ...kids) : out;
+    };
+    hookExport("NativeChatSurface", "modules/chat/native/ChatView.tsx", ["default"], output => styleRoot(output, { backgroundColor: colors().bg }));
+    hookExport("NativeComposer", CI + "FloatingChatInputContainer.tsx", ["default"], output => { const c = colors(); return styleRoot(output, { marginHorizontal: SPACE.sm, marginBottom: SPACE.xs, borderRadius: 26, backgroundColor: c.elevated, borderWidth: hairline(), borderColor: c.line, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 14, shadowOffset: { width: 0, height: 6 } }); });
+    hookExport("NativeComposerField", CI + "ChatInputNativeComponent.tsx", ["default"], output => styleRoot(output, { backgroundColor: colors().surface, borderRadius: 20 }));
+    const titlePill = output => { const c = colors(); return styleRoot(output, { backgroundColor: c.surface, borderRadius: RAD.round, paddingHorizontal: SPACE.md, paddingVertical: 4, overflow: "hidden" }); };
+    hookExport("NativeDmHeader", CH + "PrivateChannelHeader.tsx", ["default"], titlePill);
+    hookExport("NativeChannelHeader", CH + "GuildChannelHeader.tsx", ["default"], titlePill);
+    // The server screen: the guild banner gets rounded lower corners and channels become rounded pills inside Discord's measured row heights.
+    hookExport("NativeGuildHeader", "modules/channel_list_v2/native/RedesignGuildHeader.tsx", ["default"], output => styleRoot(output, { borderBottomLeftRadius: RAD.sheet, borderBottomRightRadius: RAD.sheet, overflow: "hidden" }));
+    patchFn("NativeChannelRows", "modules/channel_list_v2/native/renderRedesignChannelListItem.tsx", "renderChannelListItem", (_args, out) => {
+      if (!cfg("nativeScreens") || !isEl(out) || !out.props?.channel || typeof out.props.selected !== "boolean") return out;
+      const c = colors(), on = out.props.selected;
+      health.hooks.NativeChannelRows = "applied";
+      return h(RN.View, { key: out.key, style: { marginHorizontal: SPACE.sm, borderRadius: RAD.medium, overflow: "hidden", backgroundColor: on ? c.accentSoft : "transparent", borderWidth: on ? hairline() : 0, borderColor: c.line } }, out);
+    });
     // The server rail becomes a floating panel: its own surface, rounded trailing edge and pill separators. Width and item geometry stay Discord's.
     hookExport("NativeGuildRail", "modules/guilds_bar/native/GuildsBar.tsx", ["default"], output => { const c = colors(); return mapTree(output, n => n.props?.nativeID === "guilds-bar-view", n => addStyle(n, { backgroundColor: c.surface, borderTopRightRadius: RAD.sheet, borderBottomRightRadius: RAD.sheet, borderRightWidth: hairline(), borderColor: c.line, marginVertical: SPACE.sm, paddingTop: SPACE.xs })); });
     hookExport("NativeGuildSeparator", "modules/guilds_bar/native/GuildsBarSeparator.tsx", ["default"], output => isEl(output) && output.props?.style != null && output.props.children == null ? addStyle(output, { backgroundColor: colors().accentSoft, borderRadius: 2, width: 20, alignSelf: "center" }) : output);
